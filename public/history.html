@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stocktake History</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header>
+    <div class="header-inner">
+      <h1>Stocktake History</h1>
+      <div class="header-actions">
+        <a href="/" class="btn btn-secondary">&#8592; Stocktake</a>
+        <a href="/draft-report.html" class="btn btn-secondary">Draft &amp; Archived Stock</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="search-bar">
+      <input
+        type="text"
+        id="history-search"
+        placeholder="Search by style name..."
+        autocomplete="off"
+      />
+      <span class="search-hint">Shows when each style was last checked and by whom</span>
+    </div>
+
+    <div id="history-results"></div>
+  </main>
+
+  <script src="history.js"></script>
+  <script src="auth-bar.js"></script>
+</body>
+</html>

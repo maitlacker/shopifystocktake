@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stocktake</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+
+  <!-- Initials modal -->
+  <div id="initials-overlay" class="overlay">
+    <div class="modal">
+      <h2>Welcome to Stocktake</h2>
+      <p>Please enter your initials to begin.</p>
+      <input id="initials-input" type="text" maxlength="4" placeholder="e.g. DM" autocomplete="off" />
+      <div id="initials-error" class="initials-error"></div>
+      <button id="initials-btn" class="btn btn-primary" style="width:100%;margin-top:12px">Start Stocktake</button>
+    </div>
+  </div>
+
+  <header>
+    <div class="header-inner">
+      <h1>Stocktake</h1>
+      <div class="header-actions">
+        <span id="user-badge" class="user-badge"></span>
+        <span id="cache-status" class="cache-status">No data loaded</span>
+        <button id="btn-refresh" class="btn btn-secondary">&#8635; Load / Refresh Inventory</button>
+        <button id="btn-pdf" class="btn btn-primary" disabled>Export Discrepancy Report (PDF)</button>
+        <a href="/history.html" class="btn btn-secondary">History</a>
+        <a href="/draft-report.html" class="btn btn-secondary">Draft &amp; Archived Stock</a>
+        <a href="/velocity.html" class="btn btn-secondary">Sales Velocity</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="search-bar">
+      <input
+        type="text"
+        id="search-input"
+        placeholder="Search by style name or SKU..."
+        autocomplete="off"
+        disabled
+      />
+      <span id="search-hint" class="search-hint">Load inventory first</span>
+    </div>
+
+    <div id="results"></div>
+  </main>
+
+  <script src="app.js"></script>
+  <script src="auth-bar.js"></script>
+</body>
+</html>

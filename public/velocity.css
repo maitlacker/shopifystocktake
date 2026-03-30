@@ -1,0 +1,291 @@
+/* ── Controls bar ────────────────────────────────────────────────── */
+.vel-controls {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 20px;
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 24px;
+  margin-bottom: 24px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+
+.vel-control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vel-label {
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  color: #64748b;
+}
+
+/* Period toggle buttons */
+.vel-period-btns {
+  display: flex;
+  gap: 4px;
+}
+
+.vel-period-btn {
+  padding: 8px 16px;
+  border: 2px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: .85rem;
+  font-weight: 600;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  transition: all .15s;
+}
+.vel-period-btn.active {
+  border-color: #4f46e5;
+  background: #4f46e5;
+  color: #fff;
+}
+.vel-period-btn:hover:not(.active) {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+/* Threshold inputs */
+.vel-threshold-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vel-threshold-input input {
+  width: 72px;
+  padding: 8px 10px;
+  border: 2px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: .9rem;
+  font-weight: 700;
+  text-align: center;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  color: #1a1a2e;
+  background: #fff;
+  transition: border-color .15s;
+}
+.vel-threshold-input input:focus { border-color: #4f46e5; }
+.vel-threshold-input span {
+  font-size: .85rem;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+/* ── Summary row ─────────────────────────────────────────────────── */
+.vel-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.vel-summary-card {
+  flex: 1 1 120px;
+  background: #fff;
+  border-radius: 10px;
+  padding: 16px 12px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  cursor: pointer;
+  transition: transform .12s, box-shadow .12s;
+  border-left: 4px solid transparent;
+  text-align: center;
+  user-select: none;
+}
+.vel-summary-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(0,0,0,.12);
+}
+
+.vel-summary-count {
+  font-size: 2.2rem;
+  font-weight: 800;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.vel-summary-label {
+  font-size: .82rem;
+  font-weight: 700;
+  color: #374151;
+  margin-bottom: 2px;
+}
+.vel-summary-sub {
+  font-size: .7rem;
+  color: #94a3b8;
+}
+
+/* Colour variants */
+.vel-red    { border-left-color: #dc2626; }
+.vel-red    .vel-summary-count { color: #dc2626; }
+.vel-amber  { border-left-color: #f97316; }
+.vel-amber  .vel-summary-count { color: #f97316; }
+.vel-yellow { border-left-color: #ca8a04; }
+.vel-yellow .vel-summary-count { color: #ca8a04; }
+.vel-blue   { border-left-color: #3b82f6; }
+.vel-blue   .vel-summary-count { color: #3b82f6; }
+.vel-green  { border-left-color: #16a34a; }
+.vel-green  .vel-summary-count { color: #16a34a; }
+
+/* ── Filter tabs ─────────────────────────────────────────────────── */
+.vel-filter-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.vel-tab {
+  padding: 8px 18px;
+  border: 2px solid #e2e8f0;
+  border-radius: 20px;
+  font-size: .85rem;
+  font-weight: 600;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  transition: all .15s;
+}
+.vel-tab.active {
+  border-color: #4f46e5;
+  background: #4f46e5;
+  color: #fff;
+}
+.vel-tab:hover:not(.active) {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+/* ── Style cards — left border by status ─────────────────────────── */
+.vel-card-red    { border-left: 4px solid #dc2626 !important; }
+.vel-card-amber  { border-left: 4px solid #f97316 !important; }
+.vel-card-yellow { border-left: 4px solid #ca8a04 !important; }
+.vel-card-blue   { border-left: 4px solid #3b82f6 !important; }
+.vel-card-green  { border-left: 4px solid #16a34a !important; }
+.vel-card-grey   { border-left: 4px solid #e2e8f0 !important; opacity: .7; }
+
+/* ── Status badges ───────────────────────────────────────────────── */
+.vel-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 3px;
+}
+
+.vel-status-badge {
+  display: inline-block;
+  font-size: .73rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+  white-space: nowrap;
+  letter-spacing: .2px;
+}
+.vel-badge-red    { background: #fee2e2; color: #b91c1c; }
+.vel-badge-amber  { background: #ffedd5; color: #c2410c; }
+.vel-badge-yellow { background: #fef9c3; color: #854d0e; }
+.vel-badge-blue   { background: #dbeafe; color: #1d4ed8; }
+.vel-badge-green  { background: #dcfce7; color: #15803d; }
+.vel-badge-grey   { background: #f1f5f9; color: #64748b; }
+
+.vel-soldout-badge {
+  display: inline-block;
+  font-size: .73rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: #fef3c7;
+  color: #92400e;
+  white-space: nowrap;
+}
+
+.vel-action-hint {
+  font-size: .78rem;
+  color: #94a3b8;
+  margin-top: 3px;
+  font-style: italic;
+}
+
+/* ── Metrics row ─────────────────────────────────────────────────── */
+.vel-metrics-row {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-left: auto;
+  padding-right: 8px;
+}
+
+.vel-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 60px;
+  text-align: center;
+}
+.vel-metric-value {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #1a1a2e;
+  line-height: 1;
+}
+.vel-metric-label {
+  font-size: .65rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  margin-top: 3px;
+  white-space: nowrap;
+}
+
+/* Colour overrides for days-of-stock metric */
+.vel-metric-danger .vel-metric-value { color: #dc2626; }
+.vel-metric-warn   .vel-metric-value { color: #f97316; }
+.vel-metric-muted  .vel-metric-value { color: #94a3b8; }
+
+/* ── Expand button ───────────────────────────────────────────────── */
+.vel-expand-btn {
+  flex-shrink: 0;
+  font-size: .8rem;
+  padding: 6px 12px;
+}
+
+/* ── Sold-out variant rows ───────────────────────────────────────── */
+.vel-variant-soldout td {
+  opacity: .55;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────── */
+@media (max-width: 800px) {
+  .vel-controls {
+    flex-direction: column;
+    gap: 16px;
+  }
+  .vel-metrics-row {
+    margin-left: 0;
+    margin-top: 12px;
+    gap: 12px;
+  }
+  .vel-summary-card {
+    padding: 12px 8px;
+  }
+  .vel-summary-count {
+    font-size: 1.6rem;
+  }
+  .vel-metric-value {
+    font-size: 1.1rem;
+  }
+}
+
+/* ── Margin badges ───────────────────────────────────────────────── */
+.vel-margin-ok  { color: #15803d; font-weight: 600; }
+.vel-margin-low { color: #b45309; font-weight: 600; }
+.vel-margin-neg { color: #b91c1c; font-weight: 600; }

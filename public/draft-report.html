@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Draft &amp; Archived Products with Stock</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+
+  <header>
+    <div class="header-inner">
+      <h1>Draft &amp; Archived Products with Stock</h1>
+      <div class="header-actions">
+        <span id="report-summary" class="cache-status"></span>
+        <button id="btn-run" class="btn btn-secondary">&#8635; Run Report</button>
+        <button id="btn-pdf" class="btn btn-primary" disabled>Export PDF</button>
+        <a href="/" class="btn btn-secondary">&#8592; Stocktake</a>
+        <a href="/history.html" class="btn btn-secondary">History</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div id="results">
+      <div class="state-msg">Click <strong>Run Report</strong> to fetch draft and archived products with available stock.</div>
+    </div>
+  </main>
+
+  <script src="draft-report.js"></script>
+  <script src="auth-bar.js"></script>
+</body>
+</html>

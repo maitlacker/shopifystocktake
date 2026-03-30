@@ -1,0 +1,5 @@
+node_modules/
+.env
+stocktake-history.json
+*.ps1
+.claude/
