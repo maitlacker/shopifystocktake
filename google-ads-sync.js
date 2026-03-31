@@ -2,7 +2,7 @@ const fetch     = require('node-fetch');
 const cron      = require('node-cron');
 const { pool }  = require('./db');
 
-const ADS_VERSION    = process.env.GOOGLE_ADS_API_VERSION || 'v17';
+const ADS_VERSION    = process.env.GOOGLE_ADS_API_VERSION || 'v19';
 const DAILY_CRON     = '0 2 * * *'; // 2am every day
 
 let isRunning      = false;
@@ -93,9 +93,15 @@ async function queryAds(gaql) {
       { method: 'POST', headers, body: JSON.stringify(body) }
     );
 
-    const data = await res.json();
+    const rawText = await res.text();
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      throw new Error(`Google Ads API returned non-JSON (status ${res.status}). First 200 chars: ${rawText.slice(0, 200)}`);
+    }
     if (!res.ok) {
-      throw new Error(`Google Ads API error: ${data.error?.message || JSON.stringify(data)}`);
+      throw new Error(`Google Ads API error ${res.status}: ${data.error?.message || JSON.stringify(data)}`);
     }
 
     if (data.results) allResults.push(...data.results);
