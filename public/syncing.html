@@ -27,14 +27,53 @@
             <div class="sync-card-desc">Fetches all active products and variants into the server cache. Required before running a stocktake.</div>
           </div>
         </div>
-        <div class="sync-status" id="inventory-status">
-          <span class="sync-status-dot sync-status-dot--idle"></span>
+        <div class="sync-status">
+          <span class="sync-status-dot sync-status-dot--idle" id="inventory-dot"></span>
           <span id="inventory-status-text">Checking…</span>
         </div>
         <div class="sync-card-actions">
           <button id="btn-inventory-sync" class="btn btn-primary">&#8635; Sync Inventory</button>
         </div>
         <div id="inventory-log" class="sync-log" style="display:none"></div>
+      </div>
+
+      <!-- Stock Level Monitoring -->
+      <div class="sync-card" id="card-alerts">
+        <div class="sync-card-header">
+          <div class="sync-card-icon">&#9888;&#65039;</div>
+          <div>
+            <div class="sync-card-title">Stock Level Monitoring</div>
+            <div class="sync-card-desc">Checks all variant inventory levels and sends a Slack alert when any variant reaches exactly 2 units. Runs automatically every 30 minutes.</div>
+          </div>
+        </div>
+        <div class="sync-status">
+          <span class="sync-status-dot sync-status-dot--idle" id="alerts-dot"></span>
+          <span id="alerts-status-text">Loading…</span>
+        </div>
+        <div class="sync-card-actions">
+          <button id="btn-alerts-run" class="btn btn-primary">&#9654; Run Now</button>
+        </div>
+        <div id="alerts-log" class="sync-log" style="display:none"></div>
+
+        <!-- Recent alerts table -->
+        <div id="alerts-recent" style="display:none">
+          <div class="sync-section-label">Recent Alerts</div>
+          <div class="alerts-table-wrap">
+            <table class="alerts-table">
+              <thead>
+                <tr>
+                  <th>Style</th>
+                  <th>Variant</th>
+                  <th>SKU</th>
+                  <th>Stock</th>
+                  <th>Alerted</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="alerts-tbody"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
     </div>

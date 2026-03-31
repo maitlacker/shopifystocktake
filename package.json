@@ -2,7 +2,9 @@
   "name": "shopify-stocktake",
   "version": "1.0.0",
   "description": "Shopify warehouse management studio",
-  "engines": { "node": ">=18.0.0" },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -13,6 +15,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.18.3",
     "express-session": "^1.19.0",
+    "node-cron": "^4.2.1",
     "node-fetch": "^2.7.0",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",

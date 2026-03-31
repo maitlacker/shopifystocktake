@@ -5,8 +5,9 @@ const path         = require('path');
 const session      = require('express-session');
 const PgSession    = require('connect-pg-simple')(session);
 
-const { pool, initDb }          = require('./db');
+const { pool, initDb }               = require('./db');
 const { configureAuth, requireAuth } = require('./auth');
+const { startCron, runStockCheck, getStatus: getAlertStatus } = require('./alerts');
 
 const app = express();
 
@@ -140,6 +141,37 @@ async function fetchInventoryCosts(inventoryItemIds) {
   console.log(`[costs] done — ${Object.keys(costs).length} variants with cost`);
   return costs;
 }
+
+// ── Stock alert routes ─────────────────────────────────────────────
+app.get('/api/alerts/status', (req, res) => {
+  res.json(getAlertStatus());
+});
+
+app.post('/api/alerts/run', async (req, res) => {
+  try {
+    const result = await runStockCheck();
+    res.json(result);
+  } catch (err) {
+    console.error('Manual alert run error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/alerts/recent', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT id, variant_id AS "variantId", product_title AS "productTitle",
+             variant_title AS "variantTitle", sku, stock_at_alert AS "stockAtAlert",
+             alerted_at AS "alertedAt", resolved, resolved_at AS "resolvedAt"
+      FROM stock_alerts
+      ORDER BY alerted_at DESC
+      LIMIT 50
+    `);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ── Login page ─────────────────────────────────────────────────────
 app.get('/login', (req, res) => {
@@ -503,6 +535,7 @@ const PORT = process.env.PORT || 3000;
 
 initDb()
   .then(() => {
+    startCron();
     app.listen(PORT, () => {
       console.log(`Warehouse Studio running at http://localhost:${PORT}`);
       if (!SHOPIFY_SHOP || !SHOPIFY_TOKEN) {
