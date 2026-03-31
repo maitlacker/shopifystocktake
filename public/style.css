@@ -817,6 +817,8 @@ tr.discrepancy { background: #fff7ed; }
 
 .alerts-table-wrap {
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: 280px;
   margin-top: 8px;
   border: 1px solid #e2e8f0;
   border-radius: 7px;
