@@ -2,7 +2,7 @@ const fetch     = require('node-fetch');
 const cron      = require('node-cron');
 const { pool }  = require('./db');
 
-const ADS_VERSION    = process.env.GOOGLE_ADS_API_VERSION || 'v19';
+const ADS_VERSION    = process.env.GOOGLE_ADS_API_VERSION || 'v23';
 const DAILY_CRON     = '0 2 * * *'; // 2am every day
 
 let isRunning      = false;
