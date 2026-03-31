@@ -19,6 +19,12 @@
       ],
     },
     {
+      label: 'Marketing',
+      children: [
+        { label: 'Google Ads', href: '/google-ads.html' },
+      ],
+    },
+    {
       label: 'Syncing',
       children: [
         { label: 'Manage Syncs', href: '/syncing.html' },

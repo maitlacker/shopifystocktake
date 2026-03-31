@@ -8,6 +8,7 @@ const PgSession    = require('connect-pg-simple')(session);
 const { pool, initDb }               = require('./db');
 const { configureAuth, requireAuth } = require('./auth');
 const { startCron, runStockCheck, getStatus: getAlertStatus } = require('./alerts');
+const googleAds = require('./google-ads-sync');
 
 const app = express();
 
@@ -235,6 +236,152 @@ app.get('/api/alerts/recent', async (req, res) => {
       ORDER BY alerted_at DESC
       LIMIT 50
     `);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Google Ads OAuth connect ───────────────────────────────────────
+app.get('/auth/google-ads/connect', (req, res) => {
+  const params = new URLSearchParams({
+    client_id:     process.env.GOOGLE_CLIENT_ID,
+    redirect_uri:  `${process.env.APP_URL}/auth/google-ads/callback`,
+    response_type: 'code',
+    scope:         'https://www.googleapis.com/auth/adwords',
+    access_type:   'offline',
+    prompt:        'consent',
+  });
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+});
+
+app.get('/auth/google-ads/callback', async (req, res) => {
+  const { code, error } = req.query;
+  if (error) return res.redirect(`/syncing.html?ads_error=${encodeURIComponent(error)}`);
+
+  try {
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body:    new URLSearchParams({
+        code,
+        client_id:     process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        redirect_uri:  `${process.env.APP_URL}/auth/google-ads/callback`,
+        grant_type:    'authorization_code',
+      }).toString(),
+    });
+    const tokens = await tokenRes.json();
+    if (!tokens.refresh_token) {
+      return res.redirect('/syncing.html?ads_error=no_refresh_token');
+    }
+    await googleAds.setSetting('google_ads_refresh_token', tokens.refresh_token);
+    res.redirect('/syncing.html?ads_connected=1');
+  } catch (err) {
+    console.error('Google Ads OAuth error:', err.message);
+    res.redirect(`/syncing.html?ads_error=${encodeURIComponent(err.message)}`);
+  }
+});
+
+// ── Google Ads API routes ──────────────────────────────────────────
+app.get('/api/google-ads/status', async (req, res) => {
+  res.json(await googleAds.getStatus());
+});
+
+app.post('/api/google-ads/sync', async (req, res) => {
+  const days = Math.min(parseInt(req.body.days) || 7, 365);
+  try {
+    const result = await googleAds.runSync(days);
+    res.json(result);
+  } catch (err) {
+    console.error('Google Ads sync error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/google-ads/campaigns', async (req, res) => {
+  try {
+    const days   = Math.min(parseInt(req.query.days) || 30, 365);
+    const { rows } = await pool.query(`
+      SELECT
+        campaign_id     AS "campaignId",
+        campaign_name   AS "campaignName",
+        campaign_status AS "campaignStatus",
+        SUM(impressions)       AS impressions,
+        SUM(clicks)            AS clicks,
+        SUM(cost)              AS cost,
+        SUM(conversions)       AS conversions,
+        SUM(conversion_value)  AS "conversionValue",
+        CASE WHEN SUM(cost) > 0
+          THEN ROUND((SUM(conversion_value) / SUM(cost))::numeric, 2)
+          ELSE 0
+        END AS roas,
+        CASE WHEN SUM(impressions) > 0
+          THEN ROUND((SUM(clicks)::numeric / SUM(impressions) * 100), 2)
+          ELSE 0
+        END AS ctr,
+        CASE WHEN SUM(clicks) > 0
+          THEN ROUND((SUM(cost) / SUM(clicks))::numeric, 2)
+          ELSE 0
+        END AS cpc,
+        MAX(date) AS "lastDate"
+      FROM google_ads_daily
+      WHERE date >= CURRENT_DATE - $1
+      GROUP BY campaign_id, campaign_name, campaign_status
+      ORDER BY SUM(cost) DESC
+    `, [days]);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/google-ads/summary', async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days) || 30, 365);
+    const { rows } = await pool.query(`
+      SELECT
+        SUM(impressions)      AS impressions,
+        SUM(clicks)           AS clicks,
+        SUM(cost)             AS cost,
+        SUM(conversions)      AS conversions,
+        SUM(conversion_value) AS "conversionValue",
+        CASE WHEN SUM(cost) > 0
+          THEN ROUND((SUM(conversion_value) / SUM(cost))::numeric, 2)
+          ELSE 0
+        END AS roas,
+        COUNT(DISTINCT campaign_id) AS campaigns,
+        MIN(date) AS "fromDate",
+        MAX(date) AS "toDate"
+      FROM google_ads_daily
+      WHERE date >= CURRENT_DATE - $1
+    `, [days]);
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/google-ads/daily', async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days) || 30, 365);
+    const { rows } = await pool.query(`
+      SELECT
+        date,
+        SUM(impressions)      AS impressions,
+        SUM(clicks)           AS clicks,
+        SUM(cost)             AS cost,
+        SUM(conversions)      AS conversions,
+        SUM(conversion_value) AS "conversionValue",
+        CASE WHEN SUM(cost) > 0
+          THEN ROUND((SUM(conversion_value) / SUM(cost))::numeric, 2)
+          ELSE 0
+        END AS roas
+      FROM google_ads_daily
+      WHERE date >= CURRENT_DATE - $1
+      GROUP BY date
+      ORDER BY date DESC
+    `, [days]);
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -618,6 +765,7 @@ const PORT = process.env.PORT || 3000;
 initDb()
   .then(() => {
     startCron();
+    googleAds.startCron();
     app.listen(PORT, () => {
       console.log(`Warehouse Studio running at http://localhost:${PORT}`);
       if (!SHOPIFY_SHOP || !SHOPIFY_TOKEN) {

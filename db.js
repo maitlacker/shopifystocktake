@@ -61,6 +61,33 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_discrepancies_reviewed
       ON stocktake_discrepancies(reviewed, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key        TEXT PRIMARY KEY,
+      value      TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS google_ads_daily (
+      id               SERIAL PRIMARY KEY,
+      campaign_id      TEXT NOT NULL,
+      campaign_name    TEXT NOT NULL,
+      campaign_status  TEXT,
+      date             DATE NOT NULL,
+      impressions      BIGINT NOT NULL DEFAULT 0,
+      clicks           BIGINT NOT NULL DEFAULT 0,
+      cost             DECIMAL(12,2) NOT NULL DEFAULT 0,
+      conversions      DECIMAL(10,2) NOT NULL DEFAULT 0,
+      conversion_value DECIMAL(12,2) NOT NULL DEFAULT 0,
+      synced_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(campaign_id, date)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_google_ads_daily_date
+      ON google_ads_daily(date DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_google_ads_daily_campaign
+      ON google_ads_daily(campaign_id, date DESC);
   `);
 }
 

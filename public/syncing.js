@@ -68,6 +68,109 @@ btnInventorySync.addEventListener('click', async () => {
   }
 });
 
+// ── Google Ads card ────────────────────────────────────────────────
+const gadsDot        = document.getElementById('gads-dot');
+const gadsStatusText = document.getElementById('gads-status-text');
+const gadsLog        = document.getElementById('gads-log');
+const btnGadsConnect = document.getElementById('btn-gads-connect');
+const btnGadsFull    = document.getElementById('btn-gads-full');
+const btnGadsDaily   = document.getElementById('btn-gads-daily');
+
+function setGadsStatus(state, text) {
+  gadsDot.className = `sync-status-dot sync-status-dot--${state}`;
+  gadsStatusText.textContent = text;
+}
+
+function appendGadsLog(msg, type = 'info') {
+  gadsLog.style.display = 'block';
+  const line = document.createElement('div');
+  line.className = `sync-log-line sync-log-line--${type}`;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  gadsLog.appendChild(line);
+  gadsLog.scrollTop = gadsLog.scrollHeight;
+}
+
+async function loadGadsStatus() {
+  try {
+    const res    = await fetch('/api/google-ads/status');
+    const status = await res.json();
+
+    if (!status.configured) {
+      setGadsStatus('idle', 'Not connected — click Connect Google Ads to authorise');
+      btnGadsConnect.style.display = '';
+      btnGadsFull.style.display    = 'none';
+      btnGadsDaily.style.display   = 'none';
+    } else if (status.isRunning) {
+      setGadsStatus('syncing', 'Sync in progress…');
+    } else if (status.lastRun) {
+      const r = status.lastRunResult;
+      setGadsStatus('ok', `Last synced ${formatRelative(status.lastRun)} — ${r.upserted} rows. Daily cron: ${status.dailyCron}`);
+      btnGadsConnect.style.display = 'none';
+      btnGadsFull.style.display    = '';
+      btnGadsDaily.style.display   = '';
+    } else {
+      setGadsStatus('idle', 'Connected — no sync run yet. Run a full sync to import history.');
+      btnGadsConnect.style.display = 'none';
+      btnGadsFull.style.display    = '';
+      btnGadsDaily.style.display   = '';
+    }
+
+    // Show error from URL param if redirected back from OAuth
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('ads_connected')) {
+      setGadsStatus('ok', 'Google Ads connected! Run a full sync to import your data.');
+      appendGadsLog('Successfully connected to Google Ads.', 'success');
+      btnGadsConnect.style.display = 'none';
+      btnGadsFull.style.display    = '';
+      btnGadsDaily.style.display   = '';
+      window.history.replaceState({}, '', '/syncing.html');
+    }
+    if (params.get('ads_error')) {
+      const msg = params.get('ads_error');
+      setGadsStatus('error', `Connection failed: ${msg}`);
+      appendGadsLog(`OAuth error: ${msg}`, 'error');
+      window.history.replaceState({}, '', '/syncing.html');
+    }
+  } catch {
+    setGadsStatus('error', 'Could not load status');
+  }
+}
+
+async function runGadsSync(days) {
+  btnGadsFull.disabled  = true;
+  btnGadsDaily.disabled = true;
+  setGadsStatus('syncing', `Syncing last ${days} days…`);
+  appendGadsLog(`Starting Google Ads sync (${days} days)…`);
+
+  try {
+    const res  = await fetch('/api/google-ads/sync', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ days }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Unknown error');
+
+    if (data.skipped) {
+      appendGadsLog('Already running — try again shortly.', 'info');
+    } else {
+      appendGadsLog(`Done — ${data.upserted} rows synced across ${days} days.`, 'success');
+    }
+    await loadGadsStatus();
+  } catch (err) {
+    setGadsStatus('error', 'Sync failed');
+    appendGadsLog(`Error: ${err.message}`, 'error');
+  } finally {
+    btnGadsFull.disabled  = false;
+    btnGadsDaily.disabled = false;
+  }
+}
+
+btnGadsFull.addEventListener('click',  () => runGadsSync(90));
+btnGadsDaily.addEventListener('click', () => runGadsSync(7));
+
+loadGadsStatus();
+
 // ── Stock alert card ───────────────────────────────────────────────
 const btnAlertsRun   = document.getElementById('btn-alerts-run');
 const alertsDot      = document.getElementById('alerts-dot');

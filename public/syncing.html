@@ -76,6 +76,27 @@
         </div>
       </div>
 
+      <!-- Google Ads -->
+      <div class="sync-card" id="card-google-ads">
+        <div class="sync-card-header">
+          <div class="sync-card-icon">&#128640;</div>
+          <div>
+            <div class="sync-card-title">Google Ads</div>
+            <div class="sync-card-desc">Imports campaign performance data — spend, clicks, impressions, conversions and ROAS. Syncs automatically every day at 2am.</div>
+          </div>
+        </div>
+        <div class="sync-status">
+          <span class="sync-status-dot sync-status-dot--idle" id="gads-dot"></span>
+          <span id="gads-status-text">Checking…</span>
+        </div>
+        <div class="sync-card-actions" id="gads-actions">
+          <a href="/auth/google-ads/connect" class="btn btn-primary" id="btn-gads-connect" style="display:none">&#128279; Connect Google Ads</a>
+          <button id="btn-gads-full" class="btn btn-primary" style="display:none">&#8635; Full Sync (90 days)</button>
+          <button id="btn-gads-daily" class="btn btn-secondary" style="display:none">&#8635; Sync Last 7 Days</button>
+        </div>
+        <div id="gads-log" class="sync-log" style="display:none"></div>
+      </div>
+
     </div>
   </main>
 
