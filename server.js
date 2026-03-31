@@ -364,7 +364,16 @@ app.get('/api/google-ads/summary', async (req, res) => {
 
 app.get('/api/google-ads/daily', async (req, res) => {
   try {
-    const days = Math.min(parseInt(req.query.days) || 30, 365);
+    let whereClause, params;
+    if (req.query.start && req.query.end) {
+      whereClause = `date >= $1 AND date <= $2`;
+      params = [req.query.start, req.query.end];
+    } else {
+      const days = Math.min(parseInt(req.query.days) || 30, 365);
+      whereClause = `date >= CURRENT_DATE - ($1::int)`;
+      params = [days];
+    }
+
     const { rows } = await pool.query(`
       SELECT
         date,
@@ -378,10 +387,10 @@ app.get('/api/google-ads/daily', async (req, res) => {
           ELSE 0
         END AS roas
       FROM google_ads_daily
-      WHERE date >= CURRENT_DATE - ($1::int)
+      WHERE ${whereClause}
       GROUP BY date
-      ORDER BY date DESC
-    `, [days]);
+      ORDER BY date ASC
+    `, params);
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });

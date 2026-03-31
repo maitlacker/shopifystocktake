@@ -17,6 +17,10 @@
         <p class="page-subtitle">Campaign performance data imported from Google Ads</p>
       </div>
       <div style="display:flex;align-items:center;gap:10px">
+        <div class="disc-filter-tabs" id="view-tabs">
+          <button class="disc-tab active" data-view="overview">Overview</button>
+          <button class="disc-tab" data-view="sheet-export">Sheet Export</button>
+        </div>
         <div class="disc-filter-tabs" id="period-tabs">
           <button class="disc-tab active" data-days="7">7 days</button>
           <button class="disc-tab" data-days="30">30 days</button>
@@ -86,6 +90,52 @@
         </thead>
         <tbody id="campaigns-tbody"></tbody>
       </table>
+    </div>
+
+    <!-- Sheet Export panel -->
+    <div id="sheet-export-panel" style="display:none">
+      <div class="disc-table-wrap">
+        <div class="sheet-export-controls">
+          <div class="sheet-field">
+            <label class="sheet-label">Start date</label>
+            <input type="date" id="sheet-start" class="sheet-date-input" />
+          </div>
+          <div class="sheet-field">
+            <label class="sheet-label">End date</label>
+            <input type="date" id="sheet-end" class="sheet-date-input" />
+          </div>
+          <div class="sheet-field" style="align-self:flex-end">
+            <button id="btn-sheet-load" class="btn btn-primary">Load</button>
+          </div>
+        </div>
+
+        <div id="sheet-results" style="display:none">
+          <div class="sheet-metric-tabs">
+            <label class="sheet-metric-label">Copy metric:</label>
+            <div class="disc-filter-tabs">
+              <button class="disc-tab sheet-metric-tab active" data-metric="cost">Spend</button>
+              <button class="disc-tab sheet-metric-tab" data-metric="conversionValue">Conv. Value</button>
+              <button class="disc-tab sheet-metric-tab" data-metric="roas">ROAS</button>
+              <button class="disc-tab sheet-metric-tab" data-metric="conversions">Conversions</button>
+              <button class="disc-tab sheet-metric-tab" data-metric="clicks">Clicks</button>
+              <button class="disc-tab sheet-metric-tab" data-metric="impressions">Impressions</button>
+            </div>
+            <button id="btn-copy-dates" class="btn btn-secondary btn-sm">Copy Dates Row</button>
+            <button id="btn-copy-values" class="btn btn-primary btn-sm">Copy Values Row</button>
+            <span id="copy-confirm" class="sheet-copy-confirm" style="display:none">&#10003; Copied!</span>
+          </div>
+
+          <!-- Preview -->
+          <div class="sheet-preview-wrap">
+            <div class="sheet-preview-row" id="preview-dates"></div>
+            <div class="sheet-preview-row sheet-preview-row--values" id="preview-values"></div>
+          </div>
+
+          <p class="sheet-hint">Each row is tab-separated — paste directly into a Google Sheet row.</p>
+        </div>
+
+        <div id="sheet-empty" style="display:none" class="state-msg">No data found for that date range.</div>
+      </div>
     </div>
 
     <!-- Daily breakdown table -->

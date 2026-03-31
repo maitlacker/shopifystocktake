@@ -648,6 +648,87 @@ tr.discrepancy { background: #fff7ed; }
 .sync-log-line--success { color: #4ade80; }
 .sync-log-line--error   { color: #f87171; }
 
+/* ── Sheet Export ─────────────────────────────────────────────── */
+.sheet-export-controls {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.sheet-field { display: flex; flex-direction: column; gap: 5px; }
+
+.sheet-label {
+  font-size: .78rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.sheet-date-input {
+  padding: 7px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  font-size: .875rem;
+  outline: none;
+  transition: border-color .15s;
+}
+.sheet-date-input:focus { border-color: #a5b4fc; }
+
+.sheet-metric-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.sheet-metric-label {
+  font-size: .8rem;
+  font-weight: 600;
+  color: #64748b;
+  margin-right: 4px;
+}
+
+.sheet-preview-wrap {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-x: auto;
+  margin-bottom: 10px;
+}
+
+.sheet-preview-row {
+  font-family: 'Courier New', monospace;
+  font-size: .82rem;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.sheet-preview-row--values {
+  color: #1a1a2e;
+  font-weight: 600;
+  font-size: .9rem;
+}
+
+.sheet-hint {
+  font-size: .78rem;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+.sheet-copy-confirm {
+  font-size: .82rem;
+  color: #15803d;
+  font-weight: 600;
+}
+
 /* ── Discrepancy report ───────────────────────────────────────── */
 .disc-summary {
   display: flex;
