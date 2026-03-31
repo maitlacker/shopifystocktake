@@ -7,6 +7,7 @@
       label: 'Stocktake',
       children: [
         { label: 'Stocktake',               href: '/' },
+        { label: 'Discrepancy Report',      href: '/discrepancies.html' },
         { label: 'Draft & Archived Stock',  href: '/draft-report.html' },
         { label: 'History',                 href: '/history.html' },
       ],

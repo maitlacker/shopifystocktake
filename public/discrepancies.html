@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Discrepancy Report – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header></header>
+
+  <main>
+    <div class="page-header">
+      <h2 class="page-title">Discrepancy Report</h2>
+      <p class="page-subtitle">All stocktake counts where the physical count differed from the system quantity</p>
+    </div>
+
+    <!-- Summary cards -->
+    <div class="disc-summary" id="disc-summary">
+      <div class="disc-stat-card disc-stat-card--red">
+        <div class="disc-stat-value" id="stat-unreviewed">—</div>
+        <div class="disc-stat-label">Needs Review</div>
+      </div>
+      <div class="disc-stat-card">
+        <div class="disc-stat-value" id="stat-total">—</div>
+        <div class="disc-stat-label">Total Discrepancies</div>
+      </div>
+      <div class="disc-stat-card">
+        <div class="disc-stat-value" id="stat-short">—</div>
+        <div class="disc-stat-label">Short (Under Count)</div>
+      </div>
+      <div class="disc-stat-card">
+        <div class="disc-stat-value" id="stat-over">—</div>
+        <div class="disc-stat-label">Over Count</div>
+      </div>
+      <div class="disc-stat-card">
+        <div class="disc-stat-value" id="stat-7days">—</div>
+        <div class="disc-stat-label">Last 7 Days</div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="disc-filters">
+      <div class="disc-filter-tabs">
+        <button class="disc-tab active" data-status="all">All</button>
+        <button class="disc-tab" data-status="unreviewed">Needs Review</button>
+        <button class="disc-tab" data-status="reviewed">Reviewed</button>
+      </div>
+      <input type="text" id="disc-search" class="disc-search" placeholder="Search by product or SKU…" autocomplete="off" />
+      <button id="btn-review-all" class="btn btn-secondary" style="display:none">&#10003; Mark All Visible as Reviewed</button>
+    </div>
+
+    <!-- Table -->
+    <div class="disc-table-wrap">
+      <table class="disc-table" id="disc-table">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Variant</th>
+            <th>SKU</th>
+            <th style="text-align:center">System Qty</th>
+            <th style="text-align:center">Counted Qty</th>
+            <th style="text-align:center">Difference</th>
+            <th>Checked By</th>
+            <th>Date</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="disc-tbody"></tbody>
+      </table>
+      <div id="disc-empty" class="state-msg" style="display:none">No discrepancies found.</div>
+    </div>
+
+  </main>
+
+  <script src="discrepancies.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

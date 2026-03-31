@@ -38,6 +38,29 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_stock_alerts_resolved
       ON stock_alerts(resolved, alerted_at DESC);
+
+    CREATE TABLE IF NOT EXISTS stocktake_discrepancies (
+      id             SERIAL PRIMARY KEY,
+      product_id     BIGINT NOT NULL,
+      product_title  TEXT NOT NULL,
+      variant_id     BIGINT NOT NULL,
+      variant_title  TEXT,
+      sku            TEXT,
+      system_qty     INT NOT NULL,
+      counted_qty    INT NOT NULL,
+      difference     INT NOT NULL,
+      initials       TEXT NOT NULL,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      reviewed       BOOLEAN NOT NULL DEFAULT FALSE,
+      reviewed_at    TIMESTAMPTZ,
+      reviewed_by    TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_discrepancies_product
+      ON stocktake_discrepancies(product_id);
+
+    CREATE INDEX IF NOT EXISTS idx_discrepancies_reviewed
+      ON stocktake_discrepancies(reviewed, created_at DESC);
   `);
 }
 

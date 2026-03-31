@@ -233,11 +233,25 @@ async function handleSubmit(e) {
   btn.disabled = true;
   btn.textContent = 'Saving…';
 
+  // Collect all filled-in variant counts for this product
+  const product  = state.searchResults.find((p) => p.id === productId);
+  const variants = product ? product.variants.flatMap((v) => {
+    const counted = state.counts[v.id];
+    if (counted === undefined || counted === '') return [];
+    return [{
+      variantId:    v.id,
+      variantTitle: v.title,
+      sku:          v.sku || '',
+      systemQty:    v.inventory_quantity ?? 0,
+      countedQty:   Number(counted),
+    }];
+  }) : [];
+
   try {
     const res = await fetch('/api/stocktake/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ productId, productTitle, initials: state.initials }),
+      body: JSON.stringify({ productId, productTitle, initials: state.initials, variants }),
     });
 
     const data = await res.json();

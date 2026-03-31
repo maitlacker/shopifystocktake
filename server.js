@@ -142,6 +142,74 @@ async function fetchInventoryCosts(inventoryItemIds) {
   return costs;
 }
 
+// ── Discrepancy routes ─────────────────────────────────────────────
+app.get('/api/discrepancies', async (req, res) => {
+  const { status, q } = req.query;
+  let where = [];
+  const params = [];
+
+  if (status === 'unreviewed') { params.push(false); where.push(`reviewed = $${params.length}`); }
+  if (status === 'reviewed')   { params.push(true);  where.push(`reviewed = $${params.length}`); }
+  if (q) {
+    params.push(`%${q.toLowerCase()}%`);
+    where.push(`(LOWER(product_title) LIKE $${params.length} OR LOWER(sku) LIKE $${params.length})`);
+  }
+
+  const sql = `
+    SELECT id, product_id AS "productId", product_title AS "productTitle",
+           variant_id AS "variantId", variant_title AS "variantTitle",
+           sku, system_qty AS "systemQty", counted_qty AS "countedQty",
+           difference, initials, created_at AS "createdAt",
+           reviewed, reviewed_at AS "reviewedAt", reviewed_by AS "reviewedBy"
+    FROM stocktake_discrepancies
+    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+    ORDER BY created_at DESC
+    LIMIT 500
+  `;
+  const { rows } = await pool.query(sql, params);
+  res.json(rows);
+});
+
+app.get('/api/discrepancies/summary', async (req, res) => {
+  const { rows } = await pool.query(`
+    SELECT
+      COUNT(*)                                        AS total,
+      COUNT(*) FILTER (WHERE NOT reviewed)            AS unreviewed,
+      COUNT(*) FILTER (WHERE reviewed)                AS reviewed,
+      COUNT(*) FILTER (WHERE difference < 0)          AS short,
+      COUNT(*) FILTER (WHERE difference > 0)          AS over,
+      COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days') AS last7days
+    FROM stocktake_discrepancies
+  `);
+  res.json(rows[0]);
+});
+
+app.post('/api/discrepancies/:id/review', async (req, res) => {
+  const { id } = req.params;
+  const { reviewedBy } = req.body;
+  const { rows } = await pool.query(
+    `UPDATE stocktake_discrepancies
+     SET reviewed = true, reviewed_at = NOW(), reviewed_by = $1
+     WHERE id = $2 AND reviewed = false
+     RETURNING id`,
+    [reviewedBy || 'Unknown', id]
+  );
+  if (rows.length === 0) return res.status(404).json({ error: 'Not found or already reviewed' });
+  res.json({ ok: true });
+});
+
+app.post('/api/discrepancies/review-all', async (req, res) => {
+  const { reviewedBy, ids } = req.body;
+  if (!ids || !ids.length) return res.status(400).json({ error: 'ids required' });
+  const { rowCount } = await pool.query(
+    `UPDATE stocktake_discrepancies
+     SET reviewed = true, reviewed_at = NOW(), reviewed_by = $1
+     WHERE id = ANY($2::int[]) AND reviewed = false`,
+    [reviewedBy || 'Unknown', ids]
+  );
+  res.json({ ok: true, updated: rowCount });
+});
+
 // ── Stock alert routes ─────────────────────────────────────────────
 app.get('/api/alerts/status', (req, res) => {
   res.json(getAlertStatus());
@@ -256,21 +324,35 @@ app.get('/api/products/search', async (req, res) => {
 
 // ── Stocktake history routes ───────────────────────────────────────
 app.post('/api/stocktake/submit', async (req, res) => {
-  const { productId, productTitle, initials } = req.body;
+  const { productId, productTitle, initials, variants = [] } = req.body;
 
   if (!productId || !productTitle || !initials) {
     return res.status(400).json({ error: 'productId, productTitle and initials are required' });
   }
 
-  const entry = {
-    productId,
-    productTitle,
-    initials: initials.toUpperCase().trim(),
-    timestamp: new Date().toISOString(),
-  };
+  const normInitials = initials.toUpperCase().trim();
+  const timestamp    = new Date().toISOString();
 
+  const entry = { productId, productTitle, initials: normInitials, timestamp };
   await appendHistory(entry);
-  res.json({ ok: true, entry });
+
+  // Save any discrepancies (counted ≠ system)
+  const discrepancies = variants.filter((v) => v.countedQty !== v.systemQty);
+  for (const v of discrepancies) {
+    await pool.query(
+      `INSERT INTO stocktake_discrepancies
+        (product_id, product_title, variant_id, variant_title, sku,
+         system_qty, counted_qty, difference, initials, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [
+        productId, productTitle, v.variantId, v.variantTitle, v.sku || '',
+        v.systemQty, v.countedQty, v.countedQty - v.systemQty,
+        normInitials, timestamp,
+      ]
+    );
+  }
+
+  res.json({ ok: true, entry, discrepanciesSaved: discrepancies.length });
 });
 
 app.get('/api/stocktake/history', async (req, res) => {
