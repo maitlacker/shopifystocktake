@@ -10,6 +10,9 @@ const { configureAuth, requireAuth } = require('./auth');
 
 const app = express();
 
+// Trust Railway's reverse proxy so secure cookies work over HTTPS
+app.set('trust proxy', 1);
+
 // ── Sessions ───────────────────────────────────────────────────────
 const isProduction = process.env.NODE_ENV === 'production';
 
