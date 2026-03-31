@@ -2,7 +2,7 @@ const cron      = require('node-cron');
 const fetch     = require('node-fetch');
 const { pool }  = require('./db');
 
-const THRESHOLD      = 2;
+const THRESHOLD      = 5;
 const API_VERSION    = '2024-01';
 const CRON_SCHEDULE  = process.env.STOCK_ALERT_CRON || '*/30 * * * *';
 
