@@ -54,9 +54,17 @@ async function fetchAllVariants() {
 
 // ── Slack ──────────────────────────────────────────────────────────
 async function sendSlackAlert(variant) {
-  const webhookUrl = process.env.SLACK_WEBHOOK_URL;
+  const raw = process.env.SLACK_WEBHOOK_URL || '';
+  // Strip any accidental surrounding quotes or whitespace
+  const webhookUrl = raw.trim().replace(/^["']|["']$/g, '');
+
   if (!webhookUrl) {
     console.warn('[alerts] SLACK_WEBHOOK_URL not set — skipping Slack notification');
+    return;
+  }
+
+  if (!webhookUrl.startsWith('https://')) {
+    console.error(`[alerts] SLACK_WEBHOOK_URL looks invalid — starts with: "${webhookUrl.slice(0, 30)}"`);
     return;
   }
 
