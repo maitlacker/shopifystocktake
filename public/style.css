@@ -729,6 +729,40 @@ tr.discrepancy { background: #fff7ed; }
   font-weight: 600;
 }
 
+/* ── Shopify report copy grid ─────────────────────────────────── */
+.shopify-copy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 8px;
+}
+
+.shopify-copy-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shopify-copy-label {
+  font-size: .82rem;
+  font-weight: 700;
+  color: #475569;
+}
+
+.shopify-copy-preview {
+  font-family: 'Courier New', monospace;
+  font-size: .75rem;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
 /* ── Discrepancy report ───────────────────────────────────────── */
 .disc-summary {
   display: flex;

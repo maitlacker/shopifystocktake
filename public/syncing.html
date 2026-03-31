@@ -76,6 +76,26 @@
         </div>
       </div>
 
+      <!-- Shopify Daily Analytics -->
+      <div class="sync-card" id="card-shopify-analytics">
+        <div class="sync-card-header">
+          <div class="sync-card-icon">&#128722;</div>
+          <div>
+            <div class="sync-card-title">Shopify Daily Analytics</div>
+            <div class="sync-card-desc">Imports daily revenue, order count, items sold and sessions from Shopify. Syncs automatically every day at 3am.</div>
+          </div>
+        </div>
+        <div class="sync-status">
+          <span class="sync-status-dot sync-status-dot--idle" id="shopify-analytics-dot"></span>
+          <span id="shopify-analytics-status-text">Loading…</span>
+        </div>
+        <div class="sync-card-actions">
+          <button id="btn-shopify-analytics-full" class="btn btn-primary">&#8635; Full Sync (90 days)</button>
+          <button id="btn-shopify-analytics-daily" class="btn btn-secondary">&#8635; Sync Last 7 Days</button>
+        </div>
+        <div id="shopify-analytics-log" class="sync-log" style="display:none"></div>
+      </div>
+
       <!-- Google Ads -->
       <div class="sync-card" id="card-google-ads">
         <div class="sync-card-header">

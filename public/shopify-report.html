@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shopify Daily Report – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header></header>
+
+  <main>
+    <div class="page-header">
+      <h2 class="page-title">Shopify Daily Report</h2>
+      <p class="page-subtitle">Select a date range and copy any metric as a tab-separated row — pastes directly into Google Sheets or a CSV</p>
+    </div>
+
+    <!-- Date range controls -->
+    <div class="disc-table-wrap" style="padding-top:20px">
+      <div class="sheet-export-controls">
+        <div class="sheet-field">
+          <label class="sheet-label">Start date</label>
+          <input type="date" id="sheet-start" class="sheet-date-input" />
+        </div>
+        <div class="sheet-field">
+          <label class="sheet-label">End date</label>
+          <input type="date" id="sheet-end" class="sheet-date-input" />
+        </div>
+        <div class="sheet-field" style="align-self:flex-end">
+          <button id="btn-load" class="btn btn-primary">Load</button>
+        </div>
+      </div>
+
+      <!-- No data -->
+      <div id="no-data" class="state-msg" style="display:none">
+        No data found for that range. Run a sync from the
+        <a href="/syncing.html" class="toolbar-link">Syncing page</a> first.
+      </div>
+
+      <!-- Results -->
+      <div id="results" style="display:none">
+
+        <!-- Copy rows -->
+        <div class="shopify-copy-grid">
+
+          <div class="shopify-copy-card">
+            <div class="shopify-copy-label">&#128197; Dates</div>
+            <div class="shopify-copy-preview" id="preview-dates"></div>
+            <button class="btn btn-secondary btn-sm shopify-copy-btn" data-metric="dates">Copy Row</button>
+          </div>
+
+          <div class="shopify-copy-card">
+            <div class="shopify-copy-label">&#128176; Revenue</div>
+            <div class="shopify-copy-preview" id="preview-revenue"></div>
+            <button class="btn btn-primary btn-sm shopify-copy-btn" data-metric="revenue">Copy Row</button>
+          </div>
+
+          <div class="shopify-copy-card">
+            <div class="shopify-copy-label">&#128722; Orders</div>
+            <div class="shopify-copy-preview" id="preview-orders"></div>
+            <button class="btn btn-primary btn-sm shopify-copy-btn" data-metric="orders">Copy Row</button>
+          </div>
+
+          <div class="shopify-copy-card">
+            <div class="shopify-copy-label">&#128230; Items Sold</div>
+            <div class="shopify-copy-preview" id="preview-items"></div>
+            <button class="btn btn-primary btn-sm shopify-copy-btn" data-metric="itemsSold">Copy Row</button>
+          </div>
+
+          <div class="shopify-copy-card" id="sessions-card">
+            <div class="shopify-copy-label">&#128065; Sessions</div>
+            <div class="shopify-copy-preview" id="preview-sessions"></div>
+            <button class="btn btn-primary btn-sm shopify-copy-btn" data-metric="sessions">Copy Row</button>
+          </div>
+
+        </div>
+
+        <p class="sheet-hint" style="margin-top:16px">Values are tab-separated — paste into a row in Google Sheets or open a CSV editor.</p>
+        <span id="copy-confirm" class="sheet-copy-confirm" style="display:none">&#10003; Copied to clipboard!</span>
+
+        <!-- Full data table -->
+        <div style="margin-top:28px">
+          <h3 style="font-size:1rem;font-weight:600;color:#1a1a2e;margin-bottom:10px">Daily Breakdown</h3>
+          <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:10px">
+            <table class="disc-table" id="daily-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th style="text-align:right">Revenue</th>
+                  <th style="text-align:right">Orders</th>
+                  <th style="text-align:right">Items Sold</th>
+                  <th style="text-align:right">Sessions</th>
+                </tr>
+              </thead>
+              <tbody id="daily-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+
+  <script src="shopify-report.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

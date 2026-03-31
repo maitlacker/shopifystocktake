@@ -8,7 +8,8 @@ const PgSession    = require('connect-pg-simple')(session);
 const { pool, initDb }               = require('./db');
 const { configureAuth, requireAuth } = require('./auth');
 const { startCron, runStockCheck, getStatus: getAlertStatus } = require('./alerts');
-const googleAds = require('./google-ads-sync');
+const googleAds        = require('./google-ads-sync');
+const shopifyAnalytics = require('./shopify-analytics');
 
 const app = express();
 
@@ -236,6 +237,46 @@ app.get('/api/alerts/recent', async (req, res) => {
       ORDER BY alerted_at DESC
       LIMIT 50
     `);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Shopify Analytics routes ───────────────────────────────────────
+app.get('/api/shopify-analytics/status', (req, res) => {
+  res.json(shopifyAnalytics.getStatus());
+});
+
+app.post('/api/shopify-analytics/sync', async (req, res) => {
+  const days = Math.min(parseInt(req.body.days) || 90, 365);
+  try {
+    const result = await shopifyAnalytics.runSync(days);
+    res.json(result);
+  } catch (err) {
+    console.error('Shopify analytics sync error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/shopify-analytics/daily', async (req, res) => {
+  try {
+    let whereClause, params;
+    if (req.query.start && req.query.end) {
+      whereClause = `date >= $1 AND date <= $2`;
+      params = [req.query.start, req.query.end];
+    } else {
+      const days = Math.min(parseInt(req.query.days) || 30, 365);
+      whereClause = `date >= CURRENT_DATE - ($1::int)`;
+      params = [days];
+    }
+    const { rows } = await pool.query(
+      `SELECT date, revenue, orders, items_sold AS "itemsSold", sessions
+       FROM shopify_daily
+       WHERE ${whereClause}
+       ORDER BY date ASC`,
+      params
+    );
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -775,6 +816,7 @@ initDb()
   .then(() => {
     startCron();
     googleAds.startCron();
+    shopifyAnalytics.startCron();
     app.listen(PORT, () => {
       console.log(`Warehouse Studio running at http://localhost:${PORT}`);
       if (!SHOPIFY_SHOP || !SHOPIFY_TOKEN) {

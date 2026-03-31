@@ -88,6 +88,19 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_google_ads_daily_campaign
       ON google_ads_daily(campaign_id, date DESC);
+
+    CREATE TABLE IF NOT EXISTS shopify_daily (
+      id         SERIAL PRIMARY KEY,
+      date       DATE NOT NULL UNIQUE,
+      revenue    DECIMAL(12,2) NOT NULL DEFAULT 0,
+      orders     INT NOT NULL DEFAULT 0,
+      items_sold INT NOT NULL DEFAULT 0,
+      sessions   INT,
+      synced_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_shopify_daily_date
+      ON shopify_daily(date DESC);
   `);
 }
 

@@ -68,6 +68,86 @@ btnInventorySync.addEventListener('click', async () => {
   }
 });
 
+// ── Shopify Analytics card ─────────────────────────────────────────
+const shopifyAnalyticsDot    = document.getElementById('shopify-analytics-dot');
+const shopifyAnalyticsStatus = document.getElementById('shopify-analytics-status-text');
+const shopifyAnalyticsLog    = document.getElementById('shopify-analytics-log');
+const btnShopifyFull         = document.getElementById('btn-shopify-analytics-full');
+const btnShopifyDaily        = document.getElementById('btn-shopify-analytics-daily');
+
+function setShopifyAnalyticsStatus(state, text) {
+  shopifyAnalyticsDot.className = `sync-status-dot sync-status-dot--${state}`;
+  shopifyAnalyticsStatus.textContent = text;
+}
+
+function appendShopifyAnalyticsLog(msg, type = 'info') {
+  shopifyAnalyticsLog.style.display = 'block';
+  const line = document.createElement('div');
+  line.className = `sync-log-line sync-log-line--${type}`;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  shopifyAnalyticsLog.appendChild(line);
+  shopifyAnalyticsLog.scrollTop = shopifyAnalyticsLog.scrollHeight;
+}
+
+(async () => {
+  try {
+    const res    = await fetch('/api/shopify-analytics/status');
+    const status = await res.json();
+    if (status.isRunning) {
+      setShopifyAnalyticsStatus('syncing', 'Sync in progress…');
+    } else if (status.lastRun) {
+      const r = status.lastRunResult;
+      const sessNote = r.sessionsNote ? ` (sessions: ${r.sessionsNote})` : '';
+      setShopifyAnalyticsStatus('ok',
+        `Last synced ${formatRelative(status.lastRun)} — ${r.daysUpserted} days, ${r.ordersProcessed} orders${sessNote}`
+      );
+    } else {
+      setShopifyAnalyticsStatus('idle', 'Not synced yet — click Full Sync to import history');
+    }
+  } catch {
+    setShopifyAnalyticsStatus('error', 'Could not load status');
+  }
+})();
+
+async function runShopifyAnalyticsSync(days) {
+  btnShopifyFull.disabled  = true;
+  btnShopifyDaily.disabled = true;
+  setShopifyAnalyticsStatus('syncing', `Syncing last ${days} days…`);
+  appendShopifyAnalyticsLog(`Starting Shopify analytics sync (${days} days)…`);
+
+  try {
+    const res  = await fetch('/api/shopify-analytics/sync', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ days }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Unknown error');
+
+    if (data.skipped) {
+      appendShopifyAnalyticsLog('Already running — try again shortly.', 'info');
+    } else {
+      const sessMsg = data.sessionsAvailable ? 'sessions included' : `sessions unavailable (${data.sessionsNote || 'check read_analytics scope'})`;
+      appendShopifyAnalyticsLog(
+        `Done — ${data.daysUpserted} days synced, ${data.ordersProcessed} orders. ${sessMsg}.`,
+        'success'
+      );
+      setShopifyAnalyticsStatus('ok',
+        `Synced ${data.daysUpserted} days, ${data.ordersProcessed} orders. ${data.sessionsAvailable ? 'Sessions included.' : 'Sessions unavailable.'}`
+      );
+    }
+  } catch (err) {
+    setShopifyAnalyticsStatus('error', 'Sync failed');
+    appendShopifyAnalyticsLog(`Error: ${err.message}`, 'error');
+  } finally {
+    btnShopifyFull.disabled  = false;
+    btnShopifyDaily.disabled = false;
+  }
+}
+
+btnShopifyFull.addEventListener('click',  () => runShopifyAnalyticsSync(90));
+btnShopifyDaily.addEventListener('click', () => runShopifyAnalyticsSync(7));
+
 // ── Google Ads card ────────────────────────────────────────────────
 const gadsDot        = document.getElementById('gads-dot');
 const gadsStatusText = document.getElementById('gads-status-text');
