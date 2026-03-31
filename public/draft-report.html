@@ -3,25 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Draft &amp; Archived Products with Stock</title>
+  <title>Draft &amp; Archived Stock – The Self Styler WMS</title>
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
 
-  <header>
-    <div class="header-inner">
-      <h1>Draft &amp; Archived Products with Stock</h1>
-      <div class="header-actions">
-        <span id="report-summary" class="cache-status"></span>
-        <button id="btn-run" class="btn btn-secondary">&#8635; Run Report</button>
-        <button id="btn-pdf" class="btn btn-primary" disabled>Export PDF</button>
-        <a href="/" class="btn btn-secondary">&#8592; Stocktake</a>
-        <a href="/history.html" class="btn btn-secondary">History</a>
-      </div>
-    </div>
-  </header>
+  <header></header>
+
+  <div class="page-toolbar">
+    <span id="report-summary" class="cache-status"></span>
+    <button id="btn-run" class="btn btn-secondary">&#8635; Run Report</button>
+    <button id="btn-pdf" class="btn btn-primary" disabled>Export PDF</button>
+  </div>
 
   <main>
     <div id="results">
@@ -30,6 +25,6 @@
   </main>
 
   <script src="draft-report.js"></script>
-  <script src="auth-bar.js"></script>
+  <script src="nav.js"></script>
 </body>
 </html>

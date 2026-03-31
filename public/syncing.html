@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Syncing – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header></header>
+
+  <main>
+    <div class="page-header">
+      <h2 class="page-title">Syncing</h2>
+      <p class="page-subtitle">Manage data imports and syncs with Shopify</p>
+    </div>
+
+    <div class="sync-grid">
+
+      <!-- Shopify Inventory -->
+      <div class="sync-card" id="card-inventory">
+        <div class="sync-card-header">
+          <div class="sync-card-icon">&#128230;</div>
+          <div>
+            <div class="sync-card-title">Shopify Inventory</div>
+            <div class="sync-card-desc">Fetches all active products and variants into the server cache. Required before running a stocktake.</div>
+          </div>
+        </div>
+        <div class="sync-status" id="inventory-status">
+          <span class="sync-status-dot sync-status-dot--idle"></span>
+          <span id="inventory-status-text">Checking…</span>
+        </div>
+        <div class="sync-card-actions">
+          <button id="btn-inventory-sync" class="btn btn-primary">&#8635; Sync Inventory</button>
+        </div>
+        <div id="inventory-log" class="sync-log" style="display:none"></div>
+      </div>
+
+    </div>
+  </main>
+
+  <script src="syncing.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

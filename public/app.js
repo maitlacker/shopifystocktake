@@ -11,7 +11,6 @@ const state = {
 const searchInput    = document.getElementById('search-input');
 const searchHint     = document.getElementById('search-hint');
 const resultsEl      = document.getElementById('results');
-const btnRefresh     = document.getElementById('btn-refresh');
 const btnPdf         = document.getElementById('btn-pdf');
 const cacheStatus    = document.getElementById('cache-status');
 const userBadge      = document.getElementById('user-badge');
@@ -86,30 +85,6 @@ if (savedInitials) {
   showInitialsModal();
 }
 
-/* ── Load / Refresh inventory ──────────────────────────────────── */
-btnRefresh.addEventListener('click', async () => {
-  btnRefresh.disabled = true;
-  cacheStatus.textContent = 'Loading…';
-  resultsEl.innerHTML = `<div class="state-msg"><div class="spinner"></div><br>Fetching inventory from Shopify…</div>`;
-
-  try {
-    const res  = await fetch('/api/products/refresh');
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Unknown error');
-
-    state.loaded = true;
-    cacheStatus.textContent = `${data.count} active products — loaded ${formatDate(data.lastFetched)}`;
-    searchInput.disabled  = false;
-    searchHint.textContent = 'Type at least 2 characters to search';
-    resultsEl.innerHTML    = `<div class="state-msg">Search for a style or SKU above.</div>`;
-    btnPdf.disabled        = false;
-  } catch (err) {
-    cacheStatus.textContent = 'Load failed';
-    resultsEl.innerHTML = `<div class="state-msg" style="color:#b91c1c">Error: ${err.message}</div>`;
-  } finally {
-    btnRefresh.disabled = false;
-  }
-});
 
 /* ── Search ────────────────────────────────────────────────────── */
 const doSearch = debounce(async (query) => {
@@ -382,6 +357,8 @@ function generatePdf() {
       searchHint.textContent = 'Type at least 2 characters to search';
       btnPdf.disabled        = false;
       resultsEl.innerHTML    = `<div class="state-msg">Search for a style or SKU above.</div>`;
+    } else {
+      cacheStatus.innerHTML = `Inventory not loaded — <a href="/syncing.html" class="toolbar-link">go to Syncing</a>`;
     }
   } catch (_) {}
 })();

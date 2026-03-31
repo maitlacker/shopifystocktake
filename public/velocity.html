@@ -3,23 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sales Velocity Report</title>
+  <title>Sales Velocity – The Self Styler WMS</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="velocity.css" />
 </head>
 <body>
 
-  <header>
-    <div class="header-inner">
-      <h1>Sales Velocity</h1>
-      <div class="header-actions">
-        <span id="report-meta" class="cache-status"></span>
-        <a href="/" class="btn btn-secondary">&#8592; Stocktake</a>
-        <a href="/history.html" class="btn btn-secondary">History</a>
-        <a href="/draft-report.html" class="btn btn-secondary">Draft &amp; Archived</a>
-      </div>
-    </div>
-  </header>
+  <header></header>
 
   <main>
 
@@ -46,6 +36,9 @@
           <input type="number" id="critical-days" value="7" min="1" max="365" />
           <span>days remaining</span>
         </div>
+      </div>
+      <div class="vel-control-group">
+        <span id="report-meta" class="cache-status"></span>
       </div>
       <button id="btn-run" class="btn btn-primary">&#8635; Run Report</button>
     </div>
@@ -99,6 +92,6 @@
   </main>
 
   <script src="velocity.js"></script>
-  <script src="auth-bar.js"></script>
+  <script src="nav.js"></script>
 </body>
 </html>
