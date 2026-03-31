@@ -326,7 +326,7 @@ app.get('/api/google-ads/campaigns', async (req, res) => {
         END AS cpc,
         MAX(date) AS "lastDate"
       FROM google_ads_daily
-      WHERE date >= CURRENT_DATE - $1
+      WHERE date >= CURRENT_DATE - ($1::int)
       GROUP BY campaign_id, campaign_name, campaign_status
       ORDER BY SUM(cost) DESC
     `, [days]);
@@ -354,7 +354,7 @@ app.get('/api/google-ads/summary', async (req, res) => {
         MIN(date) AS "fromDate",
         MAX(date) AS "toDate"
       FROM google_ads_daily
-      WHERE date >= CURRENT_DATE - $1
+      WHERE date >= CURRENT_DATE - ($1::int)
     `, [days]);
     res.json(rows[0]);
   } catch (err) {
@@ -378,7 +378,7 @@ app.get('/api/google-ads/daily', async (req, res) => {
           ELSE 0
         END AS roas
       FROM google_ads_daily
-      WHERE date >= CURRENT_DATE - $1
+      WHERE date >= CURRENT_DATE - ($1::int)
       GROUP BY date
       ORDER BY date DESC
     `, [days]);
