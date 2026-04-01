@@ -16,9 +16,10 @@
     {
       label: 'Reports',
       children: [
-        { label: 'Sales Velocity',       href: '/velocity.html' },
-        { label: 'Shopify Daily Report', href: '/shopify-report.html' },
-        { label: 'Google Ads',           href: '/google-ads.html' },
+        { label: 'Sales Velocity',        href: '/velocity.html' },
+        { label: 'Shopify Daily Report',  href: '/shopify-report.html' },
+        { label: 'Google Ads',            href: '/google-ads.html' },
+        { label: 'Picking Performance',   href: '/picking-report.html' },
       ],
     },
     {

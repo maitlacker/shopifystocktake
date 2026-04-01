@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Picking Performance – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    .pr-denied {
+      text-align: center;
+      padding: 64px 24px;
+      color: #64748b;
+    }
+    .pr-denied h3 { font-size: 1.2rem; font-weight: 700; color: #1a1a2e; margin-bottom: 8px; }
+
+    /* Picker cards */
+    .pr-picker-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+    .pr-picker-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 18px 20px;
+    }
+    .pr-picker-name {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 2px;
+    }
+    .pr-picker-email {
+      font-size: 0.75rem;
+      color: #94a3b8;
+      margin-bottom: 12px;
+    }
+    .pr-picker-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .pr-stat {
+      background: #f8fafc;
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    .pr-stat-val {
+      font-size: 1.3rem;
+      font-weight: 800;
+      color: #1a1a2e;
+      line-height: 1.1;
+    }
+    .pr-stat-val.highlight { color: #4f46e5; }
+    .pr-stat-val.good      { color: #15803d; }
+    .pr-stat-lbl {
+      font-size: 0.7rem;
+      color: #94a3b8;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-top: 2px;
+    }
+    .pr-initials-badge {
+      display: inline-block;
+      background: #ede9fe;
+      color: #4f46e5;
+      font-size: 0.75rem;
+      font-weight: 700;
+      border-radius: 6px;
+      padding: 2px 8px;
+      margin-bottom: 12px;
+    }
+
+    /* Sessions table */
+    .pr-section-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin: 24px 0 12px;
+    }
+    .pr-badge {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      border-radius: 6px;
+      padding: 2px 8px;
+      background: #f1f5f9;
+      color: #475569;
+    }
+    .pr-time-good { color: #15803d; font-weight: 700; }
+    .pr-time-mid  { color: #b45309; font-weight: 700; }
+    .pr-time-slow { color: #dc2626; font-weight: 700; }
+  </style>
+</head>
+<body>
+
+  <header></header>
+
+  <main>
+    <div class="page-header">
+      <h2 class="page-title">Picking Performance</h2>
+      <p class="page-subtitle">Staff picking speed metrics — admin only</p>
+    </div>
+
+    <div id="pr-denied" class="pr-denied" style="display:none">
+      <h3>Access Restricted</h3>
+      <p>This report is only available to accounts@theselfstyler.com.</p>
+    </div>
+
+    <div id="pr-content" style="display:none">
+
+      <!-- Per-picker cards -->
+      <h3 class="pr-section-title">Picker Leaderboard</h3>
+      <div class="pr-picker-grid" id="pr-picker-grid"></div>
+
+      <!-- All sessions -->
+      <h3 class="pr-section-title">All Sessions</h3>
+      <div class="disc-table-wrap">
+        <table class="disc-table" id="pr-sessions-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Picker</th>
+              <th>Initials</th>
+              <th style="text-align:right">Orders</th>
+              <th style="text-align:right">Items</th>
+              <th style="text-align:right">Picked</th>
+              <th style="text-align:right">Avg Sec/Item</th>
+              <th style="text-align:right">Active Time</th>
+              <th style="text-align:right">Gaps Skipped</th>
+            </tr>
+          </thead>
+          <tbody id="pr-sessions-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="pr-loading" class="state-msg">Loading…</div>
+  </main>
+
+  <script src="picking-report.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

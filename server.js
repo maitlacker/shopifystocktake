@@ -510,6 +510,98 @@ app.get('/api/google-ads/pmax-coverage', async (req, res) => {
   }
 });
 
+// ── Picking metrics ───────────────────────────────────────────────
+const PICKING_REPORT_EMAIL = 'accounts@theselfstyler.com';
+
+app.post('/api/picking/session', async (req, res) => {
+  const {
+    initials, orderStart, orderEnd, orderCount, itemCount,
+    picksCompleted, avgPickSeconds, activeSeconds, excludedGaps,
+    firstPickAt, lastPickAt,
+  } = req.body;
+
+  if (!picksCompleted || picksCompleted < 2) {
+    return res.json({ ok: true, skipped: true });   // not enough data to be useful
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO picking_sessions
+         (user_email, user_name, initials, order_start, order_end, order_count,
+          item_count, picks_completed, avg_pick_seconds, active_seconds,
+          excluded_gaps, first_pick_at, last_pick_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [
+        req.user.email,
+        req.user.displayName || req.user.email,
+        (initials || '').toUpperCase().trim() || null,
+        orderStart, orderEnd, orderCount || 0, itemCount || 0,
+        picksCompleted,
+        avgPickSeconds != null ? Number(avgPickSeconds).toFixed(2) : null,
+        activeSeconds  != null ? Math.round(activeSeconds) : null,
+        excludedGaps   || 0,
+        firstPickAt    || null,
+        lastPickAt     || null,
+      ]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[picking] Session save error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/picking/report', async (req, res) => {
+  if (req.user.email !== PICKING_REPORT_EMAIL) {
+    return res.status(403).json({ error: 'Access restricted to accounts@theselfstyler.com' });
+  }
+  try {
+    // Per-user summary
+    const { rows: users } = await pool.query(`
+      SELECT
+        user_email                                      AS "userEmail",
+        user_name                                       AS "userName",
+        COALESCE(MAX(initials), '')                     AS initials,
+        COUNT(*)::int                                   AS sessions,
+        SUM(picks_completed)::int                       AS totalPicks,
+        SUM(item_count)::int                            AS totalItems,
+        ROUND(AVG(avg_pick_seconds)::numeric, 1)        AS "avgPickSeconds",
+        ROUND(MIN(avg_pick_seconds)::numeric, 1)        AS "bestPickSeconds",
+        MAX(created_at)                                 AS "lastSession"
+      FROM picking_sessions
+      GROUP BY user_email, user_name
+      ORDER BY AVG(avg_pick_seconds) ASC NULLS LAST
+    `);
+
+    // All sessions
+    const { rows: sessions } = await pool.query(`
+      SELECT
+        id,
+        user_name        AS "userName",
+        user_email       AS "userEmail",
+        initials,
+        order_start      AS "orderStart",
+        order_end        AS "orderEnd",
+        order_count      AS "orderCount",
+        item_count       AS "itemCount",
+        picks_completed  AS "picksCompleted",
+        avg_pick_seconds AS "avgPickSeconds",
+        active_seconds   AS "activeSeconds",
+        excluded_gaps    AS "excludedGaps",
+        first_pick_at    AS "firstPickAt",
+        last_pick_at     AS "lastPickAt",
+        created_at       AS "createdAt"
+      FROM picking_sessions
+      ORDER BY created_at DESC
+      LIMIT 200
+    `);
+
+    res.json({ users, sessions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Order Picking ─────────────────────────────────────────────────
 app.get('/api/picking/orders', async (req, res) => {
   const start = parseInt(req.query.start);

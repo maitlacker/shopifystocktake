@@ -1,6 +1,105 @@
-let pickState = {}; // variantId -> { picked: boolean }
-let lastTap = {};   // variantId -> timestamp (for double-tap detection)
+let pickState    = {};
+let lastTap      = {};
 let currentItems = [];
+
+// ── Session tracking ───────────────────────────────────────────────
+let session = null; // active session data
+
+function sessionStart(data) {
+  session = {
+    orderStart:    data.orders[0]   || 0,
+    orderEnd:      data.orders[data.orders.length - 1] || 0,
+    orderCount:    data.orderCount  || 0,
+    itemCount:     data.items.length,
+    pickTimestamps: [],   // ms timestamps of each pick action
+    saved:          false,
+  };
+}
+
+function sessionRecordPick() {
+  if (!session) return;
+  session.pickTimestamps.push(Date.now());
+}
+
+function sessionRecordUnpick() {
+  // Remove the last timestamp if staff undo a pick
+  if (!session || !session.pickTimestamps.length) return;
+  session.pickTimestamps.pop();
+}
+
+function computeSessionStats() {
+  if (!session || session.pickTimestamps.length < 2) return null;
+  const ts = [...session.pickTimestamps].sort((a, b) => a - b);
+
+  const MAX_GAP_MS = 2 * 60 * 1000; // 2 minutes
+  const gaps = [];
+  let excluded = 0;
+
+  for (let i = 1; i < ts.length; i++) {
+    const gap = ts[i] - ts[i - 1];
+    if (gap <= MAX_GAP_MS) {
+      gaps.push(gap);
+    } else {
+      excluded++;
+    }
+  }
+
+  const avgPickSeconds = gaps.length > 0
+    ? gaps.reduce((a, b) => a + b, 0) / gaps.length / 1000
+    : null;
+  const activeSeconds = gaps.length > 0
+    ? Math.round(gaps.reduce((a, b) => a + b, 0) / 1000)
+    : null;
+
+  return {
+    picksCompleted: ts.length,
+    avgPickSeconds: avgPickSeconds != null ? Math.round(avgPickSeconds * 10) / 10 : null,
+    activeSeconds,
+    excludedGaps:   excluded,
+    firstPickAt:    new Date(ts[0]).toISOString(),
+    lastPickAt:     new Date(ts[ts.length - 1]).toISOString(),
+  };
+}
+
+async function saveSession(force = false) {
+  if (!session || session.saved) return;
+  if (!force && session.pickTimestamps.length < 2) return;
+
+  const stats = computeSessionStats();
+  if (!stats) return;
+
+  session.saved = true;
+
+  const initials = (document.getElementById('pick-initials')?.value || '').toUpperCase().trim();
+
+  const payload = {
+    initials,
+    orderStart:    session.orderStart,
+    orderEnd:      session.orderEnd,
+    orderCount:    session.orderCount,
+    itemCount:     session.itemCount,
+    ...stats,
+  };
+
+  try {
+    // Use sendBeacon for page-unload saves (fire and forget)
+    if (force && navigator.sendBeacon) {
+      navigator.sendBeacon('/api/picking/session', new Blob([JSON.stringify(payload)], { type: 'application/json' }));
+    } else {
+      await fetch('/api/picking/session', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+    }
+  } catch (_) { /* best effort */ }
+}
+
+// Save on page hide (tab close, navigation away, iPhone home button)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') saveSession(true);
+});
+window.addEventListener('pagehide', () => saveSession(true));
 
 // ── Load orders ────────────────────────────────────────────────────
 async function loadOrders() {
@@ -27,6 +126,7 @@ async function loadOrders() {
     currentItems = data.items;
     pickState    = {};
     lastTap      = {};
+    session      = null;
 
     if (!data.items.length) {
       resultEl.innerHTML = `<div class="pick-state">No items found for orders #${start}–#${end}.<br>Check the order numbers and try again.</div>`;
@@ -34,6 +134,7 @@ async function loadOrders() {
     }
 
     renderList(data);
+    sessionStart(data);
     updateProgress();
 
   } catch (err) {
@@ -119,8 +220,10 @@ function togglePicked(el, id) {
   pickState[id] = !pickState[id];
   if (pickState[id]) {
     el.classList.add('picked');
+    sessionRecordPick();
   } else {
     el.classList.remove('picked');
+    sessionRecordUnpick();
   }
   updateProgress();
 }
@@ -138,7 +241,9 @@ function updateProgress() {
   bar.classList.toggle('complete', picked === total && total > 0);
 
   const completeMsg = document.getElementById('complete-msg');
-  completeMsg.classList.toggle('visible', picked === total && total > 0);
+  const justCompleted = picked === total && total > 0;
+  completeMsg.classList.toggle('visible', justCompleted);
+  if (justCompleted) saveSession();
 }
 
 // ── Reset ──────────────────────────────────────────────────────────
@@ -169,6 +274,17 @@ function cancelPick() {
   currentItems = [];
   document.getElementById('start-order').focus();
 }
+
+// ── Persist initials in localStorage ──────────────────────────────
+(function () {
+  const el = document.getElementById('pick-initials');
+  const saved = localStorage.getItem('pick_initials');
+  if (saved) el.value = saved;
+  el.addEventListener('input', () => {
+    el.value = el.value.toUpperCase();
+    localStorage.setItem('pick_initials', el.value);
+  });
+})();
 
 // ── Submit on Enter ────────────────────────────────────────────────
 document.getElementById('start-order').addEventListener('keydown', e => { if (e.key === 'Enter') loadOrders(); });

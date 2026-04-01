@@ -118,6 +118,30 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_pmax_coverage_campaign
       ON pmax_product_coverage(campaign_id, snapshot_date DESC);
+
+    CREATE TABLE IF NOT EXISTS picking_sessions (
+      id                SERIAL PRIMARY KEY,
+      user_email        TEXT NOT NULL,
+      user_name         TEXT NOT NULL,
+      initials          TEXT,
+      order_start       INT NOT NULL,
+      order_end         INT NOT NULL,
+      order_count       INT NOT NULL DEFAULT 0,
+      item_count        INT NOT NULL DEFAULT 0,
+      picks_completed   INT NOT NULL DEFAULT 0,
+      avg_pick_seconds  DECIMAL(8,2),
+      active_seconds    INT,
+      excluded_gaps     INT NOT NULL DEFAULT 0,
+      first_pick_at     TIMESTAMPTZ,
+      last_pick_at      TIMESTAMPTZ,
+      created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_picking_sessions_user
+      ON picking_sessions(user_email, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_picking_sessions_date
+      ON picking_sessions(created_at DESC);
   `);
 }
 
