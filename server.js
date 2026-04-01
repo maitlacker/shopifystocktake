@@ -523,6 +523,12 @@ app.get('/api/picking/orders', async (req, res) => {
   }
 
   try {
+    // Auto-populate products cache if empty (clears on every server restart)
+    if (!productsCache.length) {
+      productsCache = await fetchAllProducts();
+      lastFetched   = new Date();
+    }
+
     // Build variant→image map from products cache
     const variantImageMap = {};
     for (const p of productsCache) {
