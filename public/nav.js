@@ -23,6 +23,14 @@
       ],
     },
     {
+      label: 'Scanner',
+      children: [
+        { label: 'Scan Label',       href: '/label-scanner.html' },
+        { label: 'Reference Images', href: '/label-reference.html' },
+        { label: 'Scan History',     href: '/scan-history.html' },
+      ],
+    },
+    {
       label: 'Syncing',
       children: [
         { label: 'Manage Syncs', href: '/syncing.html' },

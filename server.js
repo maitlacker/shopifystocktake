@@ -39,7 +39,7 @@ app.use(requireAuth);
 // ── Static + body parsing ──────────────────────────────────────────
 // Serve login.html without auth (requireAuth already exempts /login)
 app.use(express.static('public'));
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 
 const SHOPIFY_SHOP  = process.env.SHOPIFY_SHOP;
 const SHOPIFY_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
@@ -505,6 +505,94 @@ app.get('/api/google-ads/pmax-coverage', async (req, res) => {
       ORDER BY snapshot_date DESC, campaign_name ASC
     `, [days]);
     res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Label reference images ────────────────────────────────────────
+
+// Summary list — all SKUs that have reference images, counts only (no image_data)
+app.get('/api/label/references', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        sku,
+        product_id      AS "productId",
+        product_title   AS "productTitle",
+        variant_title   AS "variantTitle",
+        COUNT(*)::int   AS count,
+        MAX(created_at) AS "lastAdded"
+      FROM sku_reference_images
+      GROUP BY sku, product_id, product_title, variant_title
+      ORDER BY product_title ASC, sku ASC
+    `);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Images for a specific SKU — includes image_data (for display + Phase 4 matching)
+app.get('/api/label/references/images', async (req, res) => {
+  const { sku } = req.query;
+  if (!sku) return res.status(400).json({ error: 'sku query param required' });
+  try {
+    const { rows } = await pool.query(`
+      SELECT id, sku, image_label AS "imageLabel", image_data AS "imageData",
+             uploaded_by AS "uploadedBy", created_at AS "createdAt"
+      FROM sku_reference_images
+      WHERE sku = $1
+      ORDER BY created_at ASC
+    `, [sku]);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Upload a new reference image
+app.post('/api/label/references', async (req, res) => {
+  const { sku, productId, productTitle, variantTitle, imageData, imageLabel } = req.body;
+
+  if (!sku || !sku.trim()) return res.status(400).json({ error: 'sku is required' });
+  if (!imageData)          return res.status(400).json({ error: 'imageData is required' });
+  if (!imageData.startsWith('data:image/'))
+    return res.status(400).json({ error: 'imageData must be a valid image data URL' });
+  if (imageData.length > 600_000)
+    return res.status(400).json({ error: 'Image too large — please ensure it is compressed before uploading (max ~450KB)' });
+
+  try {
+    const { rows } = await pool.query(`
+      INSERT INTO sku_reference_images
+        (sku, product_id, product_title, variant_title, image_data, image_label, uploaded_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id
+    `, [
+      sku.trim(),
+      productId   || null,
+      productTitle || null,
+      variantTitle || null,
+      imageData,
+      (imageLabel || '').trim() || null,
+      req.user.email,
+    ]);
+    res.json({ ok: true, id: rows[0].id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete a reference image
+app.delete('/api/label/references/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid id' });
+  try {
+    const { rowCount } = await pool.query(
+      'DELETE FROM sku_reference_images WHERE id = $1', [id]
+    );
+    if (rowCount === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

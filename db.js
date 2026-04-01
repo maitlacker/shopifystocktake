@@ -142,6 +142,21 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_picking_sessions_date
       ON picking_sessions(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS sku_reference_images (
+      id             SERIAL PRIMARY KEY,
+      sku            TEXT NOT NULL,
+      product_id     TEXT,
+      product_title  TEXT,
+      variant_title  TEXT,
+      image_data     TEXT NOT NULL,
+      image_label    TEXT,
+      uploaded_by    TEXT NOT NULL,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ref_images_sku
+      ON sku_reference_images(sku);
   `);
 }
 

@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reference Images – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    /* ── Coverage badge ── */
+    .ref-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      border-radius: 20px;
+      padding: 3px 10px;
+    }
+    .ref-badge--ready    { background: #dcfce7; color: #15803d; }
+    .ref-badge--partial  { background: #fef3c7; color: #b45309; }
+    .ref-badge--missing  { background: #fee2e2; color: #b91c1c; }
+    .ref-badge-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+    /* ── Search bar ── */
+    .ref-search-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .ref-search-input {
+      flex: 1;
+      padding: 11px 14px;
+      font-size: 0.95rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 10px;
+      outline: none;
+      color: #1a1a2e;
+    }
+    .ref-search-input:focus { border-color: #4f46e5; }
+
+    /* ── Product card in search results ── */
+    .ref-product-block {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px 18px;
+      margin-bottom: 10px;
+    }
+    .ref-product-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 10px;
+    }
+    .ref-variant-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+      border-top: 1px solid #f1f5f9;
+      flex-wrap: wrap;
+    }
+    .ref-variant-info { flex: 1; min-width: 0; }
+    .ref-variant-name { font-size: 0.88rem; font-weight: 600; color: #374151; }
+    .ref-sku-chip {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 700;
+      background: #f1f5f9;
+      color: #475569;
+      border-radius: 6px;
+      padding: 2px 7px;
+      margin-top: 2px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    /* ── Thumbnail strip ── */
+    .ref-thumb-strip {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .ref-thumb-wrap {
+      position: relative;
+      width: 60px;
+      height: 60px;
+      border-radius: 8px;
+      overflow: visible;
+      flex-shrink: 0;
+    }
+    .ref-thumb {
+      width: 60px;
+      height: 60px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+      display: block;
+    }
+    .ref-thumb-del {
+      position: absolute;
+      top: -7px;
+      right: -7px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #dc2626;
+      color: #fff;
+      border: none;
+      font-size: 0.7rem;
+      font-weight: 800;
+      line-height: 20px;
+      text-align: center;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .ref-thumb-label {
+      font-size: 0.65rem;
+      color: #94a3b8;
+      text-align: center;
+      margin-top: 2px;
+      width: 60px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ── Add photo button ── */
+    .ref-add-btn {
+      width: 60px;
+      height: 60px;
+      border-radius: 8px;
+      border: 2px dashed #cbd5e1;
+      background: #f8fafc;
+      color: #94a3b8;
+      font-size: 1.4rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: border-color 0.2s, color 0.2s;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    .ref-add-btn:hover, .ref-add-btn:active { border-color: #4f46e5; color: #4f46e5; }
+
+    /* ── Existing refs section ── */
+    .ref-section-title {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin: 24px 0 12px;
+    }
+
+    /* ── Empty state ── */
+    .ref-empty {
+      text-align: center;
+      padding: 36px;
+      color: #94a3b8;
+      font-size: 0.9rem;
+      background: #f8fafc;
+      border-radius: 12px;
+      border: 1px dashed #e2e8f0;
+    }
+
+    /* ── Upload modal ── */
+    .ref-modal {
+      background: #fff;
+      border-radius: 18px;
+      padding: 28px 24px;
+      width: 360px;
+      max-width: 94vw;
+      box-shadow: 0 20px 60px rgba(0,0,0,.25);
+    }
+    .ref-modal-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 4px;
+    }
+    .ref-modal-sku {
+      font-size: 0.8rem;
+      color: #64748b;
+      margin-bottom: 16px;
+    }
+    .ref-preview-wrap {
+      width: 100%;
+      aspect-ratio: 1;
+      max-height: 240px;
+      border-radius: 10px;
+      overflow: hidden;
+      background: #f1f5f9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 14px;
+      border: 1px solid #e2e8f0;
+    }
+    .ref-preview-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .ref-preview-placeholder {
+      color: #cbd5e1;
+      font-size: 3rem;
+      text-align: center;
+    }
+    .ref-label-input {
+      width: 100%;
+      padding: 10px 12px;
+      font-size: 0.9rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 8px;
+      outline: none;
+      color: #1a1a2e;
+      box-sizing: border-box;
+      margin-bottom: 4px;
+    }
+    .ref-label-input:focus { border-color: #4f46e5; }
+    .ref-label-hint {
+      font-size: 0.75rem;
+      color: #94a3b8;
+      margin-bottom: 16px;
+    }
+    .ref-modal-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .ref-progress-msg {
+      font-size: 0.82rem;
+      color: #4f46e5;
+      text-align: center;
+      margin-top: 8px;
+      min-height: 1.2em;
+    }
+    .ref-error-msg {
+      font-size: 0.82rem;
+      color: #b91c1c;
+      text-align: center;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <header></header>
+
+  <main>
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Reference Images</h2>
+        <p class="page-subtitle">Upload label photos per SKU for AI-powered scan matching — aim for 3+ images per SKU</p>
+      </div>
+    </div>
+
+    <!-- Coverage stats -->
+    <div class="disc-summary" id="stats-row" style="display:none">
+      <div class="disc-stat-card">
+        <div class="disc-stat-value" id="stat-ready" style="color:#15803d">—</div>
+        <div class="disc-stat-label">Ready (3+ images)</div>
+      </div>
+      <div class="disc-stat-card">
+        <div class="disc-stat-value" id="stat-partial" style="color:#b45309">—</div>
+        <div class="disc-stat-label">Needs More (1–2)</div>
+      </div>
+      <div class="disc-stat-card">
+        <div class="disc-stat-value" id="stat-total">—</div>
+        <div class="disc-stat-label">Total Images</div>
+      </div>
+      <div class="disc-stat-card">
+        <div class="disc-stat-value" id="stat-skus">—</div>
+        <div class="disc-stat-label">SKUs Covered</div>
+      </div>
+    </div>
+
+    <!-- Search -->
+    <div class="disc-table-wrap">
+      <p style="font-size:0.85rem;font-weight:600;color:#374151;margin-bottom:10px">
+        Search for a product to add or manage reference images
+      </p>
+      <div class="ref-search-row">
+        <input class="ref-search-input" id="search-input"
+               type="search" placeholder="Product name or SKU…"
+               autocomplete="off" autocorrect="off" spellcheck="false" />
+        <button class="btn btn-primary" id="btn-search" onclick="searchProducts()" style="padding:11px 22px">
+          Search
+        </button>
+      </div>
+      <div id="search-results"></div>
+    </div>
+
+    <!-- Existing references -->
+    <div class="disc-table-wrap">
+      <p class="ref-section-title" id="existing-title">Existing Reference Images</p>
+      <div id="existing-refs">
+        <div class="pick-state">Loading…</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Upload modal -->
+  <div class="overlay" id="upload-overlay">
+    <div class="ref-modal">
+      <div class="ref-modal-title" id="modal-title">Add Reference Image</div>
+      <div class="ref-modal-sku" id="modal-sku"></div>
+
+      <!-- Preview -->
+      <div class="ref-preview-wrap">
+        <div class="ref-preview-placeholder" id="preview-placeholder">&#128444;</div>
+        <img class="ref-preview-img" id="preview-img" src="" alt="" style="display:none" />
+      </div>
+
+      <!-- File input (hidden, triggered by button) -->
+      <input type="file" id="file-input" accept="image/*" style="display:none" onchange="handleFileSelect(event)" />
+
+      <!-- Label -->
+      <input class="ref-label-input" id="label-input" type="text"
+             placeholder='Optional label, e.g. "front", "size tag"' maxlength="40" />
+      <div class="ref-label-hint">Helps identify the angle or detail in this photo</div>
+
+      <div class="ref-modal-actions">
+        <button class="btn btn-secondary" onclick="triggerFileInput()" style="flex:1">
+          📷 Choose Photo
+        </button>
+        <button class="btn btn-primary" id="btn-upload" onclick="submitUpload()" style="flex:1" disabled>
+          Upload
+        </button>
+      </div>
+      <div class="ref-modal-actions" style="margin-top:8px">
+        <button class="btn btn-secondary" onclick="closeModal()" style="flex:1;background:#f1f5f9;color:#374151">
+          Cancel
+        </button>
+      </div>
+
+      <div class="ref-progress-msg" id="modal-progress"></div>
+      <div class="ref-error-msg"    id="modal-error"></div>
+    </div>
+  </div>
+
+  <script src="label-reference.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>
