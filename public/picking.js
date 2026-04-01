@@ -95,35 +95,24 @@ function renderList(data) {
 
   document.getElementById('pick-progress').classList.add('visible');
 
-  // Attach tap listeners to every item
+  // Attach double-tap listener to every item
+  const clickTimers = {};
   document.querySelectorAll('.pick-item').forEach(el => {
-    el.addEventListener('touchend',  (e) => handleTap(e, el), { passive: true });
-    el.addEventListener('dblclick',  (e) => handleDblClick(e, el));
+    el.addEventListener('click', () => {
+      const id = el.dataset.id;
+      if (clickTimers[id]) {
+        // Second tap within window — confirm double-tap
+        clearTimeout(clickTimers[id]);
+        clickTimers[id] = null;
+        togglePicked(el, id);
+      } else {
+        // First tap — flash and wait for possible second
+        el.classList.add('tap-flash');
+        setTimeout(() => el.classList.remove('tap-flash'), 200);
+        clickTimers[id] = setTimeout(() => { clickTimers[id] = null; }, 400);
+      }
+    });
   });
-}
-
-// ── Tap / double-tap handling ──────────────────────────────────────
-function handleTap(e, el) {
-  const id  = el.dataset.id;
-  const now = Date.now();
-
-  if (lastTap[id] && (now - lastTap[id]) < 420) {
-    // Double-tap confirmed
-    lastTap[id] = 0;
-    togglePicked(el, id);
-    // Prevent ghost click
-    e.preventDefault && e.preventDefault();
-  } else {
-    lastTap[id] = now;
-    // Brief visual flash on first tap so user knows it registered
-    el.classList.add('tap-flash');
-    setTimeout(() => el.classList.remove('tap-flash'), 200);
-  }
-}
-
-function handleDblClick(e, el) {
-  const id = el.dataset.id;
-  togglePicked(el, id);
 }
 
 function togglePicked(el, id) {
