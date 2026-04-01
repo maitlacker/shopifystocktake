@@ -101,6 +101,23 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_shopify_daily_date
       ON shopify_daily(date DESC);
+
+    CREATE TABLE IF NOT EXISTS pmax_product_coverage (
+      id               SERIAL PRIMARY KEY,
+      snapshot_date    DATE NOT NULL,
+      campaign_id      TEXT NOT NULL,
+      campaign_name    TEXT NOT NULL,
+      products_serving INT NOT NULL DEFAULT 0,
+      shopify_active   INT,
+      synced_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(snapshot_date, campaign_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pmax_coverage_date
+      ON pmax_product_coverage(snapshot_date DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_pmax_coverage_campaign
+      ON pmax_product_coverage(campaign_id, snapshot_date DESC);
   `);
 }
 
