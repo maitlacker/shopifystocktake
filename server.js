@@ -438,7 +438,16 @@ app.get('/api/google-ads/daily', async (req, res) => {
   }
 });
 
-// Run PMAX coverage sync standalone (without triggering full ads sync)
+// Run PMAX coverage sync standalone — GET so it's easy to trigger from browser
+app.get('/api/google-ads/pmax-sync', async (req, res) => {
+  try {
+    const result = await googleAds.syncPmaxCoverage();
+    res.json(result);
+  } catch (err) {
+    console.error('[pmax] Manual sync error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 app.post('/api/google-ads/pmax-sync', async (req, res) => {
   try {
     const result = await googleAds.syncPmaxCoverage();
@@ -449,10 +458,31 @@ app.post('/api/google-ads/pmax-sync', async (req, res) => {
   }
 });
 
-// Debug endpoint — runs both GAQL queries and returns raw results, no DB writes
+// Debug endpoint — GAQL queries + DB state check
 app.get('/api/google-ads/pmax-debug', async (req, res) => {
   try {
     const result = await googleAds.debugPmaxQuery();
+
+    // Check what's actually in the DB
+    const { rows: dbRows } = await pool.query(`
+      SELECT
+        COUNT(*)                  AS total_rows,
+        COUNT(DISTINCT campaign_id) AS campaigns,
+        MIN(snapshot_date)        AS earliest,
+        MAX(snapshot_date)        AS latest
+      FROM pmax_product_coverage
+    `);
+    result.database = dbRows[0];
+
+    // Show last 10 DB rows
+    const { rows: recent } = await pool.query(`
+      SELECT snapshot_date, campaign_name, products_serving, shopify_active
+      FROM pmax_product_coverage
+      ORDER BY snapshot_date DESC, campaign_name ASC
+      LIMIT 10
+    `);
+    result.databaseRecentRows = recent;
+
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
