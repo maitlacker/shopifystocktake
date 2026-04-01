@@ -585,7 +585,7 @@ app.get('/api/picking/orders', async (req, res) => {
 
     const orders = [...orderNumbersSeen].sort((a, b) => a - b);
     const items  = Object.values(aggregated)
-      .sort((a, b) => (a.sku || a.title).localeCompare(b.sku || b.title));
+      .sort((a, b) => Math.min(...a.orders) - Math.min(...b.orders));
 
     res.json({ orders, orderCount: orders.length, items });
   } catch (err) {
