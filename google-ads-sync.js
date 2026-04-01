@@ -177,6 +177,7 @@ async function syncPmaxCoverage() {
   weekAgo.setDate(weekAgo.getDate() - 7);
   const weekAgoStr = toDateStr(weekAgo);
 
+  // Query shopping_performance_view for products with impressions in PMAX campaigns
   const gaql = `
     SELECT
       campaign.id,
@@ -188,17 +189,56 @@ async function syncPmaxCoverage() {
       AND segments.date BETWEEN '${weekAgoStr}' AND '${today}'
   `;
 
+  console.log(`[pmax] Querying shopping_performance_view for ${weekAgoStr} → ${today}`);
   const results = await queryAds(gaql);
+  console.log(`[pmax] Raw API rows returned: ${results.length}`);
+
+  if (results.length > 0) {
+    // Log a sample row so we can inspect the field structure
+    console.log('[pmax] Sample row:', JSON.stringify(results[0]));
+  }
 
   // Count distinct product_item_id per campaign
   const campaignMap = {};
+  let skippedNoProduct = 0;
   for (const row of results) {
     const id            = String(row.campaign?.id || '');
     const name          = row.campaign?.name || '';
     const productItemId = row.segments?.productItemId || '';
-    if (!id || !productItemId) continue;
+    if (!id || !productItemId) { skippedNoProduct++; continue; }
     if (!campaignMap[id]) campaignMap[id] = { name, products: new Set() };
     campaignMap[id].products.add(productItemId);
+  }
+
+  console.log(`[pmax] Campaigns with products: ${Object.keys(campaignMap).length}, rows skipped (no productItemId): ${skippedNoProduct}`);
+
+  // If shopping_performance_view returned nothing, fall back to asset_group_listing_group_filter
+  // which shows products ELIGIBLE to serve (in the product feed), not just those with impressions
+  if (Object.keys(campaignMap).length === 0) {
+    console.log('[pmax] shopping_performance_view returned no product data — trying asset_group_listing_group_filter');
+    const gaql2 = `
+      SELECT
+        campaign.id,
+        campaign.name,
+        asset_group_listing_group_filter.product_item_id
+      FROM asset_group_listing_group_filter
+      WHERE campaign.advertising_channel_type = 'PERFORMANCE_MAX'
+        AND asset_group_listing_group_filter.type = 'UNIT_INCLUDED'
+    `;
+    const results2 = await queryAds(gaql2);
+    console.log(`[pmax] asset_group_listing_group_filter rows: ${results2.length}`);
+    if (results2.length > 0) {
+      console.log('[pmax] Sample row (fallback):', JSON.stringify(results2[0]));
+    }
+    for (const row of results2) {
+      const id            = String(row.campaign?.id || '');
+      const name          = row.campaign?.name || '';
+      const productItemId = row.assetGroupListingGroupFilter?.productItemId || '';
+      if (!id || !productItemId) continue;
+      if (!campaignMap[id]) campaignMap[id] = { name, products: new Set() };
+      campaignMap[id].products.add(productItemId);
+    }
+    console.log(`[pmax] After fallback — campaigns with products: ${Object.keys(campaignMap).length}`);
   }
 
   // Fetch Shopify active product count
@@ -234,7 +274,54 @@ async function syncPmaxCoverage() {
   }
 
   console.log(`[pmax] ${upserted} campaigns snapshotted, shopify_active=${shopifyActive}`);
-  return { campaigns: upserted, shopifyActive };
+  return { campaigns: upserted, shopifyActive, rawRows: results.length, skippedNoProduct };
+}
+
+// Runs the debug GAQL queries and returns raw results for inspection (no DB writes)
+async function debugPmaxQuery() {
+  const today    = toDateStr(new Date());
+  const weekAgo  = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
+  const weekAgoStr = toDateStr(weekAgo);
+
+  const out = { dateRange: { from: weekAgoStr, to: today } };
+
+  // Query 1: shopping_performance_view
+  try {
+    const results1 = await queryAds(`
+      SELECT campaign.id, campaign.name, segments.product_item_id
+      FROM shopping_performance_view
+      WHERE campaign.advertising_channel_type = 'PERFORMANCE_MAX'
+        AND metrics.impressions > 0
+        AND segments.date BETWEEN '${weekAgoStr}' AND '${today}'
+    `);
+    out.shoppingPerformanceView = {
+      rowCount: results1.length,
+      sample: results1.slice(0, 3),
+      withProductId: results1.filter(r => r.segments?.productItemId).length,
+    };
+  } catch (err) {
+    out.shoppingPerformanceView = { error: err.message };
+  }
+
+  // Query 2: asset_group_listing_group_filter
+  try {
+    const results2 = await queryAds(`
+      SELECT campaign.id, campaign.name, asset_group_listing_group_filter.product_item_id
+      FROM asset_group_listing_group_filter
+      WHERE campaign.advertising_channel_type = 'PERFORMANCE_MAX'
+        AND asset_group_listing_group_filter.type = 'UNIT_INCLUDED'
+    `);
+    out.assetGroupListingGroupFilter = {
+      rowCount: results2.length,
+      sample: results2.slice(0, 3),
+      withProductId: results2.filter(r => r.assetGroupListingGroupFilter?.productItemId).length,
+    };
+  } catch (err) {
+    out.assetGroupListingGroupFilter = { error: err.message };
+  }
+
+  return out;
 }
 
 async function runSync(days = 7) {
@@ -286,4 +373,4 @@ function startCron() {
   console.log(`[google-ads] Daily sync cron scheduled: ${DAILY_CRON}`);
 }
 
-module.exports = { runSync, getStatus, startCron, getSetting, setSetting, getRefreshToken };
+module.exports = { runSync, syncPmaxCoverage, debugPmaxQuery, getStatus, startCron, getSetting, setSetting, getRefreshToken };

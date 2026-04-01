@@ -438,6 +438,27 @@ app.get('/api/google-ads/daily', async (req, res) => {
   }
 });
 
+// Run PMAX coverage sync standalone (without triggering full ads sync)
+app.post('/api/google-ads/pmax-sync', async (req, res) => {
+  try {
+    const result = await googleAds.syncPmaxCoverage();
+    res.json(result);
+  } catch (err) {
+    console.error('[pmax] Manual sync error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Debug endpoint — runs both GAQL queries and returns raw results, no DB writes
+app.get('/api/google-ads/pmax-debug', async (req, res) => {
+  try {
+    const result = await googleAds.debugPmaxQuery();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/google-ads/pmax-coverage', async (req, res) => {
   try {
     const days = Math.min(parseInt(req.query.days) || 30, 365);
