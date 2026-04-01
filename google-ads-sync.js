@@ -171,6 +171,72 @@ async function syncDateRange(startDate, endDate) {
   return { rows: results.length, upserted };
 }
 
+async function syncPmaxCoverage() {
+  const today    = toDateStr(new Date());
+  const weekAgo  = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
+  const weekAgoStr = toDateStr(weekAgo);
+
+  const gaql = `
+    SELECT
+      campaign.id,
+      campaign.name,
+      segments.product_item_id
+    FROM shopping_performance_view
+    WHERE campaign.advertising_channel_type = 'PERFORMANCE_MAX'
+      AND metrics.impressions > 0
+      AND segments.date BETWEEN '${weekAgoStr}' AND '${today}'
+  `;
+
+  const results = await queryAds(gaql);
+
+  // Count distinct product_item_id per campaign
+  const campaignMap = {};
+  for (const row of results) {
+    const id            = String(row.campaign?.id || '');
+    const name          = row.campaign?.name || '';
+    const productItemId = row.segments?.productItemId || '';
+    if (!id || !productItemId) continue;
+    if (!campaignMap[id]) campaignMap[id] = { name, products: new Set() };
+    campaignMap[id].products.add(productItemId);
+  }
+
+  // Fetch Shopify active product count
+  let shopifyActive = null;
+  try {
+    const shopifyRes = await fetch(
+      `https://${process.env.SHOPIFY_SHOP}/admin/api/2024-01/products/count.json?status=active`,
+      { headers: { 'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN } }
+    );
+    if (shopifyRes.ok) {
+      const data = await shopifyRes.json();
+      shopifyActive = data.count ?? null;
+    }
+  } catch (err) {
+    console.warn('[pmax] Could not fetch Shopify product count:', err.message);
+  }
+
+  // Upsert today's snapshot per campaign
+  let upserted = 0;
+  for (const [campaignId, { name, products }] of Object.entries(campaignMap)) {
+    await pool.query(
+      `INSERT INTO pmax_product_coverage
+         (snapshot_date, campaign_id, campaign_name, products_serving, shopify_active)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (snapshot_date, campaign_id) DO UPDATE SET
+         campaign_name    = EXCLUDED.campaign_name,
+         products_serving = EXCLUDED.products_serving,
+         shopify_active   = EXCLUDED.shopify_active,
+         synced_at        = NOW()`,
+      [today, campaignId, name, products.size, shopifyActive]
+    );
+    upserted++;
+  }
+
+  console.log(`[pmax] ${upserted} campaigns snapshotted, shopify_active=${shopifyActive}`);
+  return { campaigns: upserted, shopifyActive };
+}
+
 async function runSync(days = 7) {
   if (isRunning) return { skipped: true, reason: 'already running' };
   if (!await isConfigured()) throw new Error('Google Ads not configured');
@@ -185,7 +251,13 @@ async function runSync(days = 7) {
     start.setDate(start.getDate() - days);
 
     const result = await syncDateRange(toDateStr(start), toDateStr(end));
-    lastRunResult = { ...result, days };
+
+    const pmaxResult = await syncPmaxCoverage().catch((err) => {
+      console.warn('[google-ads] PMAX coverage sync failed:', err.message);
+      return null;
+    });
+
+    lastRunResult = { ...result, days, pmaxCoverage: pmaxResult };
     lastRun       = started;
     console.log(`[google-ads] Done — ${result.upserted} rows upserted`);
     return lastRunResult;

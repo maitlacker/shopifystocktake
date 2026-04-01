@@ -101,11 +101,19 @@ async function load() {
   `).join('');
 }
 
-// View tabs (Overview / Sheet Export)
-const overviewEls     = ['summary-row','not-connected','no-data','campaigns-wrap','daily-wrap'];
+// View tabs (Overview / Sheet Export / PMAX Monitor)
+const overviewEls      = ['summary-row','not-connected','no-data','campaigns-wrap','daily-wrap'];
 const sheetExportPanel = document.getElementById('sheet-export-panel');
-const periodTabs      = document.getElementById('period-tabs');
+const pmaxPanel        = document.getElementById('pmax-monitor-panel');
+const periodTabs       = document.getElementById('period-tabs');
 let currentView = 'overview';
+
+function hideAllPanels() {
+  overviewEls.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+  sheetExportPanel.style.display = 'none';
+  pmaxPanel.style.display        = 'none';
+  periodTabs.style.display       = 'none';
+}
 
 document.querySelectorAll('#view-tabs .disc-tab').forEach(tab => {
   tab.addEventListener('click', () => {
@@ -114,12 +122,16 @@ document.querySelectorAll('#view-tabs .disc-tab').forEach(tab => {
     currentView = tab.dataset.view;
     if (currentView === 'overview') {
       sheetExportPanel.style.display = 'none';
+      pmaxPanel.style.display        = 'none';
       periodTabs.style.display       = '';
       load();
-    } else {
-      overviewEls.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+    } else if (currentView === 'sheet-export') {
+      hideAllPanels();
       sheetExportPanel.style.display = 'block';
-      periodTabs.style.display       = 'none';
+    } else if (currentView === 'pmax-monitor') {
+      hideAllPanels();
+      pmaxPanel.style.display = 'block';
+      loadPmax(currentPmaxDays);
     }
   });
 });
@@ -235,6 +247,111 @@ document.getElementById('btn-copy-values').addEventListener('click', () => copyT
   document.getElementById('sheet-end').value   = end.toISOString().split('T')[0];
   document.getElementById('sheet-start').value = start.toISOString().split('T')[0];
 })();
+
+// ── PMAX Monitor ───────────────────────────────────────────────────
+let currentPmaxDays = 14;
+
+function coveragePct(serving, active) {
+  if (!active || !serving) return null;
+  return Math.round((serving / active) * 100);
+}
+
+function coverageColor(pct) {
+  if (pct == null) return '#64748b';
+  if (pct >= 70)  return '#15803d';
+  if (pct >= 40)  return '#b45309';
+  return '#dc2626';
+}
+
+async function loadPmax(days) {
+  const noDataEl = document.getElementById('pmax-no-data');
+  const cardsEl  = document.getElementById('pmax-cards');
+
+  try {
+    const res  = await fetch(`/api/google-ads/pmax-coverage?days=${days}`);
+    const rows = await res.json();
+
+    if (!rows.length) {
+      noDataEl.style.display = 'block';
+      cardsEl.style.display  = 'none';
+      return;
+    }
+
+    noDataEl.style.display = 'none';
+    cardsEl.style.display  = 'block';
+
+    // Build per-campaign latest snapshot map
+    const latestByCampaign = {};
+    const allByCampaign    = {};
+    for (const row of rows) {
+      if (!latestByCampaign[row.campaignId]) {
+        latestByCampaign[row.campaignId] = row; // rows are DESC, so first = latest
+      }
+      if (!allByCampaign[row.campaignId]) allByCampaign[row.campaignId] = [];
+      allByCampaign[row.campaignId].push(row);
+    }
+
+    // Render campaign cards
+    document.getElementById('pmax-cards-grid').innerHTML = Object.values(latestByCampaign).map(row => {
+      const pct   = coveragePct(row.productsServing, row.shopifyActive);
+      const color = coverageColor(pct);
+      const pctTxt = pct != null ? `${pct}%` : 'N/A';
+      const history = allByCampaign[row.campaignId];
+      const prev    = history[1];
+      let changeTxt = '';
+      if (prev) {
+        const diff = row.productsServing - prev.productsServing;
+        changeTxt = diff > 0
+          ? `<span style="color:#15803d;font-size:0.78rem">+${diff} vs prev</span>`
+          : diff < 0
+          ? `<span style="color:#dc2626;font-size:0.78rem">${diff} vs prev</span>`
+          : `<span style="color:#64748b;font-size:0.78rem">no change</span>`;
+      }
+      return `
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px">
+          <div style="font-size:0.8rem;color:#64748b;margin-bottom:4px">${row.campaignName}</div>
+          <div style="font-size:2rem;font-weight:700;color:${color}">${fmt(row.productsServing)}</div>
+          <div style="font-size:0.78rem;color:#64748b">products serving</div>
+          <div style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-size:0.85rem;font-weight:600;color:${color}">${pctTxt} coverage</span>
+            ${changeTxt}
+          </div>
+          ${row.shopifyActive ? `<div style="font-size:0.75rem;color:#94a3b8;margin-top:4px">of ${fmt(row.shopifyActive)} active Shopify products</div>` : ''}
+          <div style="font-size:0.72rem;color:#cbd5e1;margin-top:6px">snapshot: ${new Date(row.snapshotDate).toLocaleDateString('en-AU')}</div>
+        </div>
+      `;
+    }).join('');
+
+    // Render history table
+    document.getElementById('pmax-history-tbody').innerHTML = rows.map(row => {
+      const pct   = coveragePct(row.productsServing, row.shopifyActive);
+      const color = coverageColor(pct);
+      return `
+        <tr>
+          <td>${new Date(row.snapshotDate + 'T00:00:00Z').toLocaleDateString('en-AU')}</td>
+          <td style="font-weight:500">${row.campaignName}</td>
+          <td style="text-align:right;font-weight:600">${fmt(row.productsServing)}</td>
+          <td style="text-align:right;color:#64748b">${row.shopifyActive != null ? fmt(row.shopifyActive) : '—'}</td>
+          <td style="text-align:right;font-weight:600;color:${color}">${pct != null ? pct + '%' : '—'}</td>
+        </tr>
+      `;
+    }).join('');
+
+  } catch (err) {
+    noDataEl.style.display  = 'block';
+    noDataEl.textContent    = `Error: ${err.message}`;
+    cardsEl.style.display   = 'none';
+  }
+}
+
+document.querySelectorAll('#pmax-period-tabs .disc-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('#pmax-period-tabs .disc-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    currentPmaxDays = parseInt(tab.dataset.pmaxDays);
+    loadPmax(currentPmaxDays);
+  });
+});
 
 load().catch(err => {
   document.getElementById('no-data').style.display = 'block';

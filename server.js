@@ -438,6 +438,27 @@ app.get('/api/google-ads/daily', async (req, res) => {
   }
 });
 
+app.get('/api/google-ads/pmax-coverage', async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days) || 30, 365);
+    const { rows } = await pool.query(`
+      SELECT
+        snapshot_date    AS "snapshotDate",
+        campaign_id      AS "campaignId",
+        campaign_name    AS "campaignName",
+        products_serving AS "productsServing",
+        shopify_active   AS "shopifyActive",
+        synced_at        AS "syncedAt"
+      FROM pmax_product_coverage
+      WHERE snapshot_date >= CURRENT_DATE - ($1::int)
+      ORDER BY snapshot_date DESC, campaign_name ASC
+    `, [days]);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Login page ─────────────────────────────────────────────────────
 app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
