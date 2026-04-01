@@ -510,6 +510,90 @@ app.get('/api/google-ads/pmax-coverage', async (req, res) => {
   }
 });
 
+// ── Order Picking ─────────────────────────────────────────────────
+app.get('/api/picking/orders', async (req, res) => {
+  const start = parseInt(req.query.start);
+  const end   = parseInt(req.query.end);
+
+  if (!start || !end || isNaN(start) || isNaN(end) || start > end) {
+    return res.status(400).json({ error: 'Valid start and end order numbers required' });
+  }
+  if (end - start > 500) {
+    return res.status(400).json({ error: 'Range too large — max 500 orders at once' });
+  }
+
+  try {
+    // Build variant→image map from products cache
+    const variantImageMap = {};
+    for (const p of productsCache) {
+      const productImg = p.images?.[0]?.src || null;
+      for (const v of p.variants) {
+        const variantImg = p.images?.find(img => img.id === v.image_id)?.src || productImg;
+        variantImageMap[String(v.id)] = variantImg;
+      }
+    }
+
+    // Fetch orders from Shopify (newest first), stop once order_number < start
+    const aggregated = {}; // key: variantId|sku -> item
+    const orderNumbersSeen = new Set();
+    let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json` +
+      `?status=any&limit=250&fields=id,name,order_number,line_items`;
+    let done = false;
+
+    while (url && !done) {
+      const r = await fetch(url, { headers: shopifyHeaders() });
+      if (!r.ok) {
+        const body = await r.text();
+        throw new Error(`Shopify API error ${r.status}: ${body.slice(0, 200)}`);
+      }
+      const data = await r.json();
+
+      for (const order of data.orders) {
+        if (order.order_number < start) { done = true; break; }
+        if (order.order_number > end) continue;
+
+        orderNumbersSeen.add(order.order_number);
+
+        for (const item of (order.line_items || [])) {
+          const key = item.variant_id ? `v${item.variant_id}` : `s${item.sku || item.title}`;
+          if (!aggregated[key]) {
+            aggregated[key] = {
+              variantId:    item.variant_id,
+              productId:    item.product_id,
+              title:        item.title,
+              variantTitle: (item.variant_title && item.variant_title !== 'Default Title') ? item.variant_title : null,
+              sku:          item.sku || '',
+              qty:          0,
+              image:        variantImageMap[String(item.variant_id)] || null,
+              orders:       [],
+            };
+          }
+          aggregated[key].qty += item.quantity;
+          aggregated[key].orders.push(order.order_number);
+        }
+      }
+
+      if (!done) {
+        const link = r.headers.get('link');
+        url = null;
+        if (link) {
+          const m = link.match(/<([^>]+)>;\s*rel="next"/);
+          if (m) url = m[1];
+        }
+      }
+    }
+
+    const orders = [...orderNumbersSeen].sort((a, b) => a - b);
+    const items  = Object.values(aggregated)
+      .sort((a, b) => (a.sku || a.title).localeCompare(b.sku || b.title));
+
+    res.json({ orders, orderCount: orders.length, items });
+  } catch (err) {
+    console.error('[picking] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Login page ─────────────────────────────────────────────────────
 app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
