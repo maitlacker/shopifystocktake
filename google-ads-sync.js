@@ -177,15 +177,16 @@ async function syncPmaxCoverage() {
   weekAgo.setDate(weekAgo.getDate() - 7);
   const weekAgoStr = toDateStr(weekAgo);
 
-  // Query shopping_performance_view for products with impressions in PMAX campaigns
+  // Query shopping_performance_view — no channel type filter in WHERE (not supported),
+  // select advertising_channel_type and filter PMAX in code instead
   const gaql = `
     SELECT
       campaign.id,
       campaign.name,
+      campaign.advertising_channel_type,
       segments.product_item_id
     FROM shopping_performance_view
-    WHERE campaign.advertising_channel_type = 'PERFORMANCE_MAX'
-      AND metrics.impressions > 0
+    WHERE metrics.impressions > 0
       AND segments.date BETWEEN '${weekAgoStr}' AND '${today}'
   `;
 
@@ -194,14 +195,14 @@ async function syncPmaxCoverage() {
   console.log(`[pmax] Raw API rows returned: ${results.length}`);
 
   if (results.length > 0) {
-    // Log a sample row so we can inspect the field structure
     console.log('[pmax] Sample row:', JSON.stringify(results[0]));
   }
 
-  // Count distinct product_item_id per campaign
+  // Count distinct product_item_id per PMAX campaign
   const campaignMap = {};
   let skippedNoProduct = 0;
   for (const row of results) {
+    if (row.campaign?.advertisingChannelType !== 'PERFORMANCE_MAX') continue;
     const id            = String(row.campaign?.id || '');
     const name          = row.campaign?.name || '';
     const productItemId = row.segments?.productItemId || '';
@@ -210,20 +211,20 @@ async function syncPmaxCoverage() {
     campaignMap[id].products.add(productItemId);
   }
 
-  console.log(`[pmax] Campaigns with products: ${Object.keys(campaignMap).length}, rows skipped (no productItemId): ${skippedNoProduct}`);
+  console.log(`[pmax] PMAX campaigns with products: ${Object.keys(campaignMap).length}, rows skipped (no productItemId): ${skippedNoProduct}`);
 
-  // If shopping_performance_view returned nothing, fall back to asset_group_listing_group_filter
-  // which shows products ELIGIBLE to serve (in the product feed), not just those with impressions
+  // Fallback: asset_group_listing_group_filter shows products ELIGIBLE in each PMAX asset group
   if (Object.keys(campaignMap).length === 0) {
-    console.log('[pmax] shopping_performance_view returned no product data — trying asset_group_listing_group_filter');
+    console.log('[pmax] No product data from shopping_performance_view — trying asset_group_listing_group_filter');
     const gaql2 = `
       SELECT
         campaign.id,
         campaign.name,
-        asset_group_listing_group_filter.product_item_id
+        campaign.advertising_channel_type,
+        asset_group_listing_group_filter.type,
+        asset_group_listing_group_filter.case_value.product_item_id.value
       FROM asset_group_listing_group_filter
-      WHERE campaign.advertising_channel_type = 'PERFORMANCE_MAX'
-        AND asset_group_listing_group_filter.type = 'UNIT_INCLUDED'
+      WHERE asset_group_listing_group_filter.type = 'UNIT_INCLUDED'
     `;
     const results2 = await queryAds(gaql2);
     console.log(`[pmax] asset_group_listing_group_filter rows: ${results2.length}`);
@@ -231,14 +232,15 @@ async function syncPmaxCoverage() {
       console.log('[pmax] Sample row (fallback):', JSON.stringify(results2[0]));
     }
     for (const row of results2) {
+      if (row.campaign?.advertisingChannelType !== 'PERFORMANCE_MAX') continue;
       const id            = String(row.campaign?.id || '');
       const name          = row.campaign?.name || '';
-      const productItemId = row.assetGroupListingGroupFilter?.productItemId || '';
+      const productItemId = row.assetGroupListingGroupFilter?.caseValue?.productItemId?.value || '';
       if (!id || !productItemId) continue;
       if (!campaignMap[id]) campaignMap[id] = { name, products: new Set() };
       campaignMap[id].products.add(productItemId);
     }
-    console.log(`[pmax] After fallback — campaigns with products: ${Object.keys(campaignMap).length}`);
+    console.log(`[pmax] After fallback — PMAX campaigns with products: ${Object.keys(campaignMap).length}`);
   }
 
   // Fetch Shopify active product count
@@ -286,17 +288,23 @@ async function debugPmaxQuery() {
 
   const out = { dateRange: { from: weekAgoStr, to: today } };
 
-  // Query 1: shopping_performance_view
+  // Query 1: shopping_performance_view — all campaigns with impressions, filter PMAX in code
   try {
     const results1 = await queryAds(`
-      SELECT campaign.id, campaign.name, segments.product_item_id
+      SELECT
+        campaign.id,
+        campaign.name,
+        campaign.advertising_channel_type,
+        segments.product_item_id
       FROM shopping_performance_view
-      WHERE campaign.advertising_channel_type = 'PERFORMANCE_MAX'
-        AND metrics.impressions > 0
+      WHERE metrics.impressions > 0
         AND segments.date BETWEEN '${weekAgoStr}' AND '${today}'
     `);
+    const pmaxRows = results1.filter(r => r.campaign?.advertisingChannelType === 'PERFORMANCE_MAX');
     out.shoppingPerformanceView = {
       rowCount: results1.length,
+      pmaxRowCount: pmaxRows.length,
+      channelTypes: [...new Set(results1.map(r => r.campaign?.advertisingChannelType))],
       sample: results1.slice(0, 3),
       withProductId: results1.filter(r => r.segments?.productItemId).length,
     };
@@ -304,18 +312,24 @@ async function debugPmaxQuery() {
     out.shoppingPerformanceView = { error: err.message };
   }
 
-  // Query 2: asset_group_listing_group_filter
+  // Query 2: asset_group_listing_group_filter — correct field path for product item ID
   try {
     const results2 = await queryAds(`
-      SELECT campaign.id, campaign.name, asset_group_listing_group_filter.product_item_id
+      SELECT
+        campaign.id,
+        campaign.name,
+        campaign.advertising_channel_type,
+        asset_group_listing_group_filter.type,
+        asset_group_listing_group_filter.case_value.product_item_id.value
       FROM asset_group_listing_group_filter
-      WHERE campaign.advertising_channel_type = 'PERFORMANCE_MAX'
-        AND asset_group_listing_group_filter.type = 'UNIT_INCLUDED'
+      WHERE asset_group_listing_group_filter.type = 'UNIT_INCLUDED'
     `);
+    const pmaxRows2 = results2.filter(r => r.campaign?.advertisingChannelType === 'PERFORMANCE_MAX');
     out.assetGroupListingGroupFilter = {
       rowCount: results2.length,
+      pmaxRowCount: pmaxRows2.length,
       sample: results2.slice(0, 3),
-      withProductId: results2.filter(r => r.assetGroupListingGroupFilter?.productItemId).length,
+      withProductId: results2.filter(r => r.assetGroupListingGroupFilter?.caseValue?.productItemId?.value).length,
     };
   } catch (err) {
     out.assetGroupListingGroupFilter = { error: err.message };
