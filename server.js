@@ -540,7 +540,7 @@ app.get('/api/picking/orders', async (req, res) => {
     }
 
     // Fetch orders from Shopify (newest first), stop once order_number < start
-    const aggregated = {}; // key: variantId|sku -> item
+    const items = [];
     const orderNumbersSeen = new Set();
     let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json` +
       `?status=any&limit=250&fields=id,name,order_number,line_items`;
@@ -561,21 +561,16 @@ app.get('/api/picking/orders', async (req, res) => {
         orderNumbersSeen.add(order.order_number);
 
         for (const item of (order.line_items || [])) {
-          const key = item.variant_id ? `v${item.variant_id}` : `s${item.sku || item.title}`;
-          if (!aggregated[key]) {
-            aggregated[key] = {
-              variantId:    item.variant_id,
-              productId:    item.product_id,
-              title:        item.title,
-              variantTitle: (item.variant_title && item.variant_title !== 'Default Title') ? item.variant_title : null,
-              sku:          item.sku || '',
-              qty:          0,
-              image:        variantImageMap[String(item.variant_id)] || null,
-              orders:       [],
-            };
-          }
-          aggregated[key].qty += item.quantity;
-          aggregated[key].orders.push(order.order_number);
+          items.push({
+            orderNumber:  order.order_number,
+            variantId:    item.variant_id,
+            productId:    item.product_id,
+            title:        item.title,
+            variantTitle: (item.variant_title && item.variant_title !== 'Default Title') ? item.variant_title : null,
+            sku:          item.sku || '',
+            qty:          item.quantity,
+            image:        variantImageMap[String(item.variant_id)] || null,
+          });
         }
       }
 
@@ -589,9 +584,8 @@ app.get('/api/picking/orders', async (req, res) => {
       }
     }
 
+    items.sort((a, b) => a.orderNumber - b.orderNumber);
     const orders = [...orderNumbersSeen].sort((a, b) => a - b);
-    const items  = Object.values(aggregated)
-      .sort((a, b) => Math.min(...a.orders) - Math.min(...b.orders));
 
     res.json({ orders, orderCount: orders.length, items });
   } catch (err) {

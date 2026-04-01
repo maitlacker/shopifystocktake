@@ -58,8 +58,8 @@ function renderList(data) {
     ? `Order #${data.orders[0]}`
     : `Orders #${data.orders[0]}–#${data.orders[data.orders.length - 1]} · ${data.orderCount} order${data.orderCount !== 1 ? 's' : ''}`;
 
-  const itemsHtml = data.items.map(item => {
-    const id      = String(item.variantId || item.sku || item.title);
+  const itemsHtml = data.items.map((item, idx) => {
+    const id      = `item-${idx}`;
     const isMulti = item.qty > 1;
     const thumb   = shopifyThumb(item.image, 160);
 
@@ -71,21 +71,19 @@ function renderList(data) {
       ? `<div class="pick-variant">${escHtml(item.variantTitle)}</div>`
       : '';
 
-    const ordersHtml = item.orders && item.orders.length > 1
-      ? `<div class="pick-orders-row">across ${item.orders.length} orders</div>`
-      : '';
-
     return `
-      <div class="pick-item" data-id="${escHtml(id)}" id="pick-${escHtml(id)}">
+      <div class="pick-item" data-id="${id}" id="pick-${id}">
         <div class="pick-tick"><span class="pick-tick-icon">&#10003;</span></div>
         ${imgHtml}
         <div class="pick-details">
           <div class="pick-sku">${escHtml(item.sku || '—')}</div>
           <div class="pick-title">${escHtml(item.title)}</div>
           ${variantHtml}
-          ${ordersHtml}
         </div>
-        <div class="pick-qty${isMulti ? ' multi' : ''}">${item.qty}</div>
+        <div class="pick-right">
+          <div class="pick-order-num">#${item.orderNumber}</div>
+          <div class="pick-qty${isMulti ? ' multi' : ''}">${item.qty}</div>
+        </div>
       </div>
     `;
   }).join('');
