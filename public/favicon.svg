@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Background -->
+  <rect width="32" height="32" rx="6" fill="#1a1a2e"/>
+  <!-- Warehouse roof / chevron -->
+  <polygon points="4,14 16,6 28,14" fill="#4f46e5"/>
+  <!-- Building body -->
+  <rect x="6" y="14" width="20" height="13" rx="1" fill="#4f46e5" opacity="0.85"/>
+  <!-- Door -->
+  <rect x="12" y="19" width="8" height="8" rx="1" fill="#1a1a2e" opacity="0.7"/>
+</svg>
