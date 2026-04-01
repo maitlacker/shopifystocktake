@@ -278,7 +278,11 @@
       </div>
       <div class="pick-field">
         <label class="pick-label" for="end-order">End Order #</label>
-        <input class="pick-input" id="end-order" type="number" inputmode="numeric" placeholder="1010" min="1" />
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="pick-input" id="end-order" type="number" inputmode="numeric" placeholder="1010" min="1" />
+          <button type="button" class="btn btn-secondary" onclick="addToEnd(50)"  style="padding:12px 14px;font-size:0.9rem;font-weight:700">+50</button>
+          <button type="button" class="btn btn-secondary" onclick="addToEnd(100)" style="padding:12px 14px;font-size:0.9rem;font-weight:700">+100</button>
+        </div>
       </div>
       <button type="submit" class="btn btn-primary" id="btn-load" onclick="loadOrders()" style="padding:12px 28px;font-size:1rem">
         Load

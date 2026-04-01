@@ -150,6 +150,13 @@ function resetAll() {
   updateProgress();
 }
 
+// ── +50 / +100 shortcuts ──────────────────────────────────────────
+function addToEnd(n) {
+  const start = parseInt(document.getElementById('start-order').value);
+  if (!start || isNaN(start)) { alert('Enter a start order number first.'); return; }
+  document.getElementById('end-order').value = start + n;
+}
+
 // ── Cancel ────────────────────────────────────────────────────────
 function cancelPick() {
   document.getElementById('start-order').value = '';
