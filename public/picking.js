@@ -163,6 +163,19 @@ function resetAll() {
   updateProgress();
 }
 
+// ── Cancel ────────────────────────────────────────────────────────
+function cancelPick() {
+  document.getElementById('start-order').value = '';
+  document.getElementById('end-order').value   = '';
+  document.getElementById('pick-result').innerHTML = '';
+  document.getElementById('pick-progress').classList.remove('visible');
+  document.getElementById('complete-msg').classList.remove('visible');
+  pickState    = {};
+  lastTap      = {};
+  currentItems = [];
+  document.getElementById('start-order').focus();
+}
+
 // ── Submit on Enter ────────────────────────────────────────────────
 document.getElementById('start-order').addEventListener('keydown', e => { if (e.key === 'Enter') loadOrders(); });
 document.getElementById('end-order').addEventListener('keydown',   e => { if (e.key === 'Enter') loadOrders(); });
