@@ -310,21 +310,33 @@ async function submitUpload() {
 
     document.getElementById('modal-progress').textContent = '✓ Uploaded!';
 
-    // Refresh the refMap count for this SKU
-    if (refMap[pendingMeta.sku]) {
-      refMap[pendingMeta.sku].count++;
+    // Refresh full summary from server so counts are accurate
+    const sumRes  = await fetch('/api/label/references');
+    const sumData = await sumRes.json();
+    if (sumRes.ok) {
+      refSummary = sumData;
+      refMap = {};
+      for (const row of refSummary) refMap[row.sku] = row;
     } else {
-      refMap[pendingMeta.sku] = { ...pendingMeta, count: 1 };
-      refSummary.push(refMap[pendingMeta.sku]);
+      // Fallback: increment locally
+      if (refMap[pendingMeta.sku]) {
+        refMap[pendingMeta.sku].count++;
+      } else {
+        refMap[pendingMeta.sku] = { ...pendingMeta, count: 1 };
+        refSummary.push(refMap[pendingMeta.sku]);
+      }
     }
 
-    // Re-render the thumb strip in place
-    const strip = document.getElementById(`thumbs-${CSS.escape(pendingMeta.sku)}`);
-    if (strip) await expandSku(pendingMeta.sku);
-
-    // Update badge text on the variant row
-    updateBadge(pendingMeta.sku, refMap[pendingMeta.sku].count);
     renderStats();
+
+    // Rebuild the existing-refs section with correct counts, then expand this SKU
+    const uploadedSku = pendingMeta.sku;
+    renderExisting();
+    // Re-wire listeners (renderExisting does this but we also expand immediately)
+    await expandSku(uploadedSku);
+
+    // Also update badge in search results if that section has this SKU
+    updateBadge(uploadedSku, refMap[uploadedSku]?.count || 0);
 
     setTimeout(() => closeModal(), 800);
   } catch (err) {

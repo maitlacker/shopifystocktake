@@ -909,6 +909,16 @@ app.get('/api/products/search', async (req, res) => {
 
   if (!query) return res.json([]);
 
+  // Auto-populate cache after deploys (resets on every server restart)
+  if (!productsCache.length) {
+    try {
+      productsCache = await fetchAllProducts();
+      lastFetched   = new Date();
+    } catch (err) {
+      return res.status(500).json({ error: 'Could not load products: ' + err.message });
+    }
+  }
+
   const history = await readHistory();
 
   const results = productsCache.filter((product) => {
