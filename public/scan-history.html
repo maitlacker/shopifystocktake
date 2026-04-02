@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scan History – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    /* ── Summary cards ── */
+    .sh-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .sh-stat {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+    .sh-stat-val {
+      font-size: 1.8rem;
+      font-weight: 800;
+      color: #1a1a2e;
+      line-height: 1;
+    }
+    .sh-stat-lbl {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-top: 5px;
+    }
+
+    /* ── Filters ── */
+    .sh-filters {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+      align-items: center;
+    }
+    .sh-filters select,
+    .sh-filters input {
+      padding: 9px 12px;
+      font-size: 0.9rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 9px;
+      color: #1a1a2e;
+      outline: none;
+    }
+    .sh-filters select:focus,
+    .sh-filters input:focus { border-color: #4f46e5; }
+
+    /* ── Table ── */
+    .sh-table-wrap {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      overflow: hidden;
+    }
+    .sh-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.87rem;
+    }
+    .sh-table thead tr { background: #f8fafc; }
+    .sh-table th {
+      padding: 11px 14px;
+      text-align: left;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid #e2e8f0;
+      white-space: nowrap;
+    }
+    .sh-table td {
+      padding: 11px 14px;
+      border-bottom: 1px solid #f1f5f9;
+      color: #1a1a2e;
+      vertical-align: middle;
+    }
+    .sh-table tr:last-child td { border-bottom: none; }
+    .sh-table tr:hover td { background: #f8fafc; }
+
+    /* Method badge */
+    .method-badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      border-radius: 20px;
+      padding: 2px 8px;
+      white-space: nowrap;
+    }
+    .mb-text    { background: #dbeafe; color: #1d4ed8; }
+    .mb-visual  { background: #ede9fe; color: #6d28d9; }
+    .mb-no      { background: #fee2e2; color: #b91c1c; }
+    .mb-partial { background: #fef3c7; color: #b45309; }
+
+    /* Confidence pill */
+    .conf-pill {
+      display: inline-block;
+      font-size: 0.78rem;
+      font-weight: 700;
+      border-radius: 20px;
+      padding: 2px 9px;
+    }
+    .conf-high   { background: #dcfce7; color: #15803d; }
+    .conf-mid    { background: #fef3c7; color: #b45309; }
+    .conf-low    { background: #fee2e2; color: #b91c1c; }
+    .conf-none   { background: #f1f5f9; color: #64748b; }
+
+    /* Confirmed tick */
+    .conf-tick { color: #22c55e; font-size: 1rem; }
+
+    .sh-empty {
+      text-align: center;
+      padding: 48px 24px;
+      color: #94a3b8;
+      font-size: 0.92rem;
+    }
+
+    .sh-loading { text-align: center; padding: 32px; color: #64748b; }
+  </style>
+</head>
+<body>
+  <header></header>
+
+  <main class="container" style="padding-top: 24px; padding-bottom: 48px;">
+
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h1 style="font-size:1.4rem; margin:0;">Scan History</h1>
+        <p style="color:#64748b; font-size:0.88rem; margin:4px 0 0;">All label scans by your team</p>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <select id="daysSelect" style="padding:9px 12px; font-size:0.9rem; border:2px solid #e2e8f0; border-radius:9px; color:#1a1a2e;">
+          <option value="7">Last 7 days</option>
+          <option value="14">Last 14 days</option>
+          <option value="30" selected>Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Summary stats -->
+    <div class="sh-stats" id="statsRow">
+      <div class="sh-stat"><div class="sh-stat-val" id="statTotal">–</div><div class="sh-stat-lbl">Total Scans</div></div>
+      <div class="sh-stat"><div class="sh-stat-val" id="statMatched">–</div><div class="sh-stat-lbl">Matched</div></div>
+      <div class="sh-stat"><div class="sh-stat-val" id="statConfirmed">–</div><div class="sh-stat-lbl">Confirmed</div></div>
+      <div class="sh-stat"><div class="sh-stat-val" id="statNoMatch">–</div><div class="sh-stat-lbl">No Match</div></div>
+    </div>
+
+    <!-- Filters -->
+    <div class="sh-filters">
+      <input type="text" id="searchInput" placeholder="Search SKU or product…" style="flex:1; min-width:160px;" />
+      <select id="methodFilter">
+        <option value="">All methods</option>
+        <option value="text">Text</option>
+        <option value="visual">Visual</option>
+        <option value="no_match">No match</option>
+      </select>
+    </div>
+
+    <!-- Table -->
+    <div class="sh-table-wrap">
+      <div class="sh-loading" id="loadingMsg">Loading…</div>
+      <table class="sh-table" id="scanTable" style="display:none;">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Staff</th>
+            <th>SKU</th>
+            <th>Product</th>
+            <th>Confidence</th>
+            <th>Method</th>
+            <th>✓</th>
+          </tr>
+        </thead>
+        <tbody id="scanTbody"></tbody>
+      </table>
+      <div class="sh-empty" id="emptyMsg" style="display:none;">No scans found for this period.</div>
+    </div>
+
+  </main>
+
+  <script src="scan-history.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

@@ -157,6 +157,27 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_ref_images_sku
       ON sku_reference_images(sku);
+
+    CREATE TABLE IF NOT EXISTS scan_log (
+      id             SERIAL PRIMARY KEY,
+      user_email     TEXT NOT NULL,
+      user_name      TEXT NOT NULL,
+      sku            TEXT,
+      product_title  TEXT,
+      variant_title  TEXT,
+      confidence     DECIMAL(4,2),
+      method         TEXT,
+      reasoning      TEXT,
+      confirmed      BOOLEAN NOT NULL DEFAULT FALSE,
+      confirmed_sku  TEXT,
+      scanned_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_scan_log_user
+      ON scan_log(user_email, scanned_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_scan_log_date
+      ON scan_log(scanned_at DESC);
   `);
 }
 

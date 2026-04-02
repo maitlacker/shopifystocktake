@@ -10,6 +10,7 @@ const { configureAuth, requireAuth } = require('./auth');
 const { startCron, runStockCheck, getStatus: getAlertStatus } = require('./alerts');
 const googleAds        = require('./google-ads-sync');
 const shopifyAnalytics = require('./shopify-analytics');
+const labelMatcher     = require('./label-matcher');
 
 const app = express();
 
@@ -593,6 +594,96 @@ app.delete('/api/label/references/:id', async (req, res) => {
     );
     if (rowCount === 0) return res.status(404).json({ error: 'Not found' });
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── AI Label Matching (Phase 4) ────────────────────────────────────
+
+// Match a label photo against known products
+app.post('/api/label/match', async (req, res) => {
+  const { imageData } = req.body;
+  if (!imageData) return res.status(400).json({ error: 'imageData is required' });
+  if (!imageData.startsWith('data:image/'))
+    return res.status(400).json({ error: 'imageData must be a valid image data URL' });
+  if (imageData.length > 600_000)
+    return res.status(400).json({ error: 'Image too large — compress before sending (max ~450KB)' });
+
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return res.status(503).json({ error: 'ANTHROPIC_API_KEY not configured on this server' });
+  }
+
+  try {
+    const result = await labelMatcher.matchLabel(imageData);
+    res.json(result);
+  } catch (err) {
+    console.error('[label-match] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Scan Log (Phase 6) ────────────────────────────────────────────
+
+// Save a scan result to the log
+app.post('/api/scan/log', async (req, res) => {
+  const {
+    sku, productTitle, variantTitle, confidence,
+    method, reasoning, confirmed, confirmedSku,
+  } = req.body;
+
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO scan_log
+         (user_email, user_name, sku, product_title, variant_title,
+          confidence, method, reasoning, confirmed, confirmed_sku)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING id`,
+      [
+        req.user.email,
+        req.user.displayName || req.user.email,
+        sku        || null,
+        productTitle || null,
+        variantTitle || null,
+        confidence != null ? Number(confidence).toFixed(2) : null,
+        method     || null,
+        reasoning  || null,
+        confirmed  ? true : false,
+        confirmedSku || null,
+      ]
+    );
+    res.json({ ok: true, id: rows[0].id });
+  } catch (err) {
+    console.error('[scan-log] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Scan history — last 200 scans
+app.get('/api/scan/history', async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days) || 30, 365);
+    const { rows } = await pool.query(
+      `SELECT
+         id,
+         user_name      AS "userName",
+         user_email     AS "userEmail",
+         sku,
+         product_title  AS "productTitle",
+         variant_title  AS "variantTitle",
+         confidence,
+         method,
+         reasoning,
+         confirmed,
+         confirmed_sku  AS "confirmedSku",
+         scanned_at     AS "scannedAt"
+       FROM scan_log
+       WHERE scanned_at >= CURRENT_DATE - ($1::int)
+       ORDER BY scanned_at DESC
+       LIMIT 200`,
+      [days]
+    );
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
