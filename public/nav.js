@@ -36,6 +36,12 @@
         { label: 'Manage Syncs', href: '/syncing.html' },
       ],
     },
+    {
+      label: 'Marketing',
+      children: [
+        { label: 'Coupon Export', href: '/coupon-export.html' },
+      ],
+    },
   ];
 
   function isGroupActive(children) {

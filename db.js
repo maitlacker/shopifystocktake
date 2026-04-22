@@ -178,6 +178,29 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_scan_log_date
       ON scan_log(scanned_at DESC);
+
+    CREATE TABLE IF NOT EXISTS coupon_imports (
+      id              SERIAL PRIMARY KEY,
+      code            TEXT NOT NULL,
+      price_rule_id   BIGINT,
+      usage_count     INT DEFAULT 0,
+      discount_type   TEXT,
+      discount_value  DECIMAL(10,2),
+      expires_at      TIMESTAMPTZ,
+      expiry_month    TEXT NOT NULL,
+      order_id        BIGINT,
+      order_name      TEXT,
+      customer_name   TEXT,
+      customer_email  TEXT,
+      imported_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(code, expiry_month)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_coupon_imports_month
+      ON coupon_imports(expiry_month, imported_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_coupon_imports_order
+      ON coupon_imports(order_id);
   `);
 }
 

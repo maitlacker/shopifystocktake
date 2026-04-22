@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Coupon Export – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    /* ── Stat cards ── */
+    .ce-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .ce-stat {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+    .ce-stat-val {
+      font-size: 1.8rem;
+      font-weight: 800;
+      color: #1a1a2e;
+      line-height: 1;
+    }
+    .ce-stat-lbl {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-top: 5px;
+    }
+
+    /* ── Controls row ── */
+    .ce-controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    .ce-controls input[type="month"] {
+      padding: 9px 12px;
+      font-size: 0.9rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 9px;
+      color: #1a1a2e;
+      outline: none;
+      touch-action: manipulation;
+    }
+    .ce-controls input[type="month"]:focus { border-color: #4f46e5; }
+
+    /* ── Table ── */
+    .ce-table-wrap {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      overflow: hidden;
+      overflow-x: auto;
+    }
+    .ce-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.87rem;
+      min-width: 700px;
+    }
+    .ce-table thead tr { background: #f8fafc; }
+    .ce-table th {
+      padding: 11px 14px;
+      text-align: left;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid #e2e8f0;
+      white-space: nowrap;
+    }
+    .ce-table td {
+      padding: 11px 14px;
+      border-bottom: 1px solid #f1f5f9;
+      color: #1a1a2e;
+      vertical-align: middle;
+    }
+    .ce-table tr:last-child td { border-bottom: none; }
+    .ce-table tr:hover td      { background: #f8fafc; }
+
+    /* ── Matched badge ── */
+    .match-badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      border-radius: 20px;
+      padding: 2px 9px;
+      white-space: nowrap;
+    }
+    .match-yes { background: #dcfce7; color: #15803d; }
+    .match-no  { background: #fee2e2; color: #b91c1c; }
+
+    .ce-empty, .ce-loading {
+      text-align: center;
+      padding: 48px 24px;
+      color: #94a3b8;
+      font-size: 0.92rem;
+    }
+
+    #statusMsg {
+      font-size: 0.88rem;
+      color: #475569;
+      min-height: 1.4em;
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+    #statusMsg.is-error { color: #b91c1c; }
+  </style>
+</head>
+<body>
+  <header></header>
+
+  <main class="container" style="padding-top: 24px; padding-bottom: 48px;">
+
+    <!-- Page header -->
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h1 style="font-size:1.4rem; margin:0;">Coupon Export</h1>
+        <p style="color:#64748b; font-size:0.88rem; margin:4px 0 0;">
+          360REFUND# codes — import from Shopify, match orders, export for Klaviyo
+        </p>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="ce-controls">
+      <input type="month" id="monthInput" title="Select expiry month" />
+      <button id="btnSync" class="btn btn-primary">Import from Shopify</button>
+      <button id="btnMatchOrders" class="btn btn-secondary">Match Orders</button>
+      <button id="btnExport" class="btn btn-secondary">Download CSV</button>
+    </div>
+
+    <!-- Status message -->
+    <div id="statusMsg"></div>
+
+    <!-- Stat cards -->
+    <div class="ce-stats">
+      <div class="ce-stat">
+        <div class="ce-stat-val" id="statTotal">–</div>
+        <div class="ce-stat-lbl">Total Codes</div>
+      </div>
+      <div class="ce-stat">
+        <div class="ce-stat-val" id="statMatched">–</div>
+        <div class="ce-stat-lbl">Matched</div>
+      </div>
+      <div class="ce-stat">
+        <div class="ce-stat-val" id="statUnmatched">–</div>
+        <div class="ce-stat-lbl">Unmatched</div>
+      </div>
+      <div class="ce-stat">
+        <div class="ce-stat-val" id="statUnused">–</div>
+        <div class="ce-stat-lbl">Unused</div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="ce-table-wrap">
+      <div class="ce-loading" id="loadingMsg" style="display:none;">Loading…</div>
+      <div class="ce-empty"   id="emptyMsg"   style="display:none;">
+        No coupons imported for this month yet.<br>
+        Pick a month and click <strong>Import from Shopify</strong>.
+      </div>
+      <table class="ce-table" id="couponTable" style="display:none;">
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Uses</th>
+            <th>Expiry</th>
+            <th>Discount</th>
+            <th>Order</th>
+            <th>Customer</th>
+            <th>Email</th>
+            <th>Matched</th>
+          </tr>
+        </thead>
+        <tbody id="couponTbody"></tbody>
+      </table>
+    </div>
+
+  </main>
+
+  <script src="coupon-export.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

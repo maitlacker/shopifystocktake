@@ -1246,6 +1246,279 @@ app.get('/api/velocity', async (req, res) => {
   }
 });
 
+// ── Coupon Export ──────────────────────────────────────────────────
+
+// POST /api/coupons/sync
+// Fetch 360REFUND# discount codes from Shopify, filter by expiry month + unused, store in DB
+app.post('/api/coupons/sync', async (req, res) => {
+  const { expiryMonth } = req.body;
+  if (!expiryMonth || !/^\d{4}-\d{2}$/.test(expiryMonth)) {
+    return res.status(400).json({ error: 'expiryMonth must be YYYY-MM' });
+  }
+
+  try {
+    // 1. Paginate discount_codes/search for prefix "360REFUND#"
+    //    The search endpoint matches codes that START WITH the query string.
+    //    Encode "#" as %23 so it isn't treated as a URL fragment.
+    const allCodes = [];
+    let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/discount_codes/search.json`
+            + `?code=360REFUND%23&limit=250`;
+
+    while (url) {
+      const r = await fetch(url, { headers: shopifyHeaders() });
+      if (!r.ok) {
+        const body = await r.text();
+        throw new Error(`Shopify discount_codes error ${r.status}: ${body.slice(0, 200)}`);
+      }
+      const data = await r.json();
+      allCodes.push(...(data.discount_codes || []));
+
+      const link = r.headers.get('link');
+      url = null;
+      if (link) {
+        const m = link.match(/<([^>]+)>;\s*rel="next"/);
+        if (m) url = m[1];
+      }
+    }
+
+    // 2. Filter: only unused codes
+    const unusedCodes = allCodes.filter((c) => c.usage_count === 0);
+
+    // 3. Collect unique price_rule_ids
+    const priceRuleIds = [...new Set(unusedCodes.map((c) => c.price_rule_id))];
+    console.log(`[coupons/sync] ${allCodes.length} total, ${unusedCodes.length} unused, ${priceRuleIds.length} unique price rules`);
+
+    // 4. Fetch each price rule for expiry date + discount amount
+    const priceRuleMap = {};
+    for (const prId of priceRuleIds) {
+      try {
+        const r = await fetch(
+          `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/price_rules/${prId}.json`,
+          { headers: shopifyHeaders() }
+        );
+        if (!r.ok) {
+          console.warn(`[coupons/sync] price_rule ${prId} fetch failed (${r.status})`);
+          continue;
+        }
+        const data = await r.json();
+        const pr   = data.price_rule;
+        priceRuleMap[String(prId)] = {
+          value:      pr.value,
+          value_type: pr.value_type,
+          ends_at:    pr.ends_at,
+          status:     pr.status,
+        };
+      } catch (err) {
+        console.warn(`[coupons/sync] price_rule ${prId} error:`, err.message);
+      }
+      // Small delay to respect rate limits
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    // 5. Filter by: active status AND ends_at in the selected month (UTC)
+    const [year, month] = expiryMonth.split('-').map(Number);
+    const filtered = unusedCodes.filter((c) => {
+      const pr = priceRuleMap[String(c.price_rule_id)];
+      if (!pr) return false;
+      if (pr.status !== 'active') return false;
+      if (!pr.ends_at) return false;
+      const expiryDate = new Date(pr.ends_at);
+      return (
+        expiryDate.getUTCFullYear() === year &&
+        (expiryDate.getUTCMonth() + 1) === month
+      );
+    });
+
+    // 6. Upsert each filtered code — ON CONFLICT preserves existing order match data
+    let inserted = 0;
+    let updated  = 0;
+    for (const c of filtered) {
+      const pr = priceRuleMap[String(c.price_rule_id)];
+      const discountValue = pr.value ? Math.abs(parseFloat(pr.value)) : null;
+
+      const result = await pool.query(`
+        INSERT INTO coupon_imports
+          (code, price_rule_id, usage_count, discount_type, discount_value, expires_at, expiry_month)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (code, expiry_month)
+        DO UPDATE SET
+          usage_count    = EXCLUDED.usage_count,
+          discount_type  = EXCLUDED.discount_type,
+          discount_value = EXCLUDED.discount_value,
+          expires_at     = EXCLUDED.expires_at,
+          imported_at    = NOW()
+        RETURNING (xmax = 0) AS was_inserted
+      `, [c.code, c.price_rule_id, c.usage_count, pr.value_type, discountValue, pr.ends_at, expiryMonth]);
+
+      if (result.rows[0]?.was_inserted) inserted++;
+      else updated++;
+    }
+
+    res.json({ ok: true, totalFetched: allCodes.length, unusedFiltered: unusedCodes.length, monthFiltered: filtered.length, inserted, updated });
+  } catch (err) {
+    console.error('[coupons/sync] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/coupons/list?month=YYYY-MM
+app.get('/api/coupons/list', async (req, res) => {
+  const { month } = req.query;
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ error: 'month must be YYYY-MM' });
+  }
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        id,
+        code,
+        usage_count    AS "usageCount",
+        discount_type  AS "discountType",
+        discount_value AS "discountValue",
+        expires_at     AS "expiresAt",
+        order_id       AS "orderId",
+        order_name     AS "orderName",
+        customer_name  AS "customerName",
+        customer_email AS "customerEmail",
+        imported_at    AS "importedAt"
+      FROM coupon_imports
+      WHERE expiry_month = $1
+      ORDER BY code ASC
+    `, [month]);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/coupons/match-orders
+// For unmatched coupons: extract order ID from code, fetch customer from Shopify
+app.post('/api/coupons/match-orders', async (req, res) => {
+  const { expiryMonth } = req.body;
+  if (!expiryMonth || !/^\d{4}-\d{2}$/.test(expiryMonth)) {
+    return res.status(400).json({ error: 'expiryMonth must be YYYY-MM' });
+  }
+  try {
+    const { rows: unmatched } = await pool.query(`
+      SELECT id, code FROM coupon_imports
+      WHERE expiry_month = $1 AND order_id IS NULL
+    `, [expiryMonth]);
+
+    let matched = 0, noOrderId = 0, notFound = 0, errors = 0;
+
+    for (const row of unmatched) {
+      // Code format: "360REFUND#XXXXXXYYY..."
+      //   chars 0–9  = "360REFUND#"  (10 chars, skip)
+      //   chars 10–15 = 6-digit order ID
+      if (row.code.length < 16) { noOrderId++; continue; }
+      const orderId = parseInt(row.code.substring(10, 16), 10);
+      if (isNaN(orderId) || orderId <= 0) { noOrderId++; continue; }
+
+      try {
+        // Try direct order ID lookup first
+        let order = null;
+        const r = await fetch(
+          `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders/${orderId}.json?fields=id,name,email,customer`,
+          { headers: shopifyHeaders() }
+        );
+
+        if (r.status === 404) {
+          // Fallback: search by order number (customer-facing #XXXX)
+          const sr = await fetch(
+            `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json?name=%23${orderId}&status=any&fields=id,name,email,customer&limit=1`,
+            { headers: shopifyHeaders() }
+          );
+          if (sr.ok) {
+            const sd = await sr.json();
+            order = sd.orders?.[0] || null;
+          }
+        } else if (r.ok) {
+          const d = await r.json();
+          order = d.order || null;
+        }
+
+        if (!order) { notFound++; continue; }
+
+        const customerName = order.customer
+          ? `${order.customer.first_name || ''} ${order.customer.last_name || ''}`.trim()
+          : null;
+
+        await pool.query(`
+          UPDATE coupon_imports
+          SET order_id = $1, order_name = $2, customer_name = $3, customer_email = $4
+          WHERE id = $5
+        `, [order.id, order.name, customerName, order.email, row.id]);
+
+        matched++;
+      } catch (fetchErr) {
+        console.warn(`[coupons/match] row ${row.id} error:`, fetchErr.message);
+        errors++;
+      }
+
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    res.json({ ok: true, processed: unmatched.length, matched, noOrderId, notFound, errors });
+  } catch (err) {
+    console.error('[coupons/match-orders] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/coupons/export?month=YYYY-MM  — CSV file download
+app.get('/api/coupons/export', async (req, res) => {
+  const { month } = req.query;
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ error: 'month must be YYYY-MM' });
+  }
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        code,
+        usage_count    AS "usageCount",
+        discount_type  AS "discountType",
+        discount_value AS "discountValue",
+        expires_at     AS "expiresAt",
+        order_name     AS "orderName",
+        customer_name  AS "customerName",
+        customer_email AS "customerEmail"
+      FROM coupon_imports
+      WHERE expiry_month = $1
+      ORDER BY code ASC
+    `, [month]);
+
+    function csvCell(val) {
+      if (val == null) return '';
+      const s = String(val);
+      if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }
+
+    const headers = ['Code', 'Uses', 'Expiry Date', 'Discount Type', 'Discount Value', 'Order', 'Customer Name', 'Email'];
+    const lines = [
+      headers.join(','),
+      ...rows.map((r) => [
+        csvCell(r.code),
+        csvCell(r.usageCount),
+        csvCell(r.expiresAt ? new Date(r.expiresAt).toISOString().split('T')[0] : ''),
+        csvCell(r.discountType),
+        csvCell(r.discountValue),
+        csvCell(r.orderName),
+        csvCell(r.customerName),
+        csvCell(r.customerEmail),
+      ].join(',')),
+    ];
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="coupons-${month}.csv"`);
+    res.send(lines.join('\r\n'));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
