@@ -106,7 +106,8 @@ btnSync.addEventListener('click', async () => {
     setStatus(
       `Done. ${data.monthFiltered} code${data.monthFiltered !== 1 ? 's' : ''} stored ` +
       `(${data.inserted} new, ${data.updated} updated). ` +
-      `Fetched ${data.totalFetched} total from Shopify, ${data.unusedFiltered} unused.`
+      `Checked ${data.priceRulesChecked} price rule${data.priceRulesChecked !== 1 ? 's' : ''}, ` +
+      `${data.totalFetched} total codes scanned.`
     );
     await loadMonth();
   } catch (err) {

@@ -1250,6 +1250,8 @@ app.get('/api/velocity', async (req, res) => {
 
 // POST /api/coupons/sync
 // Fetch 360REFUND# discount codes from Shopify, filter by expiry month + unused, store in DB
+// Strategy: get price_rules expiring in the target month, then fetch their discount codes.
+// The discount_codes/search.json endpoint does not exist in Shopify REST API.
 app.post('/api/coupons/sync', async (req, res) => {
   const { expiryMonth } = req.body;
   if (!expiryMonth || !/^\d{4}-\d{2}$/.test(expiryMonth)) {
@@ -1257,85 +1259,91 @@ app.post('/api/coupons/sync', async (req, res) => {
   }
 
   try {
-    // 1. Paginate discount_codes/search for prefix "360REFUND#"
-    //    The search endpoint matches codes that START WITH the query string.
-    //    Encode "#" as %23 so it isn't treated as a URL fragment.
-    const allCodes = [];
-    let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/discount_codes/search.json`
-            + `?code=360REFUND%23&limit=250`;
+    const [year, month] = expiryMonth.split('-').map(Number);
 
-    while (url) {
-      const r = await fetch(url, { headers: shopifyHeaders() });
+    // Use a slightly wider window (+/- 2 days) to catch AEST/AEDT timezone edge cases.
+    // Exact UTC month filtering is done in code below.
+    const windowStart = new Date(Date.UTC(year, month - 1, 1)).toISOString();
+    const windowEnd   = new Date(Date.UTC(year, month, 2, 23, 59, 59)).toISOString(); // 2 days into next month
+
+    // 1. Paginate price_rules filtered by ends_at window
+    const allPriceRules = [];
+    let prUrl = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/price_rules.json`
+              + `?limit=250&ends_at_min=${encodeURIComponent(windowStart)}&ends_at_max=${encodeURIComponent(windowEnd)}`;
+
+    while (prUrl) {
+      const r = await fetch(prUrl, { headers: shopifyHeaders() });
       if (!r.ok) {
         const body = await r.text();
-        throw new Error(`Shopify discount_codes error ${r.status}: ${body.slice(0, 200)}`);
+        throw new Error(`Shopify price_rules error ${r.status}: ${body.slice(0, 200)}`);
       }
       const data = await r.json();
-      allCodes.push(...(data.discount_codes || []));
+      allPriceRules.push(...(data.price_rules || []));
 
       const link = r.headers.get('link');
-      url = null;
+      prUrl = null;
       if (link) {
         const m = link.match(/<([^>]+)>;\s*rel="next"/);
-        if (m) url = m[1];
+        if (m) prUrl = m[1];
       }
     }
 
-    // 2. Filter: only unused codes
-    const unusedCodes = allCodes.filter((c) => c.usage_count === 0);
+    console.log(`[coupons/sync] ${allPriceRules.length} price rules expiring in/around ${expiryMonth}`);
 
-    // 3. Collect unique price_rule_ids
-    const priceRuleIds = [...new Set(unusedCodes.map((c) => c.price_rule_id))];
-    console.log(`[coupons/sync] ${allCodes.length} total, ${unusedCodes.length} unused, ${priceRuleIds.length} unique price rules`);
+    // 2. For each price rule, fetch its discount codes and filter by 360REFUND# prefix + unused
+    let totalFetched = 0;
+    const filteredCodes = [];
 
-    // 4. Fetch each price rule for expiry date + discount amount
-    const priceRuleMap = {};
-    for (const prId of priceRuleIds) {
-      try {
-        const r = await fetch(
-          `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/price_rules/${prId}.json`,
-          { headers: shopifyHeaders() }
-        );
-        if (!r.ok) {
-          console.warn(`[coupons/sync] price_rule ${prId} fetch failed (${r.status})`);
-          continue;
-        }
-        const data = await r.json();
-        const pr   = data.price_rule;
-        priceRuleMap[String(prId)] = {
-          value:      pr.value,
-          value_type: pr.value_type,
-          ends_at:    pr.ends_at,
-          status:     pr.status,
-        };
-      } catch (err) {
-        console.warn(`[coupons/sync] price_rule ${prId} error:`, err.message);
-      }
-      // Small delay to respect rate limits
-      await new Promise((r) => setTimeout(r, 100));
-    }
-
-    // 5. Filter by: active status AND ends_at in the selected month (UTC)
-    const [year, month] = expiryMonth.split('-').map(Number);
-    const filtered = unusedCodes.filter((c) => {
-      const pr = priceRuleMap[String(c.price_rule_id)];
-      if (!pr) return false;
-      if (pr.status !== 'active') return false;
-      if (!pr.ends_at) return false;
+    for (const pr of allPriceRules) {
+      // Only process active price rules whose ends_at is in the selected UTC month
+      if (pr.status !== 'active') continue;
+      if (!pr.ends_at) continue;
       const expiryDate = new Date(pr.ends_at);
-      return (
-        expiryDate.getUTCFullYear() === year &&
-        (expiryDate.getUTCMonth() + 1) === month
-      );
-    });
+      if (expiryDate.getUTCFullYear() !== year || (expiryDate.getUTCMonth() + 1) !== month) continue;
 
-    // 6. Upsert each filtered code — ON CONFLICT preserves existing order match data
-    let inserted = 0;
-    let updated  = 0;
-    for (const c of filtered) {
-      const pr = priceRuleMap[String(c.price_rule_id)];
       const discountValue = pr.value ? Math.abs(parseFloat(pr.value)) : null;
 
+      let codeUrl = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/price_rules/${pr.id}/discount_codes.json?limit=250`;
+      while (codeUrl) {
+        const r = await fetch(codeUrl, { headers: shopifyHeaders() });
+        if (!r.ok) {
+          console.warn(`[coupons/sync] codes for price_rule ${pr.id} failed (${r.status})`);
+          break;
+        }
+        const data = await r.json();
+        const codes = data.discount_codes || [];
+        totalFetched += codes.length;
+
+        for (const c of codes) {
+          if (c.code && c.code.startsWith('360REFUND#') && c.usage_count === 0) {
+            filteredCodes.push({
+              code:           c.code,
+              price_rule_id:  pr.id,
+              usage_count:    c.usage_count,
+              discount_type:  pr.value_type,
+              discount_value: discountValue,
+              ends_at:        pr.ends_at,
+            });
+          }
+        }
+
+        const link = r.headers.get('link');
+        codeUrl = null;
+        if (link) {
+          const m = link.match(/<([^>]+)>;\s*rel="next"/);
+          if (m) codeUrl = m[1];
+        }
+      }
+
+      await new Promise((r) => setTimeout(r, 100)); // respect rate limits
+    }
+
+    console.log(`[coupons/sync] ${totalFetched} codes checked, ${filteredCodes.length} matching 360REFUND# + unused`);
+
+    // 3. Upsert each filtered code — ON CONFLICT preserves existing order match data
+    let inserted = 0;
+    let updated  = 0;
+    for (const c of filteredCodes) {
       const result = await pool.query(`
         INSERT INTO coupon_imports
           (code, price_rule_id, usage_count, discount_type, discount_value, expires_at, expiry_month)
@@ -1348,13 +1356,20 @@ app.post('/api/coupons/sync', async (req, res) => {
           expires_at     = EXCLUDED.expires_at,
           imported_at    = NOW()
         RETURNING (xmax = 0) AS was_inserted
-      `, [c.code, c.price_rule_id, c.usage_count, pr.value_type, discountValue, pr.ends_at, expiryMonth]);
+      `, [c.code, c.price_rule_id, c.usage_count, c.discount_type, c.discount_value, c.ends_at, expiryMonth]);
 
       if (result.rows[0]?.was_inserted) inserted++;
       else updated++;
     }
 
-    res.json({ ok: true, totalFetched: allCodes.length, unusedFiltered: unusedCodes.length, monthFiltered: filtered.length, inserted, updated });
+    res.json({
+      ok: true,
+      priceRulesChecked: allPriceRules.length,
+      totalFetched,
+      monthFiltered: filteredCodes.length,
+      inserted,
+      updated,
+    });
   } catch (err) {
     console.error('[coupons/sync] Error:', err.message);
     res.status(500).json({ error: err.message });
