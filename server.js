@@ -1295,8 +1295,9 @@ app.post('/api/coupons/sync', async (req, res) => {
     const filteredCodes = [];
 
     for (const pr of allPriceRules) {
-      // Only process active price rules whose ends_at is in the selected UTC month
-      if (pr.status !== 'active') continue;
+      // Filter: ends_at must be in the selected UTC month.
+      // Note: we do NOT filter on pr.status — Shopify auto-marks past-expiry rules as 'expired'
+      // so restricting to 'active' would silently exclude every code for a past month.
       if (!pr.ends_at) continue;
       const expiryDate = new Date(pr.ends_at);
       if (expiryDate.getUTCFullYear() !== year || (expiryDate.getUTCMonth() + 1) !== month) continue;

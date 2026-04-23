@@ -25,14 +25,14 @@ const statUnused      = document.getElementById('statUnused');
 }());
 
 // ── Load coupons for selected month ───────────────────────────────
-async function loadMonth() {
+async function loadMonth(clearStatus) {
   const month = monthInput.value;
   if (!month) return;
 
   loadingMsg.style.display  = 'block';
   couponTable.style.display = 'none';
   emptyMsg.style.display    = 'none';
-  setStatus('');
+  if (clearStatus) setStatus('');
 
   try {
     const r = await fetch(`/api/coupons/list?month=${encodeURIComponent(month)}`);
@@ -40,7 +40,8 @@ async function loadMonth() {
     allCoupons = await r.json();
     render();
   } catch (err) {
-    loadingMsg.textContent = 'Error loading coupons: ' + err.message;
+    loadingMsg.style.display = 'none';
+    setStatus('Error loading coupons: ' + err.message, true);
   }
 }
 
@@ -103,13 +104,16 @@ btnSync.addEventListener('click', async () => {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Unknown error');
 
+    const hint = data.monthFiltered === 0
+      ? ' ⚠️ No matching codes found — check you have the right expiry month selected.'
+      : '';
     setStatus(
       `Done. ${data.monthFiltered} code${data.monthFiltered !== 1 ? 's' : ''} stored ` +
       `(${data.inserted} new, ${data.updated} updated). ` +
       `Checked ${data.priceRulesChecked} price rule${data.priceRulesChecked !== 1 ? 's' : ''}, ` +
-      `${data.totalFetched} total codes scanned.`
+      `${data.totalFetched} total codes scanned.${hint}`
     );
-    await loadMonth();
+    await loadMonth(); // don't pass clearStatus — keep the message above
   } catch (err) {
     setStatus('Error: ' + err.message, true);
   } finally {
@@ -159,7 +163,7 @@ btnExport.addEventListener('click', () => {
 });
 
 // ── Reload when month changes ─────────────────────────────────────
-monthInput.addEventListener('change', loadMonth);
+monthInput.addEventListener('change', () => loadMonth(true));
 
 // ── Helpers ───────────────────────────────────────────────────────
 function escHtml(s) {
