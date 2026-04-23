@@ -1608,6 +1608,58 @@ app.get('/api/coupons/export', async (req, res) => {
 
 // ── Margin Tagger ──────────────────────────────────────────────────
 
+// GET /api/margin/debug?variantId=xxx  — trace why a variant has no cost
+app.get('/api/margin/debug', requireAuth, async (req, res) => {
+  const variantId = String(req.query.variantId || '').trim();
+  if (!variantId) return res.status(400).json({ error: 'variantId query param required' });
+
+  try {
+    // 1. What do we have stored in the DB?
+    const { rows: dbRows } = await pool.query(
+      'SELECT * FROM margin_tags WHERE variant_id = $1', [variantId]
+    );
+
+    // 2. Find in products cache
+    let cachedVariant = null;
+    for (const p of productsCache) {
+      const v = p.variants.find((v) => String(v.id) === variantId);
+      if (v) { cachedVariant = { inventoryItemId: v.inventory_item_id, price: v.price, sku: v.sku, productTitle: p.title }; break; }
+    }
+
+    // 3. Fetch the variant directly from Shopify (ground truth)
+    const vRes  = await fetch(`https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/variants/${variantId}.json`, { headers: shopifyHeaders() });
+    const vData = vRes.ok ? await vRes.json() : null;
+    const shopifyVariant = vData?.variant || null;
+
+    // 4. If we have an inventory_item_id, fetch its cost directly
+    const invItemId = shopifyVariant?.inventory_item_id || cachedVariant?.inventoryItemId;
+    let shopifyCost = null;
+    if (invItemId) {
+      const iRes  = await fetch(`https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/inventory_items.json?ids=${invItemId}&fields=id,cost`, { headers: shopifyHeaders() });
+      const iData = iRes.ok ? await iRes.json() : null;
+      shopifyCost = iData?.inventory_items?.[0] ?? null;
+    }
+
+    res.json({
+      variantId,
+      db:             dbRows[0] ?? null,
+      cache:          cachedVariant,
+      cacheHasInvId:  cachedVariant ? (cachedVariant.inventoryItemId != null) : null,
+      shopifyVariant: shopifyVariant ? { id: shopifyVariant.id, inventory_item_id: shopifyVariant.inventory_item_id, price: shopifyVariant.price, sku: shopifyVariant.sku } : null,
+      inventoryItem:  shopifyCost,
+      diagnosis: (() => {
+        if (!cachedVariant)                    return 'Variant not in products cache — product may be draft/archived or cache is stale';
+        if (!cachedVariant.inventoryItemId)    return 'inventory_item_id missing from cached variant — fields parameter may be stripping it';
+        if (!shopifyCost)                      return 'Inventory item not returned by Shopify API — check read_inventory scope';
+        if (shopifyCost.cost == null)          return 'Inventory item exists but cost is null in Shopify — cost not set on this item';
+        return 'Data looks complete — try running Sync again to refresh the DB';
+      })(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/margin/sync  — fresh Shopify fetch + full recalculate
 app.post('/api/margin/sync', requireAuth, async (req, res) => {
   try {
