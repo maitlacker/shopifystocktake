@@ -63,7 +63,7 @@ function configureAuth(app) {
 function requireAuth(req, res, next) {
   if (req.isAuthenticated()) return next();
 
-  const publicPaths = ['/login', '/auth/google', '/auth/google/callback'];
+  const publicPaths = ['/login', '/auth/google', '/auth/google/callback', '/api/margin/feed'];
   if (publicPaths.some((p) => req.path.startsWith(p))) return next();
 
   if (req.path.startsWith('/api/')) {

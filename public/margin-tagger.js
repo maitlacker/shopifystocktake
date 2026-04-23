@@ -52,7 +52,8 @@ function applySettingsToUI() {
   settingPrefix.value  = settings.feedPrefix;
   settingLabel.value   = settings.feedLabel;
   updateDiagram();
-  feedUrlEl.textContent = `${window.location.origin}/api/margin/feed.tsv`;
+  const token = settings.feedToken ? `?token=${settings.feedToken}` : '';
+  feedUrlEl.textContent = `${window.location.origin}/api/margin/feed.tsv${token}`;
 }
 
 function updateDiagram() {

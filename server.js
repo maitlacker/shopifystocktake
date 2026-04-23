@@ -1655,15 +1655,28 @@ app.get('/api/margin/settings', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT key, value FROM app_settings
-       WHERE key IN ('margin_low_max','margin_high_min','margin_feed_prefix','margin_feed_label')`
+       WHERE key IN ('margin_low_max','margin_high_min','margin_feed_prefix','margin_feed_label','margin_feed_token')`
     );
     const s = {};
     for (const r of rows) s[r.key] = r.value;
+
+    // Auto-generate a feed token on first load if one doesn't exist yet
+    if (!s.margin_feed_token) {
+      s.margin_feed_token = require('crypto').randomUUID();
+      await pool.query(
+        `INSERT INTO app_settings (key, value, updated_at)
+         VALUES ('margin_feed_token', $1, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+        [s.margin_feed_token]
+      );
+    }
+
     res.json({
       lowMax:     parseFloat(s.margin_low_max     ?? '25'),
       highMin:    parseFloat(s.margin_high_min    ?? '50'),
       feedPrefix: s.margin_feed_prefix ?? 'shopify_AU',
       feedLabel:  s.margin_feed_label  ?? 'custom_label_3',
+      feedToken:  s.margin_feed_token,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1708,14 +1721,20 @@ app.post('/api/margin/settings', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/margin/feed.tsv  — Merchant Center supplemental feed (no auth — Merchant Center fetches this)
+// GET /api/margin/feed.tsv  — Merchant Center supplemental feed (bypasses global auth; token-protected)
 app.get('/api/margin/feed.tsv', async (req, res) => {
   try {
     const { rows: settings } = await pool.query(
-      `SELECT key, value FROM app_settings WHERE key IN ('margin_feed_prefix','margin_feed_label')`
+      `SELECT key, value FROM app_settings WHERE key IN ('margin_feed_prefix','margin_feed_label','margin_feed_token')`
     );
     const s = {};
     for (const r of settings) s[r.key] = r.value;
+
+    // Require a valid token so the feed isn't wide-open
+    if (s.margin_feed_token && req.query.token !== s.margin_feed_token) {
+      return res.status(401).send('Unauthorised — include ?token=<your-feed-token> in the URL');
+    }
+
     const prefix = s.margin_feed_prefix ?? 'shopify_AU';
     const label  = s.margin_feed_label  ?? 'custom_label_3';
 
