@@ -39,7 +39,8 @@
     {
       label: 'Marketing',
       children: [
-        { label: 'Coupon Export', href: '/coupon-export.html' },
+        { label: 'Coupon Export',  href: '/coupon-export.html' },
+        { label: 'Margin Tagger', href: '/margin-tagger.html' },
       ],
     },
   ];

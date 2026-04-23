@@ -201,6 +201,27 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_coupon_imports_order
       ON coupon_imports(order_id);
+
+    CREATE TABLE IF NOT EXISTS margin_tags (
+      id            SERIAL PRIMARY KEY,
+      product_id    BIGINT NOT NULL,
+      variant_id    BIGINT NOT NULL,
+      product_title TEXT NOT NULL,
+      variant_title TEXT,
+      sku           TEXT,
+      cost_price    DECIMAL(10,2),
+      sell_price    DECIMAL(10,2),
+      markup        DECIMAL(10,2),
+      margin_tier   TEXT NOT NULL DEFAULT 'UNKNOWN',
+      synced_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(variant_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_margin_tags_product
+      ON margin_tags(product_id);
+
+    CREATE INDEX IF NOT EXISTS idx_margin_tags_tier
+      ON margin_tags(margin_tier);
   `);
 }
 

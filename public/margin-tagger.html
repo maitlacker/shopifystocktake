@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Margin Tagger – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    /* ── Stat cards ── */
+    .mt-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .mt-stat {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+    .mt-stat-val {
+      font-size: 1.8rem;
+      font-weight: 800;
+      color: #1a1a2e;
+      line-height: 1;
+    }
+    .mt-stat-lbl {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-top: 5px;
+    }
+    .mt-stat.high  .mt-stat-val { color: #15803d; }
+    .mt-stat.med   .mt-stat-val { color: #b45309; }
+    .mt-stat.low   .mt-stat-val { color: #b91c1c; }
+    .mt-stat.unk   .mt-stat-val { color: #64748b; }
+
+    /* ── Controls ── */
+    .mt-controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    /* ── Settings panel ── */
+    .mt-settings {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin-bottom: 20px;
+    }
+    .mt-settings h3 {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 0 0 14px;
+    }
+    .mt-settings-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      align-items: flex-end;
+    }
+    .mt-settings-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .mt-settings-group label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .mt-settings-group input[type="number"],
+    .mt-settings-group input[type="text"] {
+      padding: 8px 10px;
+      font-size: 0.88rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 8px;
+      color: #1a1a2e;
+      width: 120px;
+      outline: none;
+    }
+    .mt-settings-group input:focus { border-color: #4f46e5; }
+    .mt-tier-diagram {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+      padding: 8px 0 2px;
+      color: #475569;
+    }
+    .mt-tier-diagram .badge-low  { background:#fee2e2; color:#b91c1c; padding:2px 8px; border-radius:20px; font-weight:700; font-size:0.72rem; }
+    .mt-tier-diagram .badge-med  { background:#fef3c7; color:#b45309; padding:2px 8px; border-radius:20px; font-weight:700; font-size:0.72rem; }
+    .mt-tier-diagram .badge-high { background:#dcfce7; color:#15803d; padding:2px 8px; border-radius:20px; font-weight:700; font-size:0.72rem; }
+
+    /* ── Feed URL panel ── */
+    .mt-feed-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin-top: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .mt-feed-box label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+    .mt-feed-url {
+      flex: 1;
+      font-family: monospace;
+      font-size: 0.8rem;
+      color: #1a1a2e;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 6px 10px;
+      min-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ── Filter tabs ── */
+    .mt-filters {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+    .mt-filter-btn {
+      padding: 6px 14px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      border: 2px solid #e2e8f0;
+      border-radius: 20px;
+      background: #fff;
+      color: #64748b;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .mt-filter-btn:hover { border-color: #94a3b8; color: #1a1a2e; }
+    .mt-filter-btn.active { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }
+    .mt-filter-btn.active-high { background: #15803d; color: #fff; border-color: #15803d; }
+    .mt-filter-btn.active-med  { background: #b45309; color: #fff; border-color: #b45309; }
+    .mt-filter-btn.active-low  { background: #b91c1c; color: #fff; border-color: #b91c1c; }
+    .mt-filter-btn.active-unk  { background: #64748b; color: #fff; border-color: #64748b; }
+
+    /* ── Table ── */
+    .mt-table-wrap {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      overflow: hidden;
+      overflow-x: auto;
+    }
+    .mt-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.87rem;
+      min-width: 640px;
+    }
+    .mt-table thead tr { background: #f8fafc; }
+    .mt-table th {
+      padding: 11px 14px;
+      text-align: left;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid #e2e8f0;
+      white-space: nowrap;
+    }
+    .mt-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid #f1f5f9;
+      color: #1a1a2e;
+      vertical-align: middle;
+    }
+    .mt-table tr:last-child td { border-bottom: none; }
+    .mt-table tr:hover td      { background: #f8fafc; }
+    .mt-table tr.group-start td { border-top: 1px solid #e2e8f0; }
+
+    /* ── Tier badges ── */
+    .tier-badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      border-radius: 20px;
+      padding: 3px 10px;
+      white-space: nowrap;
+    }
+    .tier-HIGH    { background: #dcfce7; color: #15803d; }
+    .tier-MEDIUM  { background: #fef3c7; color: #b45309; }
+    .tier-LOW     { background: #fee2e2; color: #b91c1c; }
+    .tier-UNKNOWN { background: #f1f5f9; color: #64748b; }
+
+    .mt-empty, .mt-loading {
+      text-align: center;
+      padding: 48px 24px;
+      color: #94a3b8;
+      font-size: 0.92rem;
+    }
+
+    #statusMsg {
+      font-size: 0.88rem;
+      color: #475569;
+      min-height: 1.4em;
+      margin-bottom: 14px;
+      line-height: 1.5;
+    }
+    #statusMsg.is-error { color: #b91c1c; }
+  </style>
+</head>
+<body>
+  <header></header>
+
+  <main class="container" style="padding-top: 24px; padding-bottom: 48px;">
+
+    <!-- Page header -->
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h1 style="font-size:1.4rem; margin:0;">Margin Tagger</h1>
+        <p style="color:#64748b; font-size:0.88rem; margin:4px 0 0;">
+          Tag products by markup tier — HIGH / MEDIUM / LOW — and push to Google Merchant Center
+        </p>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="mt-controls">
+      <button id="btnSync" class="btn btn-primary">Sync from Shopify</button>
+      <span id="syncedAt" style="font-size:0.82rem; color:#94a3b8;"></span>
+    </div>
+
+    <!-- Status -->
+    <div id="statusMsg"></div>
+
+    <!-- Settings panel -->
+    <div class="mt-settings">
+      <h3>Threshold &amp; Feed Settings</h3>
+      <div class="mt-settings-grid">
+        <div class="mt-settings-group">
+          <label>LOW max markup ($)</label>
+          <input type="number" id="settingLowMax" min="0" step="1" value="25" />
+        </div>
+        <div class="mt-settings-group">
+          <label>HIGH min markup ($)</label>
+          <input type="number" id="settingHighMin" min="1" step="1" value="50" />
+        </div>
+        <div class="mt-settings-group">
+          <label>Merchant Center ID prefix</label>
+          <input type="text" id="settingPrefix" value="shopify_AU" style="width:160px;" />
+        </div>
+        <div class="mt-settings-group">
+          <label>Custom label column</label>
+          <input type="text" id="settingLabel" value="custom_label_3" style="width:160px;" />
+        </div>
+        <div style="display:flex; align-items:flex-end;">
+          <button id="btnSaveSettings" class="btn btn-secondary">Save Settings</button>
+        </div>
+      </div>
+      <div class="mt-tier-diagram">
+        <span class="badge-low">LOW</span> &lt; $<span id="diagramLow">25</span> &nbsp;·&nbsp;
+        <span class="badge-med">MEDIUM</span> $<span id="diagramLowVal">25</span>–$<span id="diagramHigh">50</span> &nbsp;·&nbsp;
+        <span class="badge-high">HIGH</span> ≥ $<span id="diagramHighVal">50</span>
+      </div>
+
+      <!-- Feed URL -->
+      <div class="mt-feed-box">
+        <label>Merchant Center Feed URL:</label>
+        <span class="mt-feed-url" id="feedUrl"></span>
+        <button class="btn btn-secondary" id="btnCopyFeed" style="padding:6px 14px; font-size:0.82rem;">Copy URL</button>
+      </div>
+    </div>
+
+    <!-- Stat cards -->
+    <div class="mt-stats">
+      <div class="mt-stat high">
+        <div class="mt-stat-val" id="statHigh">–</div>
+        <div class="mt-stat-lbl">HIGH Margin</div>
+      </div>
+      <div class="mt-stat med">
+        <div class="mt-stat-val" id="statMed">–</div>
+        <div class="mt-stat-lbl">MEDIUM Margin</div>
+      </div>
+      <div class="mt-stat low">
+        <div class="mt-stat-val" id="statLow">–</div>
+        <div class="mt-stat-lbl">LOW Margin</div>
+      </div>
+      <div class="mt-stat unk">
+        <div class="mt-stat-val" id="statUnk">–</div>
+        <div class="mt-stat-lbl">No Cost Data</div>
+      </div>
+    </div>
+
+    <!-- Filter tabs -->
+    <div class="mt-filters">
+      <button class="mt-filter-btn active" data-tier="ALL">All</button>
+      <button class="mt-filter-btn" data-tier="HIGH">HIGH</button>
+      <button class="mt-filter-btn" data-tier="MEDIUM">MEDIUM</button>
+      <button class="mt-filter-btn" data-tier="LOW">LOW</button>
+      <button class="mt-filter-btn" data-tier="UNKNOWN">No Cost</button>
+    </div>
+
+    <!-- Table -->
+    <div class="mt-table-wrap">
+      <div class="mt-loading" id="loadingMsg" style="display:none;">Loading…</div>
+      <div class="mt-empty"   id="emptyMsg"   style="display:none;">
+        No margin data yet.<br>Click <strong>Sync from Shopify</strong> to calculate tiers.
+      </div>
+      <table class="mt-table" id="marginTable" style="display:none;">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Variant</th>
+            <th>SKU</th>
+            <th style="text-align:right;">Cost</th>
+            <th style="text-align:right;">Price</th>
+            <th style="text-align:right;">Markup</th>
+            <th style="text-align:center;">Tier</th>
+          </tr>
+        </thead>
+        <tbody id="marginTbody"></tbody>
+      </table>
+    </div>
+
+  </main>
+
+  <script src="margin-tagger.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

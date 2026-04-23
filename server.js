@@ -5,6 +5,7 @@ const path         = require('path');
 const session      = require('express-session');
 const PgSession    = require('connect-pg-simple')(session);
 
+const cron             = require('node-cron');
 const { pool, initDb }               = require('./db');
 const { configureAuth, requireAuth } = require('./auth');
 const { startCron, runStockCheck, getStatus: getAlertStatus } = require('./alerts');
@@ -143,6 +144,76 @@ async function fetchInventoryCosts(inventoryItemIds) {
 
   console.log(`[costs] done — ${Object.keys(costs).length} variants with cost`);
   return costs;
+}
+
+// ── Margin Tagger helpers ──────────────────────────────────────────
+async function getMarginThresholds() {
+  const { rows } = await pool.query(
+    `SELECT key, value FROM app_settings WHERE key IN ('margin_low_max','margin_high_min')`
+  );
+  const s = {};
+  for (const r of rows) s[r.key] = r.value;
+  return {
+    lowMax:  parseFloat(s.margin_low_max  ?? '25'),
+    highMin: parseFloat(s.margin_high_min ?? '50'),
+  };
+}
+
+function calcMarginTier(markup, lowMax, highMin) {
+  if (markup == null) return 'UNKNOWN';
+  if (markup >= highMin) return 'HIGH';
+  if (markup >= lowMax)  return 'MEDIUM';
+  return 'LOW';
+}
+
+async function recalcMarginTiers() {
+  const { lowMax, highMin } = await getMarginThresholds();
+
+  productsCache = await fetchAllProducts();
+  lastFetched   = new Date();
+
+  // Map inventoryItemId → { variant, product }
+  const invMap = {};
+  for (const p of productsCache) {
+    for (const v of p.variants) {
+      if (v.inventory_item_id) {
+        invMap[String(v.inventory_item_id)] = { v, p };
+      }
+    }
+  }
+
+  const costs = await fetchInventoryCosts(Object.keys(invMap));
+
+  let upserted = 0;
+  for (const [invItemId, { v, p }] of Object.entries(invMap)) {
+    const cost      = costs[invItemId] ?? null;
+    const sellPrice = v.price ? parseFloat(v.price) : null;
+    const markup    = (cost != null && sellPrice != null)
+      ? Math.round((sellPrice - cost) * 100) / 100
+      : null;
+    const tier = calcMarginTier(markup, lowMax, highMin);
+
+    await pool.query(`
+      INSERT INTO margin_tags
+        (product_id, variant_id, product_title, variant_title, sku,
+         cost_price, sell_price, markup, margin_tier, synced_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
+      ON CONFLICT (variant_id) DO UPDATE SET
+        product_title = EXCLUDED.product_title,
+        variant_title = EXCLUDED.variant_title,
+        sku           = EXCLUDED.sku,
+        cost_price    = EXCLUDED.cost_price,
+        sell_price    = EXCLUDED.sell_price,
+        markup        = EXCLUDED.markup,
+        margin_tier   = EXCLUDED.margin_tier,
+        synced_at     = NOW()
+    `, [p.id, v.id, p.title, v.title || null, v.sku || null,
+        cost, sellPrice, markup, tier]);
+    upserted++;
+  }
+
+  console.log(`[margin] recalc done — ${upserted} variants | LOW<$${lowMax} MEDIUM<$${highMin} HIGH>=$${highMin}`);
+  return { upserted, lowMax, highMin };
 }
 
 // ── Discrepancy routes ─────────────────────────────────────────────
@@ -1535,6 +1606,136 @@ app.get('/api/coupons/export', async (req, res) => {
   }
 });
 
+// ── Margin Tagger ──────────────────────────────────────────────────
+
+// POST /api/margin/sync  — fresh Shopify fetch + full recalculate
+app.post('/api/margin/sync', requireAuth, async (req, res) => {
+  try {
+    const stats = await recalcMarginTiers();
+    res.json({ ok: true, ...stats });
+  } catch (err) {
+    console.error('[margin/sync] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/margin/list?tier=HIGH|MEDIUM|LOW|UNKNOWN
+app.get('/api/margin/list', requireAuth, async (req, res) => {
+  const { tier } = req.query;
+  const params = [];
+  let where = '';
+  if (tier && ['HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'].includes(tier)) {
+    where = 'WHERE margin_tier = $1';
+    params.push(tier);
+  }
+  try {
+    const { rows } = await pool.query(`
+      SELECT product_id    AS "productId",
+             variant_id    AS "variantId",
+             product_title AS "productTitle",
+             variant_title AS "variantTitle",
+             sku,
+             cost_price    AS "costPrice",
+             sell_price    AS "sellPrice",
+             markup,
+             margin_tier   AS "marginTier",
+             synced_at     AS "syncedAt"
+      FROM margin_tags
+      ${where}
+      ORDER BY product_title ASC, markup DESC NULLS LAST
+    `, params);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/margin/settings
+app.get('/api/margin/settings', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT key, value FROM app_settings
+       WHERE key IN ('margin_low_max','margin_high_min','margin_feed_prefix','margin_feed_label')`
+    );
+    const s = {};
+    for (const r of rows) s[r.key] = r.value;
+    res.json({
+      lowMax:     parseFloat(s.margin_low_max     ?? '25'),
+      highMin:    parseFloat(s.margin_high_min    ?? '50'),
+      feedPrefix: s.margin_feed_prefix ?? 'shopify_AU',
+      feedLabel:  s.margin_feed_label  ?? 'custom_label_3',
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/margin/settings  — save thresholds + re-tier existing rows in DB (no Shopify call)
+app.post('/api/margin/settings', requireAuth, async (req, res) => {
+  const { lowMax, highMin, feedPrefix, feedLabel } = req.body;
+  if (lowMax == null || highMin == null) {
+    return res.status(400).json({ error: 'lowMax and highMin are required' });
+  }
+  const lm = parseFloat(lowMax);
+  const hm = parseFloat(highMin);
+  if (isNaN(lm) || isNaN(hm) || lm >= hm) {
+    return res.status(400).json({ error: 'lowMax must be a number less than highMin' });
+  }
+  try {
+    await pool.query(`
+      INSERT INTO app_settings (key, value, updated_at) VALUES
+        ('margin_low_max',     $1, NOW()),
+        ('margin_high_min',    $2, NOW()),
+        ('margin_feed_prefix', $3, NOW()),
+        ('margin_feed_label',  $4, NOW())
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+    `, [String(lm), String(hm), feedPrefix || 'shopify_AU', feedLabel || 'custom_label_3']);
+
+    // Re-tier all existing rows using the new thresholds (no Shopify fetch needed)
+    await pool.query(`
+      UPDATE margin_tags SET margin_tier = CASE
+        WHEN markup IS NULL  THEN 'UNKNOWN'
+        WHEN markup >= $1    THEN 'HIGH'
+        WHEN markup >= $2    THEN 'MEDIUM'
+        ELSE                      'LOW'
+      END
+    `, [hm, lm]);
+
+    const { rows } = await pool.query('SELECT COUNT(*) FROM margin_tags');
+    res.json({ ok: true, lowMax: lm, highMin: hm, variants: parseInt(rows[0].count, 10) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/margin/feed.tsv  — Merchant Center supplemental feed (no auth — Merchant Center fetches this)
+app.get('/api/margin/feed.tsv', async (req, res) => {
+  try {
+    const { rows: settings } = await pool.query(
+      `SELECT key, value FROM app_settings WHERE key IN ('margin_feed_prefix','margin_feed_label')`
+    );
+    const s = {};
+    for (const r of settings) s[r.key] = r.value;
+    const prefix = s.margin_feed_prefix ?? 'shopify_AU';
+    const label  = s.margin_feed_label  ?? 'custom_label_3';
+
+    const { rows } = await pool.query(
+      `SELECT product_id, variant_id, margin_tier FROM margin_tags ORDER BY product_id, variant_id`
+    );
+
+    const lines = [`id\t${label}`];
+    for (const r of rows) {
+      lines.push(`${prefix}_${r.product_id}_${r.variant_id}\t${r.margin_tier}`);
+    }
+
+    res.setHeader('Content-Type', 'text/tab-separated-values; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.send(lines.join('\n'));
+  } catch (err) {
+    res.status(500).send('Error generating feed: ' + err.message);
+  }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
@@ -1543,6 +1744,17 @@ initDb()
     startCron();
     googleAds.startCron();
     shopifyAnalytics.startCron();
+
+    // Recalculate margin tiers nightly at 02:00
+    cron.schedule('0 2 * * *', async () => {
+      console.log('[margin] Nightly recalc starting…');
+      try {
+        const { upserted } = await recalcMarginTiers();
+        console.log(`[margin] Nightly recalc done — ${upserted} variants updated`);
+      } catch (err) {
+        console.error('[margin] Nightly recalc error:', err.message);
+      }
+    });
     app.listen(PORT, () => {
       console.log(`Warehouse Studio running at http://localhost:${PORT}`);
       if (!SHOPIFY_SHOP || !SHOPIFY_TOKEN) {
