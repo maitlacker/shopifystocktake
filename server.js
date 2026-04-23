@@ -108,7 +108,7 @@ async function fetchInventoryCosts(inventoryItemIds) {
   for (let i = 0; i < ids.length; i += 100) {
     const batchNum = i / 100 + 1;
     const batch = ids.slice(i, i + 100).join(',');
-    const url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/inventory_items.json?ids=${batch}&fields=id,cost`;
+    const url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/inventory_items.json?ids=${batch}&limit=100&fields=id,cost`;
 
     let attempts = 0;
     while (attempts < 3) {
