@@ -65,11 +65,15 @@ async function runReport() {
   });
 
   try {
+    const deadMinSold       = document.getElementById('dead-min-sold').value || 10;
+    const excludeCollection = (document.getElementById('exclude-collection').value || '').trim();
     const params = new URLSearchParams({
       days:           activePeriod,
       low_stock_days: lowStockDays,
       critical_days:  criticalDays,
+      dead_min_sold:  deadMinSold,
     });
+    if (excludeCollection) params.append('exclude_collection', excludeCollection);
     const res = await fetch(`/api/velocity?${params}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }));

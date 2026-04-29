@@ -39,6 +39,20 @@
         </div>
       </div>
       <div class="vel-control-group">
+        <label class="vel-label">Dead stock threshold</label>
+        <div class="vel-threshold-input">
+          <span>fewer than</span>
+          <input type="number" id="dead-min-sold" value="10" min="1" max="999" style="width:60px;" />
+          <span>sold in period</span>
+        </div>
+      </div>
+      <div class="vel-control-group">
+        <label class="vel-label">Exclude collection</label>
+        <div class="vel-threshold-input">
+          <input type="text" id="exclude-collection" value="Accessories" style="width:130px; font-size:0.88rem;" />
+        </div>
+      </div>
+      <div class="vel-control-group">
         <span id="report-meta" class="cache-status"></span>
       </div>
       <button id="btn-run" class="btn btn-primary">&#8635; Run Report</button>

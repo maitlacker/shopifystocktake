@@ -1174,11 +1174,12 @@ async function fetchOrdersSince(sinceDate) {
 
 app.get('/api/velocity', async (req, res) => {
   try {
-    const days             = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 365);
-    const lowStockDays     = parseFloat(req.query.low_stock_days) || 21;
-    const criticalDays     = parseFloat(req.query.critical_days) || 7;
-    const deadVelocity     = parseFloat(req.query.dead_velocity) || 0.1;
-    const deadMinInventory = parseInt(req.query.dead_inventory) || 5;
+    const days              = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 365);
+    const lowStockDays      = parseFloat(req.query.low_stock_days) || 21;
+    const criticalDays      = parseFloat(req.query.critical_days) || 7;
+    const deadMinSold       = parseInt(req.query.dead_min_sold) || 10;
+    const deadMinInventory  = parseInt(req.query.dead_inventory) || 5;
+    const excludeCollection = (req.query.exclude_collection || '').trim();
 
     const since = new Date();
     since.setDate(since.getDate() - days);
@@ -1186,6 +1187,35 @@ app.get('/api/velocity', async (req, res) => {
     if (!productsCache || productsCache.length === 0) {
       productsCache = await fetchAllProducts();
       lastFetched = new Date();
+    }
+
+    // Build set of product IDs to exclude from dead-stock flagging
+    const excludedProductIds = new Set();
+    if (excludeCollection) {
+      for (const endpoint of ['custom_collections', 'smart_collections']) {
+        const cr = await fetch(
+          `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/${endpoint}.json?title=${encodeURIComponent(excludeCollection)}&fields=id,title`,
+          { headers: shopifyHeaders() }
+        );
+        if (!cr.ok) continue;
+        const cd   = await cr.json();
+        const list = cd[endpoint] || [];
+        const col  = list.find((c) => c.title.toLowerCase() === excludeCollection.toLowerCase());
+        if (col) {
+          let pUrl = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products.json?collection_id=${col.id}&fields=id&limit=250`;
+          while (pUrl) {
+            const pr = await fetch(pUrl, { headers: shopifyHeaders() });
+            if (!pr.ok) break;
+            const pd = await pr.json();
+            for (const p of (pd.products || [])) excludedProductIds.add(String(p.id));
+            const lnk = pr.headers.get('link');
+            pUrl = null;
+            if (lnk) { const m = lnk.match(/<([^>]+)>;\s*rel="next"/); if (m) pUrl = m[1]; }
+          }
+          console.log(`[velocity] excluding ${excludedProductIds.size} products from "${excludeCollection}" collection`);
+          break;
+        }
+      }
     }
 
     const orders = await fetchOrdersSince(since);
@@ -1264,7 +1294,7 @@ app.get('/api/velocity', async (req, res) => {
         status = 'amber';  alertType = 'low_stock';      priorityTier = 3; sortKey = styleDaysStock;
       } else if (soldOutVariants.length > 0 && inStockVariants.length > 0 && totalInventory >= deadMinInventory) {
         status = 'yellow'; alertType = 'imbalanced';     priorityTier = 2; sortKey = -soldOutRatio;
-      } else if (styleDailyVel < deadVelocity && totalInventory >= deadMinInventory) {
+      } else if (totalSold < deadMinSold && totalInventory >= deadMinInventory && !excludedProductIds.has(String(product.id))) {
         status = 'blue';   alertType = 'dead_stock';     priorityTier = 1; sortKey = -totalInventory;
       }
 
@@ -1307,7 +1337,7 @@ app.get('/api/velocity', async (req, res) => {
       period_days: days,
       generated_at: new Date().toISOString(),
       total_orders_analysed: orders.filter((o) => !o.cancelled_at).length,
-      thresholds: { low_stock_days: lowStockDays, critical_days: criticalDays, dead_velocity: deadVelocity, dead_min_inventory: deadMinInventory },
+      thresholds: { low_stock_days: lowStockDays, critical_days: criticalDays, dead_min_sold: deadMinSold, dead_min_inventory: deadMinInventory, exclude_collection: excludeCollection || null },
       summary,
       styles,
     });
