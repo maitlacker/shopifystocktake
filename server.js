@@ -1636,6 +1636,220 @@ app.get('/api/coupons/export', async (req, res) => {
   }
 });
 
+// ── Gift Card Export ───────────────────────────────────────────────
+
+// POST /api/gift-cards/sync
+// Paginate all enabled Shopify gift cards, filter by expiry month + balance > 0, upsert to DB.
+// Requires read_gift_cards scope on the Shopify token.
+app.post('/api/gift-cards/sync', requireAuth, async (req, res) => {
+  const { expiryMonth } = req.body;
+  if (!expiryMonth || !/^\d{4}-\d{2}$/.test(expiryMonth)) {
+    return res.status(400).json({ error: 'expiryMonth must be YYYY-MM' });
+  }
+  try {
+    let totalFetched = 0;
+    const filtered = [];
+
+    let gcUrl = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/gift_cards.json?status=enabled&limit=250`;
+    while (gcUrl) {
+      const r = await fetch(gcUrl, { headers: shopifyHeaders() });
+      if (!r.ok) {
+        const body = await r.text();
+        if (r.status === 403) throw new Error('Shopify returned 403 — ensure the read_gift_cards scope is enabled on your access token.');
+        throw new Error(`Shopify gift_cards error ${r.status}: ${body.slice(0, 200)}`);
+      }
+      const data = await r.json();
+      const cards = data.gift_cards || [];
+      totalFetched += cards.length;
+
+      for (const gc of cards) {
+        if (!gc.expires_on) continue;                              // skip cards with no expiry
+        if (!gc.expires_on.startsWith(expiryMonth)) continue;     // wrong month
+        if (parseFloat(gc.balance) <= 0) continue;                // fully used
+        filtered.push(gc);
+      }
+
+      const link = r.headers.get('link');
+      gcUrl = null;
+      if (link) { const m = link.match(/<([^>]+)>;\s*rel="next"/); if (m) gcUrl = m[1]; }
+    }
+
+    console.log(`[gift-cards/sync] ${totalFetched} scanned, ${filtered.length} with balance expiring ${expiryMonth}`);
+
+    let inserted = 0, updated = 0;
+    for (const gc of filtered) {
+      const custName  = gc.customer
+        ? `${gc.customer.first_name || ''} ${gc.customer.last_name || ''}`.trim() || null
+        : null;
+      const custEmail = gc.customer?.email || null;
+      const custId    = gc.customer?.id    || null;
+
+      const result = await pool.query(`
+        INSERT INTO gift_card_imports
+          (gift_card_id, last_characters, initial_value, balance, currency,
+           expires_on, expiry_month, order_id, customer_id, customer_name, customer_email)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        ON CONFLICT (gift_card_id) DO UPDATE SET
+          last_characters = EXCLUDED.last_characters,
+          balance         = EXCLUDED.balance,
+          expires_on      = EXCLUDED.expires_on,
+          expiry_month    = EXCLUDED.expiry_month,
+          order_id        = COALESCE(EXCLUDED.order_id,      gift_card_imports.order_id),
+          customer_id     = COALESCE(EXCLUDED.customer_id,   gift_card_imports.customer_id),
+          customer_name   = COALESCE(EXCLUDED.customer_name, gift_card_imports.customer_name),
+          customer_email  = COALESCE(EXCLUDED.customer_email,gift_card_imports.customer_email),
+          imported_at     = NOW()
+        RETURNING (xmax = 0) AS was_inserted
+      `, [gc.id, gc.last_characters, gc.initial_value, gc.balance, gc.currency || 'AUD',
+          gc.expires_on, expiryMonth, gc.order_id || null, custId, custName, custEmail]);
+
+      if (result.rows[0]?.was_inserted) inserted++; else updated++;
+    }
+
+    const hint = filtered.length === 0
+      ? ' ⚠️ No matching gift cards found — check the expiry month or that gift cards have an expiry date set.'
+      : '';
+    res.json({ ok: true, totalFetched, monthFiltered: filtered.length, inserted, updated, hint });
+  } catch (err) {
+    console.error('[gift-cards/sync] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/gift-cards/list?month=YYYY-MM
+app.get('/api/gift-cards/list', requireAuth, async (req, res) => {
+  const { month } = req.query;
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ error: 'month must be YYYY-MM' });
+  }
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        gift_card_id   AS "giftCardId",
+        last_characters AS "lastCharacters",
+        initial_value  AS "initialValue",
+        balance,
+        currency,
+        expires_on     AS "expiresOn",
+        order_id       AS "orderId",
+        order_name     AS "orderName",
+        customer_name  AS "customerName",
+        customer_email AS "customerEmail",
+        imported_at    AS "importedAt"
+      FROM gift_card_imports
+      WHERE expiry_month = $1
+      ORDER BY balance DESC, last_characters ASC
+    `, [month]);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/gift-cards/match-customers
+// For cards without customer data: look up from order_id
+app.post('/api/gift-cards/match-customers', requireAuth, async (req, res) => {
+  const { expiryMonth } = req.body;
+  if (!expiryMonth || !/^\d{4}-\d{2}$/.test(expiryMonth)) {
+    return res.status(400).json({ error: 'expiryMonth must be YYYY-MM' });
+  }
+  try {
+    const { rows: unmatched } = await pool.query(`
+      SELECT id, order_id FROM gift_card_imports
+      WHERE expiry_month = $1 AND customer_email IS NULL AND order_id IS NOT NULL
+    `, [expiryMonth]);
+
+    let matched = 0, notFound = 0, noOrderId = 0, errors = 0;
+
+    for (const row of unmatched) {
+      try {
+        const r = await fetch(
+          `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders/${row.order_id}.json?fields=id,name,email,customer`,
+          { headers: shopifyHeaders() }
+        );
+        if (r.status === 404) { notFound++; continue; }
+        if (!r.ok)            { errors++;   continue; }
+        const data  = await r.json();
+        const order = data.order;
+        if (!order) { notFound++; continue; }
+
+        const custEmail = order.customer?.email || order.email || null;
+        const custName  = order.customer
+          ? `${order.customer.first_name || ''} ${order.customer.last_name || ''}`.trim() || null
+          : null;
+        const custId    = order.customer?.id || null;
+
+        if (custEmail) {
+          await pool.query(`
+            UPDATE gift_card_imports
+            SET customer_id = $1, customer_name = $2, customer_email = $3, order_name = $4
+            WHERE id = $5
+          `, [custId, custName, custEmail, order.name || null, row.id]);
+          matched++;
+        } else {
+          notFound++;
+        }
+      } catch (_) { errors++; }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    // Count how many still have no customer at all (no order_id either)
+    const { rows: noOrder } = await pool.query(`
+      SELECT COUNT(*) FROM gift_card_imports
+      WHERE expiry_month = $1 AND customer_email IS NULL AND order_id IS NULL
+    `, [expiryMonth]);
+    noOrderId = parseInt(noOrder[0].count, 10);
+
+    res.json({ ok: true, processed: unmatched.length, matched, notFound, noOrderId, errors });
+  } catch (err) {
+    console.error('[gift-cards/match-customers] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/gift-cards/export?month=YYYY-MM  — CSV download
+app.get('/api/gift-cards/export', requireAuth, async (req, res) => {
+  const { month } = req.query;
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ error: 'month must be YYYY-MM' });
+  }
+  try {
+    const { rows } = await pool.query(`
+      SELECT last_characters, initial_value, balance, currency,
+             expires_on, order_id, order_name, customer_name, customer_email
+      FROM gift_card_imports
+      WHERE expiry_month = $1
+      ORDER BY balance DESC, last_characters ASC
+    `, [month]);
+
+    function csvCell(v) {
+      if (v == null) return '';
+      const s = String(v);
+      return (s.includes(',') || s.includes('"') || s.includes('\n'))
+        ? '"' + s.replace(/"/g, '""') + '"'
+        : s;
+    }
+
+    const headers = ['Last 4 Chars', 'Initial Value', 'Balance', 'Currency', 'Expiry Date', 'Order', 'Customer Name', 'Email'];
+    const lines = [headers.join(','), ...rows.map((r) => [
+      csvCell(r.last_characters ? `...${r.last_characters}` : ''),
+      csvCell(r.initial_value != null ? `$${Number(r.initial_value).toFixed(2)}` : ''),
+      csvCell(r.balance       != null ? `$${Number(r.balance).toFixed(2)}`       : ''),
+      csvCell(r.currency || 'AUD'),
+      csvCell(r.expires_on ? String(r.expires_on).slice(0, 10) : ''),
+      csvCell(r.order_name || (r.order_id ? `#${r.order_id}` : '')),
+      csvCell(r.customer_name  || ''),
+      csvCell(r.customer_email || ''),
+    ].join(','))];
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="gift-cards-${month}.csv"`);
+    res.send(lines.join('\r\n'));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Margin Tagger ──────────────────────────────────────────────────
 
 // GET /api/margin/debug?variantId=xxx  — trace why a variant has no cost

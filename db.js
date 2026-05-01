@@ -222,6 +222,29 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_margin_tags_tier
       ON margin_tags(margin_tier);
+
+    CREATE TABLE IF NOT EXISTS gift_card_imports (
+      id              SERIAL PRIMARY KEY,
+      gift_card_id    BIGINT NOT NULL UNIQUE,
+      last_characters TEXT,
+      initial_value   DECIMAL(10,2),
+      balance         DECIMAL(10,2),
+      currency        TEXT DEFAULT 'AUD',
+      expires_on      DATE,
+      expiry_month    TEXT NOT NULL,
+      order_id        BIGINT,
+      order_name      TEXT,
+      customer_id     BIGINT,
+      customer_name   TEXT,
+      customer_email  TEXT,
+      imported_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_gift_card_imports_month
+      ON gift_card_imports(expiry_month, imported_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_gift_card_imports_order
+      ON gift_card_imports(order_id);
   `);
 }
 
