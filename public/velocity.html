@@ -7,6 +7,140 @@
   <link rel="stylesheet" href="style.css" />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="velocity.css" />
+  <style>
+    /* ── AI Insights panel ── */
+    .vel-tab-sep {
+      color: #cbd5e1;
+      padding: 0 6px;
+      align-self: center;
+      font-weight: 300;
+      font-size: 1rem;
+      line-height: 1;
+    }
+
+    .analysis-empty-state {
+      text-align: center;
+      padding: 64px 24px;
+    }
+    .analysis-empty-state h3 {
+      font-size: 1.1rem;
+      margin: 0 0 8px;
+      color: #1a1a2e;
+    }
+    .analysis-empty-state p {
+      color: #64748b;
+      margin: 0 0 22px;
+      max-width: 420px;
+      margin-left: auto;
+      margin-right: auto;
+      line-height: 1.55;
+    }
+    .analysis-empty-state small {
+      display: block;
+      color: #94a3b8;
+      font-size: 0.78rem;
+      margin-top: 10px;
+    }
+
+    .insights-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .insights-header h2 {
+      font-size: 1.15rem;
+      margin: 0;
+    }
+
+    .insights-summary {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 20px;
+      font-size: 0.92rem;
+      color: #334155;
+      line-height: 1.65;
+    }
+
+    .insights-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+      gap: 16px;
+      margin-bottom: 40px;
+    }
+
+    .insight-cluster {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 18px;
+      border-top: 4px solid #e2e8f0;
+    }
+    .insight-cluster-hot  { border-top-color: #f97316; }
+    .insight-cluster-cold { border-top-color: #3b82f6; }
+
+    .insight-cluster-label {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .insight-cluster-count {
+      font-size: 0.7rem;
+      font-weight: 600;
+      background: #f1f5f9;
+      color: #64748b;
+      border-radius: 20px;
+      padding: 2px 9px;
+    }
+
+    .insight-keywords {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin: 8px 0 10px;
+    }
+    .insight-keyword {
+      font-size: 0.7rem;
+      font-weight: 600;
+      border-radius: 20px;
+      padding: 3px 10px;
+      background: #f1f5f9;
+      color: #475569;
+    }
+    .insight-keyword-hot  { background: #fff7ed; color: #c2410c; }
+    .insight-keyword-cold { background: #eff6ff; color: #1d4ed8; }
+
+    .insight-text {
+      font-size: 0.84rem;
+      color: #475569;
+      line-height: 1.55;
+      margin-bottom: 10px;
+    }
+
+    .insight-examples {
+      font-size: 0.77rem;
+      color: #94a3b8;
+      border-top: 1px solid #f1f5f9;
+      padding-top: 9px;
+    }
+    .insight-examples strong {
+      color: #64748b;
+      display: block;
+      margin-bottom: 4px;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+  </style>
 </head>
 <body>
 
@@ -95,13 +229,47 @@
       <button class="vel-tab" data-filter="imbalanced">🟡 Imbalanced</button>
       <button class="vel-tab" data-filter="dead_stock">📦 Dead Stock</button>
       <button class="vel-tab" data-filter="ok">🟢 Healthy</button>
+      <span class="vel-tab-sep">|</span>
+      <button class="vel-tab" data-filter="hot_analysis">🔥 What's Hot</button>
+      <button class="vel-tab" data-filter="cold_analysis">❄️ What's Not</button>
     </div>
 
-    <!-- Results -->
+    <!-- Results (product cards) -->
     <div id="results">
       <div class="state-msg">
         Set your analysis period and thresholds, then click <strong>Run Report</strong>.
       </div>
+    </div>
+
+    <!-- AI Analysis panel (shown instead of results when on insight tabs) -->
+    <div id="analysis-panel" style="display:none">
+
+      <!-- Loading state -->
+      <div id="analysis-loading" class="state-msg" style="display:none">
+        <div class="spinner"></div><br>
+        Claude is analysing your product data…<br>
+        <small style="color:#94a3b8">This usually takes 10–20 seconds</small>
+      </div>
+
+      <!-- No analysis yet -->
+      <div id="analysis-run-prompt" style="display:none">
+        <div class="analysis-empty-state">
+          <div style="font-size:2.5rem; margin-bottom:12px">🤖</div>
+          <h3>No AI Analysis Yet</h3>
+          <p>
+            Claude will read the product titles, tags, and sales data from your velocity report
+            and identify the common themes, styles, and keywords that are driving (or blocking) sales.
+          </p>
+          <button id="btn-run-analysis" class="btn btn-primary" style="font-size:0.95rem; padding:11px 26px; touch-action:manipulation;">
+            🔥 Run AI Analysis
+          </button>
+          <small>Run the velocity report first, then click here. Takes ~15 seconds.</small>
+        </div>
+      </div>
+
+      <!-- Analysis results -->
+      <div id="analysis-results"></div>
+
     </div>
 
   </main>

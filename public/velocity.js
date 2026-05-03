@@ -1,7 +1,20 @@
 // ── State ──────────────────────────────────────────────────────────
-let reportData  = null;
+let reportData   = null;
 let activeFilter = 'all';
 let activePeriod = 30;
+
+// ── Insights state ─────────────────────────────────────────────────
+// keyed by period (30/60/90): { hot, not_hot, generated_at, products_analysed }
+let insightsCache       = {};
+let activeInsightsType  = 'hot';   // 'hot' | 'not_hot'
+let insightsRunning     = false;
+
+// ── Element refs ───────────────────────────────────────────────────
+const resultsDiv        = document.getElementById('results');
+const analysisPanel     = document.getElementById('analysis-panel');
+const analysisLoading   = document.getElementById('analysis-loading');
+const analysisRunPrompt = document.getElementById('analysis-run-prompt');
+const analysisResults   = document.getElementById('analysis-results');
 
 // ── HTML escape ────────────────────────────────────────────────────
 function esc(str) {
@@ -38,7 +51,19 @@ function setFilter(filter) {
   document.querySelectorAll('.vel-tab').forEach((t) => {
     t.classList.toggle('active', t.dataset.filter === filter);
   });
-  renderStyles();
+
+  const isAnalysis = filter === 'hot_analysis' || filter === 'cold_analysis';
+  activeInsightsType = filter === 'cold_analysis' ? 'not_hot' : 'hot';
+
+  if (isAnalysis) {
+    resultsDiv.style.display    = 'none';
+    analysisPanel.style.display = 'block';
+    showInsights();
+  } else {
+    resultsDiv.style.display    = '';
+    analysisPanel.style.display = 'none';
+    renderStyles();
+  }
 }
 
 // ── Run report ─────────────────────────────────────────────────────
@@ -52,8 +77,11 @@ async function runReport() {
   btn.disabled    = true;
   btn.textContent = 'Loading…';
 
-  document.getElementById('results').innerHTML =
+  // Hide everything during load
+  resultsDiv.innerHTML            =
     '<div class="state-msg"><div class="spinner"></div><br>Fetching orders and calculating velocity…<br><small style="color:#94a3b8">This may take a moment for large catalogues.</small></div>';
+  resultsDiv.style.display        = '';
+  analysisPanel.style.display     = 'none';
   document.getElementById('summary-row').style.display  = 'none';
   document.getElementById('filter-tabs').style.display  = 'none';
   document.getElementById('report-meta').textContent    = '';
@@ -82,7 +110,7 @@ async function runReport() {
     reportData = await res.json();
     renderReport();
   } catch (err) {
-    document.getElementById('results').innerHTML =
+    resultsDiv.innerHTML =
       `<div class="state-msg" style="color:#b91c1c">&#9888; Error: ${esc(err.message)}</div>`;
   } finally {
     btn.disabled    = false;
@@ -98,11 +126,11 @@ function renderReport() {
   document.getElementById('report-meta').textContent =
     `${styles.length} styles · ${total_orders_analysed} orders · ${period_days}d window · ${dt.toLocaleTimeString()}`;
 
-  document.getElementById('count-critical').textContent  = summary.critical_stock;
-  document.getElementById('count-low').textContent       = summary.low_stock;
+  document.getElementById('count-critical').textContent   = summary.critical_stock;
+  document.getElementById('count-low').textContent        = summary.low_stock;
   document.getElementById('count-imbalanced').textContent = summary.imbalanced;
-  document.getElementById('count-dead').textContent      = summary.dead_stock;
-  document.getElementById('count-ok').textContent        = summary.ok;
+  document.getElementById('count-dead').textContent       = summary.dead_stock;
+  document.getElementById('count-ok').textContent         = summary.ok;
 
   document.getElementById('summary-row').style.display = 'flex';
   document.getElementById('filter-tabs').style.display = 'flex';
@@ -119,17 +147,15 @@ function renderStyles() {
     : reportData.styles.filter((s) => s.alert_type === activeFilter);
 
   if (styles.length === 0) {
-    document.getElementById('results').innerHTML =
-      '<div class="state-msg">No styles in this category.</div>';
+    resultsDiv.innerHTML = '<div class="state-msg">No styles in this category.</div>';
     return;
   }
 
-  document.getElementById('results').innerHTML = styles.map(styleCard).join('');
-
+  resultsDiv.innerHTML = styles.map(styleCard).join('');
 }
 
 // ── Expand/collapse — single delegated listener on results div ─────
-document.getElementById('results').addEventListener('click', (e) => {
+resultsDiv.addEventListener('click', (e) => {
   const btn = e.target.closest('.vel-expand-btn');
   if (!btn) return;
   const id    = btn.dataset.id;
@@ -272,4 +298,141 @@ function variantRow(v) {
     <td style="text-align:right">${v.margin !== null ? fmt(v.margin) : '—'}</td>
     <td style="text-align:right">${marginHtml}</td>
   </tr>`;
+}
+
+// ── AI Insights ────────────────────────────────────────────────────
+
+document.getElementById('btn-run-analysis').addEventListener('click', runAnalysis);
+
+async function showInsights() {
+  // In-memory cache hit — instant
+  if (insightsCache[activePeriod]) {
+    renderInsights(insightsCache[activePeriod]);
+    return;
+  }
+
+  // Check server-side cache
+  analysisLoading.style.display   = 'block';
+  analysisRunPrompt.style.display = 'none';
+  analysisResults.style.display   = 'none';
+
+  try {
+    const r = await fetch(`/api/velocity/insights/latest?days=${activePeriod}`);
+    if (r.ok) {
+      const data = await r.json();
+      if (data) {
+        insightsCache[activePeriod] = data;
+        renderInsights(data);
+        return;
+      }
+    }
+  } catch (_) { /* fall through */ }
+
+  // No cached analysis — show run prompt
+  analysisLoading.style.display   = 'none';
+  analysisRunPrompt.style.display = 'block';
+  analysisResults.style.display   = 'none';
+}
+
+async function runAnalysis() {
+  if (!reportData) {
+    alert('Please run the velocity report first, then click Run AI Analysis.');
+    return;
+  }
+  if (insightsRunning) return;
+
+  insightsRunning = true;
+  analysisLoading.style.display   = 'block';
+  analysisRunPrompt.style.display = 'none';
+  analysisResults.style.display   = 'none';
+  document.getElementById('btn-run-analysis').disabled = true;
+
+  try {
+    const r = await fetch('/api/velocity/insights', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ days: activePeriod, styles: reportData.styles }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: r.statusText }));
+      throw new Error(err.error || r.statusText);
+    }
+    const data = await r.json();
+    insightsCache[activePeriod] = data;
+    renderInsights(data);
+  } catch (err) {
+    analysisLoading.style.display   = 'none';
+    analysisRunPrompt.style.display = 'block';
+    analysisResults.innerHTML       =
+      `<div class="state-msg" style="color:#b91c1c; padding:16px 0">&#9888; ${esc(err.message)}</div>`;
+    analysisResults.style.display   = 'block';
+  } finally {
+    insightsRunning = false;
+    document.getElementById('btn-run-analysis').disabled = false;
+  }
+}
+
+function renderInsights(data) {
+  analysisLoading.style.display   = 'none';
+  analysisRunPrompt.style.display = 'none';
+  analysisResults.style.display   = 'block';
+
+  const section = activeInsightsType === 'hot' ? data.hot : data.not_hot;
+  if (!section || !section.clusters || section.clusters.length === 0) {
+    analysisResults.innerHTML = '<div class="state-msg">No pattern data available for this category.</div>';
+    return;
+  }
+
+  const isHot       = activeInsightsType === 'hot';
+  const typeLabel   = isHot ? '🔥 What\'s Hot' : '❄️ What\'s Not Selling';
+  const clsCls      = isHot ? 'insight-cluster-hot'  : 'insight-cluster-cold';
+  const kwCls       = isHot ? 'insight-keyword-hot'  : 'insight-keyword-cold';
+  const genAt       = data.generated_at ? new Date(data.generated_at) : null;
+  const genAgo      = genAt ? timeAgo(genAt) : '';
+
+  const clusterCards = section.clusters.map((c) => `
+    <div class="insight-cluster ${clsCls}">
+      <div class="insight-cluster-label">
+        ${esc(c.label)}
+        ${c.product_count ? `<span class="insight-cluster-count">${c.product_count} products</span>` : ''}
+      </div>
+      <div class="insight-keywords">
+        ${(c.keywords || []).map((k) => `<span class="insight-keyword ${kwCls}">${esc(k)}</span>`).join('')}
+      </div>
+      <div class="insight-text">${esc(c.insight)}</div>
+      ${c.examples && c.examples.length > 0 ? `
+        <div class="insight-examples">
+          <strong>Examples</strong>
+          ${c.examples.slice(0, 3).map((e) => `• ${esc(e)}`).join('<br>')}
+        </div>` : ''}
+    </div>
+  `).join('');
+
+  analysisResults.innerHTML = `
+    <div class="insights-header">
+      <h2>${typeLabel}</h2>
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        ${genAgo ? `<span style="color:#94a3b8; font-size:0.82rem;">Analysed ${genAgo}</span>` : ''}
+        <button class="btn btn-secondary" id="btn-reanalyse"
+                style="font-size:0.82rem; padding:6px 14px; touch-action:manipulation;">
+          ↺ Re-analyse
+        </button>
+      </div>
+    </div>
+    <div class="insights-summary">${esc(section.summary)}</div>
+    <div class="insights-grid">${clusterCards}</div>
+  `;
+
+  document.getElementById('btn-reanalyse').addEventListener('click', () => {
+    delete insightsCache[activePeriod];
+    runAnalysis();
+  });
+}
+
+function timeAgo(date) {
+  const secs = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (secs < 90)    return 'just now';
+  if (secs < 3600)  return `${Math.floor(secs / 60)} min ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)} hr ago`;
+  return `${Math.floor(secs / 86400)} day${Math.floor(secs / 86400) !== 1 ? 's' : ''} ago`;
 }

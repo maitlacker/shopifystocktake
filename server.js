@@ -12,6 +12,11 @@ const { startCron, runStockCheck, getStatus: getAlertStatus } = require('./alert
 const googleAds        = require('./google-ads-sync');
 const shopifyAnalytics = require('./shopify-analytics');
 const labelMatcher     = require('./label-matcher');
+const Anthropic        = require('@anthropic-ai/sdk');
+
+const anthropicClient = process.env.ANTHROPIC_API_KEY
+  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  : null;
 
 const app = express();
 
@@ -1301,6 +1306,8 @@ app.get('/api/velocity', async (req, res) => {
       return {
         id: product.id,
         title: product.title,
+        tags: product.tags || '',
+        product_type: product.product_type || '',
         image: product.images && product.images.length > 0 ? product.images[0].src : null,
         total_inventory: totalInventory,
         total_sold: totalSold,
@@ -1343,6 +1350,153 @@ app.get('/api/velocity', async (req, res) => {
     });
   } catch (err) {
     console.error('Velocity error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Velocity Insights (AI Analysis) ───────────────────────────────
+
+// POST /api/velocity/insights
+// Accepts the styles array from a velocity run, calls Claude to identify hot/cold keyword clusters.
+app.post('/api/velocity/insights', requireAuth, async (req, res) => {
+  if (!anthropicClient) {
+    return res.status(503).json({ error: 'ANTHROPIC_API_KEY is not configured on this server.' });
+  }
+  const { days, styles } = req.body;
+  if (!Array.isArray(styles) || styles.length === 0) {
+    return res.status(400).json({ error: 'styles array is required — run the velocity report first.' });
+  }
+  const periodDays = Math.min(Math.max(parseInt(days) || 30, 1), 365);
+
+  try {
+    // Hot: top sellers with actual velocity, sorted fastest first
+    const hotStyles = styles
+      .filter((s) => s.daily_velocity > 0 && s.alert_type !== 'no_activity')
+      .sort((a, b) => b.daily_velocity - a.daily_velocity)
+      .slice(0, 30);
+
+    // Cold: dead stock + zero-velocity with inventory
+    const coldStyles = styles
+      .filter((s) =>
+        s.alert_type === 'dead_stock' ||
+        (s.daily_velocity === 0 && s.total_inventory > 5 && s.alert_type !== 'no_activity')
+      )
+      .sort((a, b) => b.total_inventory - a.total_inventory)
+      .slice(0, 30);
+
+    if (hotStyles.length < 3) {
+      return res.status(400).json({ error: 'Not enough sales data — need at least 3 selling products. Run the velocity report with a longer period.' });
+    }
+
+    function fmtStyle(s) {
+      const tags = s.tags ? s.tags.replace(/,\s*/g, ', ') : '';
+      const type = s.product_type ? ` [${s.product_type}]` : '';
+      const tagsStr = tags ? ` | tags: ${tags}` : '';
+      return `• "${s.title}"${type}${tagsStr} | ${s.total_sold} sold, ${s.daily_velocity.toFixed(2)}/day, stock: ${s.total_inventory}`;
+    }
+
+    const hotList  = hotStyles.map(fmtStyle).join('\n');
+    const coldList = coldStyles.length > 0
+      ? coldStyles.map(fmtStyle).join('\n')
+      : '(no clear slow movers identified in this period)';
+
+    const prompt = `You are a retail analytics assistant for The Self Styler, an Australian women's fashion e-commerce retailer (clothing, dresses, tops, shoes, accessories).
+
+Analyse these two groups of products from the last ${periodDays} days:
+
+═══ TOP SELLERS (highest daily velocity) ═══
+${hotList}
+
+═══ SLOW MOVERS (dead stock / zero velocity with inventory) ═══
+${coldList}
+
+Identify the key themes, styles, keywords and product characteristics that explain each group's performance. Look for patterns in: silhouettes (wrap, oversized, bodycon), lengths (midi, mini, maxi), fabrics, prints/patterns, occasions (casual, workwear, occasion/formal), colours, and product categories.
+
+Return ONLY raw JSON — absolutely no markdown fences or extra text before or after:
+{
+  "hot": {
+    "summary": "2-3 sentences summarising what is selling well and the dominant trends driving it",
+    "clusters": [
+      {
+        "label": "Short cluster name (e.g. 'Wrap Dresses', 'Floral Prints', 'Casual Knitwear')",
+        "keywords": ["keyword1", "keyword2", "keyword3"],
+        "insight": "1-2 sentences explaining why these products are resonating with customers",
+        "examples": ["Exact Product Title 1", "Exact Product Title 2"],
+        "product_count": 5
+      }
+    ]
+  },
+  "not_hot": {
+    "summary": "2-3 sentences summarising what is not selling and the likely causes",
+    "clusters": [...]
+  }
+}
+
+Provide 4-7 clusters per section. Be specific — reference actual words and phrases from the titles and tags above.`;
+
+    console.log(`[velocity/insights] Calling Claude: ${hotStyles.length} hot + ${coldStyles.length} cold, period=${periodDays}d`);
+
+    const message = await anthropicClient.messages.create({
+      model: 'claude-3-5-haiku-20241022',
+      max_tokens: 2048,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const rawText = message.content[0]?.text || '';
+    // Strip markdown fences in case Claude adds them despite instructions
+    const jsonText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch (e) {
+      console.error('[velocity/insights] JSON parse failed:', jsonText.slice(0, 400));
+      return res.status(500).json({ error: 'AI returned malformed JSON — try again.' });
+    }
+
+    // Cache in DB
+    await pool.query(`
+      INSERT INTO velocity_insights (period_days, products_analysed, hot_json, not_hot_json, model_used)
+      VALUES ($1, $2, $3, $4, $5)
+    `, [
+      periodDays,
+      hotStyles.length + coldStyles.length,
+      JSON.stringify(parsed.hot    || {}),
+      JSON.stringify(parsed.not_hot || {}),
+      message.model || 'claude-3-5-haiku-20241022',
+    ]);
+
+    res.json({
+      ok: true,
+      period_days: periodDays,
+      hot: parsed.hot,
+      not_hot: parsed.not_hot,
+      products_analysed: hotStyles.length + coldStyles.length,
+      generated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[velocity/insights] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/velocity/insights/latest?days=N — return the most recent cached analysis for this period
+app.get('/api/velocity/insights/latest', requireAuth, async (req, res) => {
+  const periodDays = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 365);
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        period_days, products_analysed,
+        hot_json      AS hot,
+        not_hot_json  AS not_hot,
+        model_used, generated_at
+      FROM velocity_insights
+      WHERE period_days = $1
+      ORDER BY generated_at DESC
+      LIMIT 1
+    `, [periodDays]);
+    res.json(rows.length > 0 ? rows[0] : null);
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

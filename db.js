@@ -245,6 +245,19 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_gift_card_imports_order
       ON gift_card_imports(order_id);
+
+    CREATE TABLE IF NOT EXISTS velocity_insights (
+      id                SERIAL PRIMARY KEY,
+      period_days       INT NOT NULL,
+      products_analysed INT NOT NULL DEFAULT 0,
+      hot_json          JSONB NOT NULL DEFAULT '{}',
+      not_hot_json      JSONB NOT NULL DEFAULT '{}',
+      model_used        TEXT,
+      generated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_velocity_insights_period
+      ON velocity_insights(period_days, generated_at DESC);
   `);
 }
 
