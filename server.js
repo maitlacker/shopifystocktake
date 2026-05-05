@@ -1552,8 +1552,24 @@ app.post('/api/velocity/idea-factory', requireAuth, async (req, res) => {
       const parts = s.variants.map(v => {
         const label = v.title !== 'Default Title' ? v.title : null;
         return label ? `${label}: ${v.inventory === 0 ? 'SOLD OUT' : v.inventory + ' left'}` : null;
-      }).filter(Boolean).slice(0, 6);
+      }).filter(Boolean).slice(0, 8);
       return parts.length ? `\n    Sizes: ${parts.join(' | ')}` : '';
+    }
+
+    // For final-size products — make the remaining units unmissably obvious
+    function fmtFinalSize(s) {
+      const price     = fmtPrice(s);
+      const margin    = fmtMargin(s);
+      const hasVars   = s.variants && s.variants.length > 1;
+      if (!hasVars) {
+        return `  • "${s.title}" — ${price},${margin} ONLY ${s.total_inventory} unit(s) left, ${s.total_sold} sold in ${periodDays}d`;
+      }
+      const inStock   = s.variants.filter(v => v.inventory > 0 && v.title !== 'Default Title');
+      const soldOut   = s.variants.filter(v => v.inventory === 0 && v.title !== 'Default Title');
+      const totalLeft = inStock.reduce((sum, v) => sum + v.inventory, 0);
+      const leftList  = inStock.map(v => `${v.title}: ${v.inventory}`).join(', ');
+      const goneList  = soldOut.length ? ` | GONE: ${soldOut.map(v => v.title).join(', ')}` : '';
+      return `  • "${s.title}" — ${price},${margin} ONLY ${totalLeft} unit(s) left → ${leftList}${goneList} (${s.total_sold} sold in ${periodDays}d)`;
     }
 
     function fmtBlock(arr, label) {
@@ -1564,11 +1580,17 @@ app.post('/api/velocity/idea-factory', requireAuth, async (req, res) => {
       return `${label}\n${lines}\n`;
     }
 
+    function fmtFinalSizeBlock(arr) {
+      if (!arr.length) return '';
+      const lines = arr.map(s => fmtFinalSize(s)).join('\n');
+      return `═══ FINAL SIZES (orphaned sizes — most variants sold out, last units stranded) ═══\n${lines}\n`;
+    }
+
     const context = [
-      fmtBlock(deadStock,  `═══ DEAD STOCK (sitting still — needs to move) ═══`),
-      fmtBlock(finalSizes, `═══ FINAL SIZES (some variants sold out — last units remaining) ═══`),
-      fmtBlock(lowStock,   `═══ RUNNING LOW (selling fast — restock or capitalise now) ═══`),
-      fmtBlock(topSellers, `═══ TOP SELLERS (healthy performers — push harder) ═══`),
+      fmtBlock(deadStock,     `═══ DEAD STOCK (sitting still — needs to move) ═══`),
+      fmtFinalSizeBlock(finalSizes),
+      fmtBlock(lowStock,      `═══ RUNNING LOW (selling fast — restock or capitalise now) ═══`),
+      fmtBlock(topSellers,    `═══ TOP SELLERS (healthy performers — push harder) ═══`),
     ].filter(Boolean).join('\n');
 
     const prompt = `You are a senior retail strategist and digital marketing expert advising The Self Styler, an Australian women's fashion e-commerce retailer (dresses, tops, shoes, accessories, approx $50–$300 price range).
@@ -1582,12 +1604,13 @@ Generate 10–15 specific, high-impact action ideas to maximise revenue, clear s
 Ideas must span multiple tactics — include a mix from: clearance/markdown pricing, final-size bundles, Meta/Instagram ad campaigns, email marketing, flash sales, site promotions, urgency messaging, restock decisions, product page tweaks.
 
 Rules:
-- Name ACTUAL products from the lists above
+- Name ACTUAL products from the lists above — never give generic advice
 - Be SPECIFIC and DIRECT — tell us exactly what to do, not vague advice
-- Final sizes should be priced to MOVE quickly (free shelf space)
-- Dead stock needs CREATIVE solutions (bundles, deep discounts, styled collections)
-- Top sellers deserve more ad budget and urgency copy
-- Think about the cost of holding unsold inventory
+- FINAL SIZES: for every orphaned product, give a concrete action: "You have X [size] left in [Product] — drop to $Y and clear them." These are shelf-hogging dead weight; one idea per product if warranted
+- Dead stock needs CREATIVE solutions (bundles, deep discounts, styled collections, gift-with-purchase)
+- Top sellers deserve more ad budget, urgency copy ("selling fast"), and restock consideration
+- Think about the cost of holding unsold stock — physical space and cash tied up
+- If a product has only 1-3 units of a single size left, say so explicitly and recommend a specific price or action
 
 Return ONLY raw JSON (absolutely no markdown fences):
 {
