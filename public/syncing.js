@@ -354,3 +354,78 @@ btnAlertsRun.addEventListener('click', async () => {
     btnAlertsRun.disabled = false;
   }
 });
+
+// ── Idea Factory cron card ─────────────────────────────────────────
+const btnIdeasRun  = document.getElementById('btn-ideas-run');
+const ideasDot     = document.getElementById('ideas-dot');
+const ideasStatus  = document.getElementById('ideas-status-text');
+const ideasLog     = document.getElementById('ideas-log');
+
+function setIdeasStatus(state, text) {
+  ideasDot.className   = `sync-status-dot sync-status-dot--${state}`;
+  ideasStatus.textContent = text;
+}
+
+function appendIdeasLog(msg, type = 'info') {
+  ideasLog.style.display = 'block';
+  const line = document.createElement('div');
+  line.className  = `sync-log-line sync-log-line--${type}`;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  ideasLog.appendChild(line);
+  ideasLog.scrollTop = ideasLog.scrollHeight;
+}
+
+async function loadIdeasStatus() {
+  try {
+    const res  = await fetch('/api/ideas-cron/status');
+    const data = await res.json();
+
+    if (data.isRunning) {
+      setIdeasStatus('syncing', 'Generating ideas… this takes ~30 seconds');
+    } else if (data.lastRunAt) {
+      const slackNote = data.slackConfigured ? '' : ' (Slack not configured)';
+      setIdeasStatus(
+        data.lastRunStatus && data.lastRunStatus.startsWith('error') ? 'error' : 'ok',
+        `Last run ${formatRelative(data.lastRunAt)} — ${data.lastRunStatus}${slackNote}`
+      );
+    } else {
+      const slackNote = data.slackConfigured ? '' : ' · ⚠ SLACK_IDEAS_WEBHOOK_URL not set';
+      setIdeasStatus('idle', `Scheduled daily at 7am AEST (${data.schedule})${slackNote}. Not run yet this session.`);
+    }
+  } catch {
+    setIdeasStatus('error', 'Could not load status');
+  }
+}
+
+loadIdeasStatus();
+
+btnIdeasRun.addEventListener('click', async () => {
+  btnIdeasRun.disabled = true;
+  setIdeasStatus('syncing', 'Running — fetching inventory and calling Claude…');
+  appendIdeasLog('Starting idea generation (this takes ~30–60 seconds)…');
+
+  try {
+    const res  = await fetch('/api/ideas-cron/run', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Unknown error');
+
+    if (data.skipped) {
+      appendIdeasLog(data.message || 'Skipped — already running or not configured.', 'info');
+    } else if (data.error) {
+      appendIdeasLog(`Error: ${data.message}`, 'error');
+    } else {
+      const slackMsg = data.slackSent ? ' · posted to Slack ✓' : '';
+      appendIdeasLog(
+        `Done — ${data.total} ideas generated, ${data.newIdeas} new${slackMsg}`,
+        'success'
+      );
+    }
+
+    await loadIdeasStatus();
+  } catch (err) {
+    setIdeasStatus('error', 'Run failed');
+    appendIdeasLog(`Error: ${err.message}`, 'error');
+  } finally {
+    btnIdeasRun.disabled = false;
+  }
+});

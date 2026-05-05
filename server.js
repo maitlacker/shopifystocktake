@@ -13,6 +13,7 @@ const googleAds        = require('./google-ads-sync');
 const shopifyAnalytics = require('./shopify-analytics');
 const labelMatcher     = require('./label-matcher');
 const Anthropic        = require('@anthropic-ai/sdk');
+const ideasCron        = require('./ideas-cron');
 
 const anthropicClient = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -1683,6 +1684,19 @@ app.get('/api/velocity/idea-factory/latest', requireAuth, async (req, res) => {
   }
 });
 
+// ── Idea Factory Cron Status & Manual Trigger ─────────────────────
+
+// GET /api/ideas-cron/status
+app.get('/api/ideas-cron/status', requireAuth, (req, res) => {
+  res.json(ideasCron.getStatus());
+});
+
+// POST /api/ideas-cron/run  — manual trigger from syncing page
+app.post('/api/ideas-cron/run', requireAuth, async (req, res) => {
+  const result = await ideasCron.runIdeaCron();
+  res.json(result);
+});
+
 // ── Coupon Export ──────────────────────────────────────────────────
 
 // POST /api/coupons/sync
@@ -2395,6 +2409,7 @@ initDb()
     startCron();
     googleAds.startCron();
     shopifyAnalytics.startCron();
+    ideasCron.startCron(pool, anthropicClient);
 
     // Recalculate margin tiers nightly at 02:00
     cron.schedule('0 2 * * *', async () => {

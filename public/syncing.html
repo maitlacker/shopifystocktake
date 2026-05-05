@@ -118,6 +118,25 @@
         <div id="gads-log" class="sync-log" style="display:none"></div>
       </div>
 
+      <!-- Idea Factory Cron -->
+      <div class="sync-card" id="card-ideas-cron">
+        <div class="sync-card-header">
+          <div class="sync-card-icon">💡</div>
+          <div>
+            <div class="sync-card-title">Daily Idea Factory</div>
+            <div class="sync-card-desc">Every morning Claude analyses your inventory and sends new merchandising ideas — clearance pricing, final sizes, ad targets, flash sales — directly to your marketing Slack channel. Runs automatically at 7am AEST.</div>
+          </div>
+        </div>
+        <div class="sync-status">
+          <span class="sync-status-dot sync-status-dot--idle" id="ideas-dot"></span>
+          <span id="ideas-status-text">Loading…</span>
+        </div>
+        <div class="sync-card-actions">
+          <button id="btn-ideas-run" class="btn btn-primary">&#9654; Run Now</button>
+        </div>
+        <div id="ideas-log" class="sync-log" style="display:none"></div>
+      </div>
+
     </div>
   </main>
 
