@@ -13,8 +13,6 @@ const searchHint     = document.getElementById('search-hint');
 const resultsEl      = document.getElementById('results');
 const btnPdf         = document.getElementById('btn-pdf');
 const cacheStatus    = document.getElementById('cache-status');
-const userBadge      = document.getElementById('user-badge');
-
 /* ── Helpers ───────────────────────────────────────────────────── */
 function debounce(fn, ms) {
   let t;
@@ -46,18 +44,22 @@ function escHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-/* ── Auto-derive initials from logged-in Google account ─────────── */
-fetch('/api/me')
-  .then((r) => r.ok ? r.json() : null)
-  .then((user) => {
-    if (!user) return;
-    const name = user.displayName || user.email || '';
-    // "Jane Smith" → "JS", "Mary Jane Watson" → "MJW"
-    const initials = name.trim().split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 4);
-    state.initials = initials || name.slice(0, 4).toUpperCase();
-    userBadge.textContent = name;
-  })
-  .catch(() => {});
+/* ── Initials input (persisted in localStorage) ─────────────────── */
+(function () {
+  const el    = document.getElementById('initials-input');
+  const saved = localStorage.getItem('stocktake_initials');
+  if (saved) {
+    el.value       = saved;
+    state.initials = saved;
+  }
+  el.addEventListener('input', () => {
+    el.value       = el.value.toUpperCase();
+    state.initials = el.value.trim();
+    localStorage.setItem('stocktake_initials', state.initials);
+  });
+  el.addEventListener('focus', () => { el.style.borderColor = '#4f46e5'; });
+  el.addEventListener('blur',  () => { el.style.borderColor = '#e2e8f0'; });
+}());
 
 
 /* ── Search ────────────────────────────────────────────────────── */

@@ -14,7 +14,11 @@
   <header></header>
 
   <div class="page-toolbar">
-    <span id="user-badge" class="user-badge"></span>
+    <label style="display:flex;align-items:center;gap:8px;font-size:0.82rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">
+      Initials
+      <input id="initials-input" type="text" maxlength="4" placeholder="e.g. JD" autocomplete="off"
+        style="width:64px;padding:7px 10px;font-size:0.95rem;font-weight:700;border:2px solid #e2e8f0;border-radius:8px;color:#1a1a2e;outline:none;text-transform:uppercase;touch-action:manipulation;" />
+    </label>
     <span id="cache-status" class="cache-status">Inventory not loaded</span>
     <button id="btn-pdf" class="btn btn-primary" disabled>Export Discrepancy Report (PDF)</button>
   </div>
