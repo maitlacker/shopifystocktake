@@ -258,6 +258,19 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_velocity_insights_period
       ON velocity_insights(period_days, generated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS velocity_ideas (
+      id                SERIAL PRIMARY KEY,
+      period_days       INT NOT NULL,
+      products_analysed INT NOT NULL DEFAULT 0,
+      headline          TEXT,
+      ideas_json        JSONB NOT NULL DEFAULT '[]',
+      model_used        TEXT,
+      generated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_velocity_ideas_period
+      ON velocity_ideas(period_days, generated_at DESC);
   `);
 }
 

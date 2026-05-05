@@ -1504,6 +1504,162 @@ app.get('/api/velocity/insights/latest', requireAuth, async (req, res) => {
   }
 });
 
+// ── Velocity Idea Factory (AI Merchandising Advisor) ──────────────
+
+// POST /api/velocity/idea-factory
+// Sends full inventory context to Claude Sonnet and returns ~10-15 specific
+// business ideas (clearance, pricing, bundles, Meta ads, email, etc.)
+app.post('/api/velocity/idea-factory', requireAuth, async (req, res) => {
+  if (!anthropicClient) {
+    return res.status(503).json({ error: 'ANTHROPIC_API_KEY is not configured on this server.' });
+  }
+  const { days, styles } = req.body;
+  if (!Array.isArray(styles) || styles.length === 0) {
+    return res.status(400).json({ error: 'styles array is required — run the velocity report first.' });
+  }
+  const periodDays = Math.min(Math.max(parseInt(days) || 30, 1), 365);
+
+  try {
+    // ── Segment inventory by status ────────────────────────────────
+    const deadStock   = styles.filter(s => s.alert_type === 'dead_stock')
+      .sort((a, b) => b.total_inventory - a.total_inventory).slice(0, 15);
+
+    const finalSizes  = styles.filter(s => s.alert_type === 'imbalanced')
+      .sort((a, b) => b.variant_sold_out_count - a.variant_sold_out_count).slice(0, 12);
+
+    const lowStock    = styles.filter(s => ['critical_stock', 'low_stock'].includes(s.alert_type))
+      .sort((a, b) => (a.days_of_stock ?? 999) - (b.days_of_stock ?? 999)).slice(0, 10);
+
+    const topSellers  = styles.filter(s => s.alert_type === 'ok' && s.daily_velocity > 0)
+      .sort((a, b) => b.daily_velocity - a.daily_velocity).slice(0, 10);
+
+    const productsAnalysed = deadStock.length + finalSizes.length + lowStock.length + topSellers.length;
+
+    if (productsAnalysed < 3) {
+      return res.status(400).json({ error: 'Not enough product data — run the velocity report first.' });
+    }
+
+    // ── Format product data for Claude ─────────────────────────────
+    function fmtPrice(s) {
+      const p = s.variants?.[0]?.price;
+      return p != null ? `$${Number(p).toFixed(2)}` : '';
+    }
+    function fmtMargin(s) {
+      return s.avg_margin_pct != null ? ` ${s.avg_margin_pct.toFixed(0)}% margin` : '';
+    }
+    function fmtVariants(s) {
+      if (!s.variants || s.variants.length <= 1) return '';
+      const parts = s.variants.map(v => {
+        const label = v.title !== 'Default Title' ? v.title : null;
+        return label ? `${label}: ${v.inventory === 0 ? 'SOLD OUT' : v.inventory + ' left'}` : null;
+      }).filter(Boolean).slice(0, 6);
+      return parts.length ? `\n    Sizes: ${parts.join(' | ')}` : '';
+    }
+
+    function fmtBlock(arr, label) {
+      if (!arr.length) return '';
+      const lines = arr.map(s =>
+        `  • "${s.title}" — ${fmtPrice(s)},${fmtMargin(s)}, stock: ${s.total_inventory}, sold: ${s.total_sold} in ${periodDays}d, velocity: ${s.daily_velocity.toFixed(2)}/day${fmtVariants(s)}`
+      ).join('\n');
+      return `${label}\n${lines}\n`;
+    }
+
+    const context = [
+      fmtBlock(deadStock,  `═══ DEAD STOCK (sitting still — needs to move) ═══`),
+      fmtBlock(finalSizes, `═══ FINAL SIZES (some variants sold out — last units remaining) ═══`),
+      fmtBlock(lowStock,   `═══ RUNNING LOW (selling fast — restock or capitalise now) ═══`),
+      fmtBlock(topSellers, `═══ TOP SELLERS (healthy performers — push harder) ═══`),
+    ].filter(Boolean).join('\n');
+
+    const prompt = `You are a senior retail strategist and digital marketing expert advising The Self Styler, an Australian women's fashion e-commerce retailer (dresses, tops, shoes, accessories, approx $50–$300 price range).
+
+Here is the live inventory and sales performance snapshot from the last ${periodDays} days:
+
+${context}
+
+Generate 10–15 specific, high-impact action ideas to maximise revenue, clear stagnant stock, and grow the business. Think like an experienced retail merchandiser AND a performance marketing specialist.
+
+Ideas must span multiple tactics — include a mix from: clearance/markdown pricing, final-size bundles, Meta/Instagram ad campaigns, email marketing, flash sales, site promotions, urgency messaging, restock decisions, product page tweaks.
+
+Rules:
+- Name ACTUAL products from the lists above
+- Be SPECIFIC and DIRECT — tell us exactly what to do, not vague advice
+- Final sizes should be priced to MOVE quickly (free shelf space)
+- Dead stock needs CREATIVE solutions (bundles, deep discounts, styled collections)
+- Top sellers deserve more ad budget and urgency copy
+- Think about the cost of holding unsold inventory
+
+Return ONLY raw JSON (absolutely no markdown fences):
+{
+  "headline": "Honest 1-2 sentence assessment of the overall inventory health and biggest opportunity right now",
+  "ideas": [
+    {
+      "category": "Clearance|Final Sizes|Bundle Deal|Meta Ads|Email Campaign|Flash Sale|Pricing|Restock|Promotion|Site Merch",
+      "icon": "single relevant emoji",
+      "title": "Short punchy idea title (6 words max)",
+      "action": "Exactly what to do — be specific and direct (2-3 sentences)",
+      "products": ["Exact product name 1", "Exact product name 2"],
+      "rationale": "Why this, why now — one sentence",
+      "priority": "high|medium|low"
+    }
+  ]
+}
+
+Prioritise the ideas that will have the most immediate financial impact.`;
+
+    console.log(`[idea-factory] Calling Claude Sonnet: ${productsAnalysed} products, period=${periodDays}d`);
+
+    const message = await anthropicClient.messages.create({
+      model:      'claude-3-5-sonnet-20241022',
+      max_tokens: 4096,
+      messages:   [{ role: 'user', content: prompt }],
+    });
+
+    const rawText  = message.content[0]?.text || '';
+    const jsonText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch (e) {
+      console.error('[idea-factory] JSON parse failed:', jsonText.slice(0, 400));
+      return res.status(500).json({ error: 'AI returned malformed JSON — try again.' });
+    }
+
+    const ideas    = parsed.ideas || [];
+    const headline = parsed.headline || '';
+
+    // Store in DB
+    await pool.query(`
+      INSERT INTO velocity_ideas (period_days, products_analysed, headline, ideas_json, model_used)
+      VALUES ($1, $2, $3, $4, $5)
+    `, [periodDays, productsAnalysed, headline, JSON.stringify(ideas), message.model || 'claude-3-5-sonnet-20241022']);
+
+    res.json({ ok: true, period_days: periodDays, headline, ideas, products_analysed: productsAnalysed, generated_at: new Date().toISOString() });
+
+  } catch (err) {
+    console.error('[idea-factory] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/velocity/idea-factory/latest?days=N
+app.get('/api/velocity/idea-factory/latest', requireAuth, async (req, res) => {
+  const periodDays = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 365);
+  try {
+    const { rows } = await pool.query(`
+      SELECT period_days, products_analysed, headline, ideas_json AS ideas, model_used, generated_at
+      FROM velocity_ideas
+      WHERE period_days = $1
+      ORDER BY generated_at DESC
+      LIMIT 1
+    `, [periodDays]);
+    res.json(rows.length > 0 ? rows[0] : null);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Coupon Export ──────────────────────────────────────────────────
 
 // POST /api/coupons/sync

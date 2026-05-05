@@ -9,12 +9,21 @@ let insightsCache       = {};
 let activeInsightsType  = 'hot';   // 'hot' | 'not_hot'
 let insightsRunning     = false;
 
+// ── Ideas state ─────────────────────────────────────────────────────
+// keyed by period (30/60/90): { headline, ideas, products_analysed, generated_at }
+let ideasCache   = {};
+let ideasRunning = false;
+
 // ── Element refs ───────────────────────────────────────────────────
 const resultsDiv        = document.getElementById('results');
 const analysisPanel     = document.getElementById('analysis-panel');
 const analysisLoading   = document.getElementById('analysis-loading');
 const analysisRunPrompt = document.getElementById('analysis-run-prompt');
 const analysisResults   = document.getElementById('analysis-results');
+const ideaFactoryPanel  = document.getElementById('idea-factory-panel');
+const ideaLoading       = document.getElementById('idea-loading');
+const ideaRunPrompt     = document.getElementById('idea-run-prompt');
+const ideaResults       = document.getElementById('idea-results');
 
 // ── HTML escape ────────────────────────────────────────────────────
 function esc(str) {
@@ -53,15 +62,23 @@ function setFilter(filter) {
   });
 
   const isAnalysis = filter === 'hot_analysis' || filter === 'cold_analysis';
+  const isIdeas    = filter === 'idea_factory';
   activeInsightsType = filter === 'cold_analysis' ? 'not_hot' : 'hot';
 
   if (isAnalysis) {
-    resultsDiv.style.display    = 'none';
-    analysisPanel.style.display = 'block';
+    resultsDiv.style.display        = 'none';
+    analysisPanel.style.display     = 'block';
+    ideaFactoryPanel.style.display  = 'none';
     showInsights();
+  } else if (isIdeas) {
+    resultsDiv.style.display        = 'none';
+    analysisPanel.style.display     = 'none';
+    ideaFactoryPanel.style.display  = 'block';
+    showIdeas();
   } else {
-    resultsDiv.style.display    = '';
-    analysisPanel.style.display = 'none';
+    resultsDiv.style.display        = '';
+    analysisPanel.style.display     = 'none';
+    ideaFactoryPanel.style.display  = 'none';
     renderStyles();
   }
 }
@@ -82,6 +99,7 @@ async function runReport() {
     '<div class="state-msg"><div class="spinner"></div><br>Fetching orders and calculating velocity…<br><small style="color:#94a3b8">This may take a moment for large catalogues.</small></div>';
   resultsDiv.style.display        = '';
   analysisPanel.style.display     = 'none';
+  ideaFactoryPanel.style.display  = 'none';
   document.getElementById('summary-row').style.display  = 'none';
   document.getElementById('filter-tabs').style.display  = 'none';
   document.getElementById('report-meta').textContent    = '';
@@ -435,4 +453,146 @@ function timeAgo(date) {
   if (secs < 3600)  return `${Math.floor(secs / 60)} min ago`;
   if (secs < 86400) return `${Math.floor(secs / 3600)} hr ago`;
   return `${Math.floor(secs / 86400)} day${Math.floor(secs / 86400) !== 1 ? 's' : ''} ago`;
+}
+
+// ── Idea Factory ────────────────────────────────────────────────────
+
+document.getElementById('btn-run-ideas').addEventListener('click', runIdeas);
+
+async function showIdeas() {
+  // In-memory cache hit — instant
+  if (ideasCache[activePeriod]) {
+    renderIdeas(ideasCache[activePeriod]);
+    return;
+  }
+
+  // Check server-side cache
+  ideaLoading.style.display   = 'block';
+  ideaRunPrompt.style.display = 'none';
+  ideaResults.style.display   = 'none';
+
+  try {
+    const r = await fetch(`/api/velocity/idea-factory/latest?days=${activePeriod}`);
+    if (r.ok) {
+      const data = await r.json();
+      if (data) {
+        ideasCache[activePeriod] = data;
+        renderIdeas(data);
+        return;
+      }
+    }
+  } catch (_) { /* fall through */ }
+
+  // No cached ideas — show run prompt
+  ideaLoading.style.display   = 'none';
+  ideaRunPrompt.style.display = 'block';
+  ideaResults.style.display   = 'none';
+}
+
+async function runIdeas() {
+  if (!reportData) {
+    alert('Please run the velocity report first, then click Generate Ideas.');
+    return;
+  }
+  if (ideasRunning) return;
+
+  ideasRunning = true;
+  ideaLoading.style.display   = 'block';
+  ideaRunPrompt.style.display = 'none';
+  ideaResults.style.display   = 'none';
+  document.getElementById('btn-run-ideas').disabled = true;
+
+  try {
+    const r = await fetch('/api/velocity/idea-factory', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ days: activePeriod, styles: reportData.styles }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: r.statusText }));
+      throw new Error(err.error || r.statusText);
+    }
+    const data = await r.json();
+    ideasCache[activePeriod] = data;
+    renderIdeas(data);
+  } catch (err) {
+    ideaLoading.style.display   = 'none';
+    ideaRunPrompt.style.display = 'block';
+    ideaResults.innerHTML =
+      `<div class="state-msg" style="color:#b91c1c; padding:16px 0">&#9888; ${esc(err.message)}</div>`;
+    ideaResults.style.display = 'block';
+  } finally {
+    ideasRunning = false;
+    document.getElementById('btn-run-ideas').disabled = false;
+  }
+}
+
+function renderIdeas(data) {
+  ideaLoading.style.display   = 'none';
+  ideaRunPrompt.style.display = 'none';
+  ideaResults.style.display   = 'block';
+
+  const { headline, ideas, generated_at, products_analysed } = data;
+
+  if (!ideas || ideas.length === 0) {
+    ideaResults.innerHTML = '<div class="state-msg">No ideas were generated. Try running the report again.</div>';
+    return;
+  }
+
+  const genAt  = generated_at ? new Date(generated_at) : null;
+  const genAgo = genAt ? timeAgo(genAt) : '';
+
+  const priorityOrder = { high: 0, medium: 1, low: 2 };
+  const sorted = [...ideas].sort((a, b) =>
+    (priorityOrder[a.priority] ?? 9) - (priorityOrder[b.priority] ?? 9)
+  );
+
+  const cards = sorted.map((idea) => {
+    const priCls   = `idea-card-${idea.priority || 'low'}`;
+    const priLabel = (idea.priority || 'low').charAt(0).toUpperCase() + (idea.priority || 'low').slice(1);
+    const priBadge = `idea-priority-${idea.priority || 'low'}`;
+
+    const productsHtml = idea.products && idea.products.length > 0
+      ? `<div class="idea-products">
+           ${idea.products.slice(0, 6).map((p) => `<span class="idea-product-chip">${esc(p)}</span>`).join('')}
+           ${idea.products.length > 6 ? `<span class="idea-product-chip">+${idea.products.length - 6} more</span>` : ''}
+         </div>`
+      : '';
+
+    return `
+      <div class="idea-card ${priCls}">
+        <div class="idea-card-top">
+          <div class="idea-icon">${esc(idea.icon || '💡')}</div>
+          <div class="idea-header">
+            <div class="idea-category">${esc(idea.category || '')}</div>
+            <div class="idea-title">${esc(idea.title)}</div>
+          </div>
+          <span class="idea-priority ${priBadge}">${priLabel}</span>
+        </div>
+        <div class="idea-action">${esc(idea.action)}</div>
+        ${productsHtml}
+        ${idea.rationale ? `<div class="idea-rationale">${esc(idea.rationale)}</div>` : ''}
+      </div>`;
+  }).join('');
+
+  ideaResults.innerHTML = `
+    <div class="insights-header">
+      <h2>💡 Idea Factory</h2>
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        ${products_analysed ? `<span style="color:#94a3b8; font-size:0.82rem;">${products_analysed} products analysed</span>` : ''}
+        ${genAgo ? `<span style="color:#94a3b8; font-size:0.82rem;">Generated ${genAgo}</span>` : ''}
+        <button class="btn btn-secondary" id="btn-regenerate"
+                style="font-size:0.82rem; padding:6px 14px; touch-action:manipulation;">
+          ↺ Re-generate
+        </button>
+      </div>
+    </div>
+    ${headline ? `<div class="ideas-headline">${esc(headline)}</div>` : ''}
+    <div class="ideas-grid">${cards}</div>
+  `;
+
+  document.getElementById('btn-regenerate').addEventListener('click', () => {
+    delete ideasCache[activePeriod];
+    runIdeas();
+  });
 }
