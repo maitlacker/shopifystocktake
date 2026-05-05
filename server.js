@@ -876,13 +876,15 @@ app.get('/api/picking/orders', async (req, res) => {
       lastFetched   = new Date();
     }
 
-    // Build variant→image map from products cache
+    // Build variant→image and variant→stock maps from products cache
     const variantImageMap = {};
+    const variantStockMap = {};
     for (const p of productsCache) {
       const productImg = p.images?.[0]?.src || null;
       for (const v of p.variants) {
         const variantImg = p.images?.find(img => img.id === v.image_id)?.src || productImg;
         variantImageMap[String(v.id)] = variantImg;
+        variantStockMap[String(v.id)] = v.inventory_quantity ?? null;
       }
     }
 
@@ -917,6 +919,7 @@ app.get('/api/picking/orders', async (req, res) => {
             sku:          item.sku || '',
             qty:          item.quantity,
             image:        variantImageMap[String(item.variant_id)] || null,
+            stock:        variantStockMap[String(item.variant_id)] ?? null,
           });
         }
       }

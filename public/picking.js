@@ -183,7 +183,10 @@ function renderList(data) {
         </div>
         <div class="pick-right">
           <div class="pick-order-num">#${item.orderNumber}</div>
-          <div class="pick-qty${isMulti ? ' multi' : ''}">${item.qty}</div>
+          <div class="pick-qty-row">
+            <div class="pick-qty${isMulti ? ' multi' : ''}">${item.qty}</div>
+            ${item.stock !== null ? `<div class="pick-stock">${item.stock} left</div>` : ''}
+          </div>
         </div>
       </div>
     `;
