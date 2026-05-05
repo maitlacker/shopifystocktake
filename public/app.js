@@ -14,10 +14,6 @@ const resultsEl      = document.getElementById('results');
 const btnPdf         = document.getElementById('btn-pdf');
 const cacheStatus    = document.getElementById('cache-status');
 const userBadge      = document.getElementById('user-badge');
-const initialsOverlay = document.getElementById('initials-overlay');
-const initialsInput  = document.getElementById('initials-input');
-const initialsBtn    = document.getElementById('initials-btn');
-const initialsError  = document.getElementById('initials-error');
 
 /* ── Helpers ───────────────────────────────────────────────────── */
 function debounce(fn, ms) {
@@ -50,40 +46,18 @@ function escHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-/* ── Initials modal ────────────────────────────────────────────── */
-function showInitialsModal() {
-  initialsOverlay.classList.add('active');
-  setTimeout(() => initialsInput.focus(), 100);
-}
-
-function closeInitialsModal(initials) {
-  state.initials = initials.toUpperCase().trim();
-  sessionStorage.setItem('stocktake_initials', state.initials);
-  initialsOverlay.classList.remove('active');
-  userBadge.textContent = `Signed in as: ${state.initials}`;
-}
-
-function confirmInitials() {
-  const val = initialsInput.value.trim();
-  if (!val || val.length < 1) {
-    initialsError.textContent = 'Please enter your initials.';
-    return;
-  }
-  closeInitialsModal(val);
-}
-
-initialsBtn.addEventListener('click', confirmInitials);
-initialsInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') confirmInitials();
-});
-
-// Check if initials already set this session
-const savedInitials = sessionStorage.getItem('stocktake_initials');
-if (savedInitials) {
-  closeInitialsModal(savedInitials);
-} else {
-  showInitialsModal();
-}
+/* ── Auto-derive initials from logged-in Google account ─────────── */
+fetch('/api/me')
+  .then((r) => r.ok ? r.json() : null)
+  .then((user) => {
+    if (!user) return;
+    const name = user.displayName || user.email || '';
+    // "Jane Smith" → "JS", "Mary Jane Watson" → "MJW"
+    const initials = name.trim().split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 4);
+    state.initials = initials || name.slice(0, 4).toUpperCase();
+    userBadge.textContent = name;
+  })
+  .catch(() => {});
 
 
 /* ── Search ────────────────────────────────────────────────────── */
