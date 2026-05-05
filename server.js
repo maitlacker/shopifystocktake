@@ -1440,7 +1440,7 @@ Provide 4-7 clusters per section. Be specific — reference actual words and phr
     console.log(`[velocity/insights] Calling Claude: ${hotStyles.length} hot + ${coldStyles.length} cold, period=${periodDays}d`);
 
     const message = await anthropicClient.messages.create({
-      model: 'claude-3-5-haiku-20241022',
+      model: 'claude-haiku-4-5',
       max_tokens: 2048,
       messages: [{ role: 'user', content: prompt }],
     });
@@ -1466,7 +1466,7 @@ Provide 4-7 clusters per section. Be specific — reference actual words and phr
       hotStyles.length + coldStyles.length,
       JSON.stringify(parsed.hot    || {}),
       JSON.stringify(parsed.not_hot || {}),
-      message.model || 'claude-3-5-haiku-20241022',
+      message.model || 'claude-haiku-4-5',
     ]);
 
     res.json({
@@ -1633,7 +1633,7 @@ Prioritise the ideas that will have the most immediate financial impact.`;
     console.log(`[idea-factory] Calling Claude Sonnet: ${productsAnalysed} products, period=${periodDays}d`);
 
     const message = await anthropicClient.messages.create({
-      model:      'claude-3-5-sonnet-20241022',
+      model:      'claude-sonnet-4-5',
       max_tokens: 4096,
       messages:   [{ role: 'user', content: prompt }],
     });
@@ -1656,7 +1656,7 @@ Prioritise the ideas that will have the most immediate financial impact.`;
     await pool.query(`
       INSERT INTO velocity_ideas (period_days, products_analysed, headline, ideas_json, model_used)
       VALUES ($1, $2, $3, $4, $5)
-    `, [periodDays, productsAnalysed, headline, JSON.stringify(ideas), message.model || 'claude-3-5-sonnet-20241022']);
+    `, [periodDays, productsAnalysed, headline, JSON.stringify(ideas), message.model || 'claude-sonnet-4-5']);
 
     res.json({ ok: true, period_days: periodDays, headline, ideas, products_analysed: productsAnalysed, generated_at: new Date().toISOString() });
 
