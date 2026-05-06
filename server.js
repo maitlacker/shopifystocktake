@@ -16,6 +16,7 @@ const Anthropic        = require('@anthropic-ai/sdk');
 const ideasCron        = require('./ideas-cron');
 const metaAds          = require('./meta-ads-sync');
 const xeroSync         = require('./xero-sync');
+const weeklyPulse      = require('./weekly-pulse');
 
 const anthropicClient = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -2553,6 +2554,71 @@ app.get('/api/margin/feed.tsv', async (req, res) => {
   }
 });
 
+// ── Xero — Balance Sheet ───────────────────────────────────────────
+
+// POST /api/xero/sync-balance-sheet
+app.post('/api/xero/sync-balance-sheet', async (req, res) => {
+  try {
+    const result = await xeroSync.syncBalanceSheet();
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[xero/balance-sheet] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/xero/balance-sheet — latest snapshot for the BI dashboard
+app.get('/api/xero/balance-sheet', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT report_date, section, subsection, account_name, value
+      FROM xero_balance_sheet
+      WHERE report_date = (SELECT MAX(report_date) FROM xero_balance_sheet)
+      ORDER BY section, subsection NULLS LAST, value DESC
+    `);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/xero/pl-lines?month=YYYY-MM — line items for a given month
+app.get('/api/xero/pl-lines', async (req, res) => {
+  const { month } = req.query;
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ error: 'month must be YYYY-MM' });
+  }
+  try {
+    const { rows } = await pool.query(`
+      SELECT section, account_name, value
+      FROM xero_pl_lines
+      WHERE to_char(period_start, 'YYYY-MM') = $1
+      ORDER BY section, value DESC
+    `, [month]);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Weekly Business Pulse ──────────────────────────────────────────
+
+// GET /api/weekly-pulse/status
+app.get('/api/weekly-pulse/status', (req, res) => {
+  res.json(weeklyPulse.getStatus());
+});
+
+// POST /api/weekly-pulse/run  — manual trigger
+app.post('/api/weekly-pulse/run', async (req, res) => {
+  try {
+    const result = await weeklyPulse.runWeeklyPulse();
+    res.json(result);
+  } catch (err) {
+    console.error('[weekly-pulse/run] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Business Intelligence ──────────────────────────────────────────
 
 // GET /api/bi/summary?start=YYYY-MM-DD&end=YYYY-MM-DD
@@ -2695,6 +2761,7 @@ initDb()
     ideasCron.startCron(pool, anthropicClient);
     metaAds.startCron(pool);
     xeroSync.startCron(pool);
+    weeklyPulse.startCron(pool, anthropicClient);
 
     // Recalculate margin tiers nightly at 02:00
     cron.schedule('0 2 * * *', async () => {

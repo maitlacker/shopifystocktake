@@ -103,7 +103,7 @@ async function getValidAccessToken() {
 // ── OAuth flow ─────────────────────────────────────────────────────
 function getAuthUrl(redirectUri, state) {
   const clientId = process.env.XERO_CLIENT_ID;
-  const scopes   = 'openid offline_access accounting.reports.profitandloss.read';
+  const scopes   = 'openid offline_access accounting.reports.profitandloss.read accounting.reports.balancesheet.read';
   // Build manually — URLSearchParams encodes spaces as + but Xero requires %20
   return `${XERO_AUTH}` +
     `?response_type=code` +
@@ -192,7 +192,6 @@ function parseProfitAndLoss(report) {
       if (!section.Title) continue;
       const title = section.Title.toLowerCase();
       if (!title.includes(sectionTitle.toLowerCase())) continue;
-      // Find the summary row (last row in section)
       const sectionRows = section.Rows || [];
       const summaryRow  = sectionRows.find(r => r.RowType === 'SummaryRow');
       if (summaryRow?.Cells?.length >= 2) {
@@ -211,7 +210,77 @@ function parseProfitAndLoss(report) {
   return result;
 }
 
-// ── Sync P&L for a given month range ──────────────────────────────
+// ── Extract individual P&L line items (account-level detail) ───────
+function parsePLLines(report) {
+  const sections = report.Reports?.[0]?.Rows || [];
+  const lines = [];
+
+  for (const section of sections) {
+    if (section.RowType !== 'Section' || !section.Title) continue;
+    const sectionTitle = section.Title.trim();
+
+    for (const row of (section.Rows || [])) {
+      if (row.RowType !== 'Row') continue;
+      const cells = row.Cells || [];
+      if (cells.length < 2) continue;
+
+      const accountName = (cells[0]?.Value || '').trim();
+      const rawValue    = cells[1]?.Value;
+      if (!accountName || rawValue === '' || rawValue == null) continue;
+
+      const value = parseFloat(rawValue);
+      if (isNaN(value)) continue;
+
+      lines.push({ section: sectionTitle, account_name: accountName, value });
+    }
+  }
+
+  return lines;
+}
+
+// ── Extract Balance Sheet line items ───────────────────────────────
+function parseBSLines(report) {
+  const topRows = report.Reports?.[0]?.Rows || [];
+  const lines   = [];
+
+  for (const section of topRows) {
+    if (section.RowType !== 'Section' || !section.Title) continue;
+    const sectionTitle = section.Title.trim();
+
+    for (const row of (section.Rows || [])) {
+      // Xero balance sheet has nested sections (e.g. "Current Assets" inside "Assets")
+      if (row.RowType === 'Section') {
+        const subsectionTitle = (row.Title || '').trim() || null;
+        for (const subrow of (row.Rows || [])) {
+          if (subrow.RowType !== 'Row') continue;
+          const cells = subrow.Cells || [];
+          if (cells.length < 2) continue;
+          const accountName = (cells[0]?.Value || '').trim();
+          const rawValue    = cells[1]?.Value;
+          if (!accountName || rawValue === '' || rawValue == null) continue;
+          const value = parseFloat(rawValue);
+          if (isNaN(value)) continue;
+          lines.push({ section: sectionTitle, subsection: subsectionTitle, account_name: accountName, value });
+        }
+        continue;
+      }
+
+      if (row.RowType !== 'Row') continue;
+      const cells = row.Cells || [];
+      if (cells.length < 2) continue;
+      const accountName = (cells[0]?.Value || '').trim();
+      const rawValue    = cells[1]?.Value;
+      if (!accountName || rawValue === '' || rawValue == null) continue;
+      const value = parseFloat(rawValue);
+      if (isNaN(value)) continue;
+      lines.push({ section: sectionTitle, subsection: null, account_name: accountName, value });
+    }
+  }
+
+  return lines;
+}
+
+// ── Sync P&L for a given month range (summaries + line items) ─────
 async function syncProfitAndLoss(monthsBack = 3) {
   const tenantId = await getTenantId();
   if (!tenantId) throw new Error('Xero not connected');
@@ -230,6 +299,7 @@ async function syncProfitAndLoss(monthsBack = 3) {
     const data   = await xeroGet('/Reports/ProfitAndLoss', { fromDate: start, toDate: end });
     const parsed = parseProfitAndLoss(data);
 
+    // Save top-level summary
     await _pool.query(
       `INSERT INTO xero_financials
          (period_start, period_end, report_type, revenue, cogs, gross_profit, expenses, net_profit, raw_json)
@@ -246,11 +316,52 @@ async function syncProfitAndLoss(monthsBack = 3) {
        parsed.expenses, parsed.netProfit, JSON.stringify(data)]
     );
 
-    synced.push({ month: start.slice(0, 7), ...parsed });
+    // Save individual account line items
+    const lines = parsePLLines(data);
+    for (const line of lines) {
+      await _pool.query(
+        `INSERT INTO xero_pl_lines (period_start, period_end, section, account_name, value)
+         VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (period_start, section, account_name) DO UPDATE SET
+           value     = EXCLUDED.value,
+           synced_at = NOW()`,
+        [start, end, line.section, line.account_name, line.value]
+      );
+    }
+    console.log(`[xero] Saved ${lines.length} P&L line items for ${start}`);
+
+    synced.push({ month: start.slice(0, 7), ...parsed, lineItems: lines.length });
   }
 
   console.log(`[xero] Synced ${synced.length} months of P&L`);
   return { months: synced.length, data: synced };
+}
+
+// ── Sync Balance Sheet (point-in-time snapshot) ────────────────────
+async function syncBalanceSheet() {
+  const tenantId = await getTenantId();
+  if (!tenantId) throw new Error('Xero not connected');
+
+  const today = new Date().toISOString().slice(0, 10);
+  console.log(`[xero] Fetching Balance Sheet as at ${today}`);
+
+  const data  = await xeroGet('/Reports/BalanceSheet', { date: today });
+  const lines = parseBSLines(data);
+
+  for (const line of lines) {
+    await _pool.query(
+      `INSERT INTO xero_balance_sheet (report_date, section, subsection, account_name, value)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (report_date, section, account_name) DO UPDATE SET
+         subsection = EXCLUDED.subsection,
+         value      = EXCLUDED.value,
+         synced_at  = NOW()`,
+      [today, line.section, line.subsection, line.account_name, line.value]
+    );
+  }
+
+  console.log(`[xero] Balance Sheet synced — ${lines.length} line items as at ${today}`);
+  return { date: today, lines: lines.length };
 }
 
 // ── Status helpers ─────────────────────────────────────────────────
@@ -304,6 +415,7 @@ function getStatus() {
 }
 
 module.exports = {
-  startCron, syncProfitAndLoss, getConnectionStatus, getLastSync,
+  startCron, syncProfitAndLoss, syncBalanceSheet,
+  getConnectionStatus, getLastSync,
   getAuthUrl, handleOAuthCallback, getStatus,
 };

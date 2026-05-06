@@ -156,8 +156,28 @@
           <a href="/auth/xero/connect" class="btn btn-primary" id="btn-xero-connect" style="display:none">🔗 Connect Xero</a>
           <button id="btn-xero-full" class="btn btn-primary" style="display:none">⟳ Full Sync (3 months)</button>
           <button id="btn-xero-daily" class="btn btn-secondary" style="display:none">⟳ Sync This Month</button>
+          <button id="btn-xero-bs" class="btn btn-secondary" style="display:none">📋 Sync Balance Sheet</button>
         </div>
         <div id="xero-log" class="sync-log" style="display:none"></div>
+      </div>
+
+      <!-- Weekly Business Pulse -->
+      <div class="sync-card" id="card-weekly-pulse">
+        <div class="sync-card-header">
+          <div class="sync-card-icon">📈</div>
+          <div>
+            <div class="sync-card-title">Weekly Business Pulse</div>
+            <div class="sync-card-desc">Every Monday at 8am AEST, Claude analyses all data sources — Shopify, Google Ads, Meta Ads, Xero P&L and Balance Sheet — and posts a concise strategic report with benchmarks and top 3 actions to your Slack channel.</div>
+          </div>
+        </div>
+        <div class="sync-status">
+          <span class="sync-status-dot sync-status-dot--idle" id="pulse-dot"></span>
+          <span id="pulse-status-text">Loading…</span>
+        </div>
+        <div class="sync-card-actions">
+          <button id="btn-pulse-run" class="btn btn-primary">▶ Run Now &amp; Post to Slack</button>
+        </div>
+        <div id="pulse-log" class="sync-log" style="display:none"></div>
       </div>
 
       <!-- Idea Factory Cron -->

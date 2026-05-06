@@ -338,6 +338,7 @@ const xeroLog        = document.getElementById('xero-log');
 const btnXeroConnect = document.getElementById('btn-xero-connect');
 const btnXeroFull    = document.getElementById('btn-xero-full');
 const btnXeroDaily   = document.getElementById('btn-xero-daily');
+const btnXeroBs      = document.getElementById('btn-xero-bs');
 
 function setXeroStatus(state, text) {
   xeroDot.className = `sync-status-dot sync-status-dot--${state}`;
@@ -363,11 +364,13 @@ async function loadXeroStatus() {
       btnXeroConnect.style.display = 'none';
       btnXeroFull.style.display    = '';
       btnXeroDaily.style.display   = '';
+      btnXeroBs.style.display      = '';
     } else {
       setXeroStatus('idle', 'Not connected');
       btnXeroConnect.style.display = '';
       btnXeroFull.style.display    = 'none';
       btnXeroDaily.style.display   = 'none';
+      btnXeroBs.style.display      = 'none';
     }
   } catch {
     setXeroStatus('error', 'Could not load status');
@@ -377,6 +380,7 @@ async function loadXeroStatus() {
 async function runXeroSync(months) {
   btnXeroFull.disabled  = true;
   btnXeroDaily.disabled = true;
+  btnXeroBs.disabled    = true;
   setXeroStatus('syncing', `Syncing ${months} month${months !== 1 ? 's' : ''} of P&L…`);
   appendXeroLog(`Syncing Xero P&L — ${months} month${months !== 1 ? 's' : ''}…`);
   try {
@@ -401,8 +405,31 @@ async function runXeroSync(months) {
   } finally {
     btnXeroFull.disabled  = false;
     btnXeroDaily.disabled = false;
+    btnXeroBs.disabled    = false;
   }
 }
+
+btnXeroBs.addEventListener('click', async () => {
+  btnXeroFull.disabled  = true;
+  btnXeroDaily.disabled = true;
+  btnXeroBs.disabled    = true;
+  setXeroStatus('syncing', 'Syncing Balance Sheet…');
+  appendXeroLog('Fetching Balance Sheet from Xero…');
+  try {
+    const res  = await fetch('/api/xero/sync-balance-sheet', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Sync failed');
+    appendXeroLog(`Done — ${data.lines} line items as at ${data.date}`, 'success');
+    await loadXeroStatus();
+  } catch (err) {
+    setXeroStatus('error', 'Balance Sheet sync failed');
+    appendXeroLog(`Error: ${err.message}`, 'error');
+  } finally {
+    btnXeroFull.disabled  = false;
+    btnXeroDaily.disabled = false;
+    btnXeroBs.disabled    = false;
+  }
+});
 
 btnXeroFull.addEventListener('click',  () => runXeroSync(3));
 btnXeroDaily.addEventListener('click', () => runXeroSync(1));
@@ -607,3 +634,69 @@ btnIdeasRun.addEventListener('click', async () => {
     btnIdeasRun.disabled = false;
   }
 });
+
+// ── Weekly Business Pulse card ─────────────────────────────────────
+const pulseDot      = document.getElementById('pulse-dot');
+const pulseStatusTxt= document.getElementById('pulse-status-text');
+const pulseLog      = document.getElementById('pulse-log');
+const btnPulseRun   = document.getElementById('btn-pulse-run');
+
+function setPulseStatus(state, text) {
+  pulseDot.className    = `sync-status-dot sync-status-dot--${state}`;
+  pulseStatusTxt.textContent = text;
+}
+
+function appendPulseLog(msg, type = 'info') {
+  pulseLog.style.display = 'block';
+  const line = document.createElement('div');
+  line.className   = `sync-log-line sync-log-line--${type}`;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  pulseLog.appendChild(line);
+  pulseLog.scrollTop = pulseLog.scrollHeight;
+}
+
+async function loadPulseStatus() {
+  try {
+    const res  = await fetch('/api/weekly-pulse/status');
+    const data = await res.json();
+    if (data.isRunning) {
+      setPulseStatus('syncing', 'Generating pulse report…');
+    } else if (data.lastRun) {
+      const slackNote = data.slackConfigured ? '' : ' · ⚠ Slack webhook not set';
+      const statusTxt = data.lastResult?.error
+        ? `Last run ${formatRelative(data.lastRun)} — error: ${data.lastResult.error}`
+        : `Last run ${formatRelative(data.lastRun)} ✓${slackNote}`;
+      setPulseStatus(data.lastResult?.error ? 'error' : 'ok', statusTxt);
+    } else {
+      const slackNote = data.slackConfigured ? '' : ' · ⚠ SLACK_IDEAS_WEBHOOK_URL not set';
+      setPulseStatus('idle', `Scheduled Mon 8am AEST (${data.schedule}). Not run yet.${slackNote}`);
+    }
+  } catch {
+    setPulseStatus('error', 'Could not load status');
+  }
+}
+
+btnPulseRun.addEventListener('click', async () => {
+  btnPulseRun.disabled = true;
+  setPulseStatus('syncing', 'Running — gathering data and calling Claude (takes ~30s)…');
+  appendPulseLog('Starting weekly pulse generation…');
+
+  try {
+    const res  = await fetch('/api/weekly-pulse/run', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Unknown error');
+    if (data.skipped) {
+      appendPulseLog('Already running — try again in a moment.', 'info');
+    } else {
+      appendPulseLog(`Done — ${data.chars} chars posted to Slack ✓`, 'success');
+    }
+    await loadPulseStatus();
+  } catch (err) {
+    setPulseStatus('error', 'Failed');
+    appendPulseLog(`Error: ${err.message}`, 'error');
+  } finally {
+    btnPulseRun.disabled = false;
+  }
+});
+
+loadPulseStatus();

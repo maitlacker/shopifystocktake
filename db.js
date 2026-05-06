@@ -321,6 +321,34 @@ async function initDb() {
       token_expiry    TIMESTAMPTZ,
       connected_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS xero_pl_lines (
+      id           SERIAL PRIMARY KEY,
+      period_start DATE NOT NULL,
+      period_end   DATE NOT NULL,
+      section      TEXT NOT NULL,
+      account_name TEXT NOT NULL,
+      value        DECIMAL(14,2) NOT NULL DEFAULT 0,
+      synced_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(period_start, section, account_name)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_xero_pl_lines_period
+      ON xero_pl_lines(period_start DESC);
+
+    CREATE TABLE IF NOT EXISTS xero_balance_sheet (
+      id           SERIAL PRIMARY KEY,
+      report_date  DATE NOT NULL,
+      section      TEXT NOT NULL,
+      subsection   TEXT,
+      account_name TEXT NOT NULL,
+      value        DECIMAL(14,2) NOT NULL DEFAULT 0,
+      synced_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(report_date, section, account_name)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_xero_balance_sheet_date
+      ON xero_balance_sheet(report_date DESC);
   `);
 }
 
