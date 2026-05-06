@@ -2553,6 +2553,137 @@ app.get('/api/margin/feed.tsv', async (req, res) => {
   }
 });
 
+// ── Business Intelligence ──────────────────────────────────────────
+
+// GET /api/bi/summary?start=YYYY-MM-DD&end=YYYY-MM-DD
+// Returns aggregated Shopify, Google Ads, Meta Ads, and Xero data for the period.
+// Restricted to specific management emails.
+const BI_ALLOWED_EMAILS = ['accounts@theselfstyler.com', 'bianca@theselfstyler.com'];
+
+app.get('/api/bi/summary', async (req, res) => {
+  if (!BI_ALLOWED_EMAILS.includes(req.user?.email)) {
+    return res.status(403).json({ error: 'Access restricted' });
+  }
+
+  const { start, end } = req.query;
+  if (!start || !end ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(start) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+    return res.status(400).json({ error: 'start and end (YYYY-MM-DD) are required' });
+  }
+
+  try {
+    // ── Shopify ──────────────────────────────────────────────────
+    const { rows: sRows } = await pool.query(`
+      SELECT
+        COALESCE(SUM(revenue),    0) AS revenue,
+        COALESCE(SUM(orders),     0) AS orders,
+        COALESCE(SUM(items_sold), 0) AS items_sold,
+        SUM(sessions)                AS sessions,
+        COUNT(*)                     AS days_with_data
+      FROM shopify_daily
+      WHERE date >= $1 AND date <= $2
+    `, [start, end]);
+
+    // ── Google Ads ───────────────────────────────────────────────
+    const { rows: gRows } = await pool.query(`
+      SELECT
+        COALESCE(SUM(cost),             0) AS spend,
+        COALESCE(SUM(impressions),      0) AS impressions,
+        COALESCE(SUM(clicks),           0) AS clicks,
+        COALESCE(SUM(conversions),      0) AS conversions,
+        COALESCE(SUM(conversion_value), 0) AS conversion_value
+      FROM google_ads_daily
+      WHERE date >= $1 AND date <= $2
+    `, [start, end]);
+
+    // ── Meta Ads ─────────────────────────────────────────────────
+    const { rows: mRows } = await pool.query(`
+      SELECT
+        COALESCE(SUM(spend),          0) AS spend,
+        COALESCE(SUM(impressions),    0) AS impressions,
+        COALESCE(SUM(clicks),         0) AS clicks,
+        COALESCE(SUM(purchases),      0) AS purchases,
+        COALESCE(SUM(purchase_value), 0) AS purchase_value
+      FROM meta_ads_daily
+      WHERE date >= $1 AND date <= $2
+    `, [start, end]);
+
+    // ── Xero P&L — months overlapping the selected period ────────
+    const { rows: xRows } = await pool.query(`
+      SELECT
+        to_char(period_start, 'YYYY-MM') AS month,
+        revenue, cogs, gross_profit, expenses, net_profit
+      FROM xero_financials
+      WHERE report_type = 'ProfitAndLoss'
+        AND period_end   >= $1
+        AND period_start <= $2
+      ORDER BY period_start DESC
+    `, [start, end]);
+
+    const s = sRows[0];
+    const g = gRows[0];
+    const m = mRows[0];
+
+    const sRevenue  = parseFloat(s.revenue);
+    const sOrders   = parseInt(s.orders,     10);
+    const sItems    = parseInt(s.items_sold, 10);
+    const sSessions = s.sessions != null ? parseInt(s.sessions, 10) : null;
+
+    const gSpend    = parseFloat(g.spend);
+    const gConvVal  = parseFloat(g.conversion_value);
+    const mSpend    = parseFloat(m.spend);
+    const mPurchVal = parseFloat(m.purchase_value);
+    const totalSpend = gSpend + mSpend;
+
+    res.json({
+      period: { start, end },
+      shopify: {
+        revenue:        sRevenue,
+        orders:         sOrders,
+        itemsSold:      sItems,
+        sessions:       sSessions,
+        aov:            sOrders > 0 ? sRevenue / sOrders : 0,
+        conversionRate: (sSessions != null && sSessions > 0)
+                          ? (sOrders / sSessions) * 100 : null,
+        daysWithData:   parseInt(s.days_with_data, 10),
+      },
+      googleAds: {
+        spend:           gSpend,
+        impressions:     parseInt(g.impressions, 10),
+        clicks:          parseInt(g.clicks, 10),
+        conversions:     parseFloat(g.conversions),
+        conversionValue: gConvVal,
+        roas:            gSpend > 0 ? gConvVal / gSpend : 0,
+      },
+      metaAds: {
+        spend:         mSpend,
+        impressions:   parseInt(m.impressions, 10),
+        clicks:        parseInt(m.clicks, 10),
+        purchases:     parseFloat(m.purchases),
+        purchaseValue: mPurchVal,
+        roas:          mSpend > 0 ? mPurchVal / mSpend : 0,
+      },
+      combined: {
+        totalAdSpend:   totalSpend,
+        mer:            totalSpend > 0 ? sRevenue / totalSpend : 0,
+        adCostPerOrder: sOrders  > 0 ? totalSpend / sOrders  : 0,
+      },
+      xero: xRows.map((r) => ({
+        month:       r.month,
+        revenue:     parseFloat(r.revenue),
+        cogs:        parseFloat(r.cogs),
+        grossProfit: parseFloat(r.gross_profit),
+        expenses:    parseFloat(r.expenses),
+        netProfit:   parseFloat(r.net_profit),
+      })),
+    });
+  } catch (err) {
+    console.error('[bi/summary] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 

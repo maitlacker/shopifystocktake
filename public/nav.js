@@ -2,6 +2,9 @@
 (function () {
   const path = window.location.pathname;
 
+  // Emails allowed to see restricted nav items (BI Dashboard)
+  const BI_ALLOWED = ['accounts@theselfstyler.com', 'bianca@theselfstyler.com'];
+
   const NAV_ITEMS = [
     {
       label: 'Stocktake',
@@ -16,6 +19,7 @@
     {
       label: 'Reports',
       children: [
+        { label: 'BI Dashboard',          href: '/bi-dashboard.html', restrict: BI_ALLOWED },
         { label: 'Sales Velocity',        href: '/velocity.html' },
         { label: 'Shopify Daily Report',  href: '/shopify-report.html' },
         { label: 'Google Ads',            href: '/google-ads.html' },
@@ -62,9 +66,11 @@
         ${group.label}<span class="nav-caret">&#9660;</span>
       </button>
       <div class="nav-dropdown-menu">
-        ${group.children.map((c) => `
-          <a href="${c.href}" class="nav-dropdown-item${isItemActive(c.href) ? ' nav-dropdown-item--active' : ''}">${c.label}</a>
-        `).join('')}
+        ${group.children.map((c) => {
+          const restricted  = c.restrict ? ` style="display:none" data-restrict="${c.restrict.join(',')}"` : '';
+          const activeCls   = isItemActive(c.href) ? ' nav-dropdown-item--active' : '';
+          return `<a href="${c.href}" class="nav-dropdown-item${activeCls}"${restricted}>${c.label}</a>`;
+        }).join('')}
       </div>
     </div>
   `).join('');
@@ -93,6 +99,13 @@
     })
     .then((user) => {
       if (!user) return;
+
+      // Reveal restricted nav items if this user is on the allow-list
+      document.querySelectorAll('[data-restrict]').forEach((el) => {
+        const allowed = el.dataset.restrict.split(',');
+        if (allowed.includes(user.email)) el.style.display = '';
+      });
+
       const nameEl = document.getElementById('nav-user-name');
       if (!nameEl) return;
       if (user.photo) {
