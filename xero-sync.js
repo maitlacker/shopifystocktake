@@ -103,7 +103,7 @@ async function getValidAccessToken() {
 // ── OAuth flow ─────────────────────────────────────────────────────
 function getAuthUrl(redirectUri, state) {
   const clientId = process.env.XERO_CLIENT_ID;
-  const scopes   = 'openid profile email accounting.reports.read accounting.transactions.read offline_access';
+  const scopes   = 'openid profile email accounting.reports.read offline_access';
   const params   = new URLSearchParams({
     response_type: 'code',
     client_id:     clientId,
