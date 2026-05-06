@@ -103,7 +103,7 @@ async function getValidAccessToken() {
 // ── OAuth flow ─────────────────────────────────────────────────────
 function getAuthUrl(redirectUri, state) {
   const clientId = process.env.XERO_CLIENT_ID;
-  const scopes   = 'openid profile email accounting.reports.read offline_access';
+  const scopes   = 'openid offline_access accounting.reports.read';
   // Build manually — URLSearchParams encodes spaces as + but Xero requires %20
   return `${XERO_AUTH}` +
     `?response_type=code` +
