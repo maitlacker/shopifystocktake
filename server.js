@@ -1786,6 +1786,17 @@ app.get('/auth/xero/callback', requireAuth, async (req, res) => {
   }
 });
 
+app.post('/api/xero/disconnect', requireAuth, async (req, res) => {
+  try {
+    await pool.query(
+      `DELETE FROM app_settings WHERE key IN ('xero_tokens','xero_tenant_id','xero_tenant_name')`
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/xero/status', requireAuth, async (req, res) => {
   try {
     const [connection, lastSync] = await Promise.all([
