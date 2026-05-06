@@ -1697,6 +1697,16 @@ app.post('/api/ideas-cron/run', requireAuth, async (req, res) => {
   res.json(result);
 });
 
+// POST /api/ideas-cron/push-current — post all current DB ideas to Slack (one-off)
+app.post('/api/ideas-cron/push-current', requireAuth, async (req, res) => {
+  try {
+    const result = await ideasCron.pushCurrentToSlack();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Coupon Export ──────────────────────────────────────────────────
 
 // POST /api/coupons/sync

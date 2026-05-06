@@ -356,6 +356,7 @@ btnAlertsRun.addEventListener('click', async () => {
 });
 
 // ── Idea Factory cron card ─────────────────────────────────────────
+const btnIdeasPush = document.getElementById('btn-ideas-push');
 const btnIdeasRun  = document.getElementById('btn-ideas-run');
 const ideasDot     = document.getElementById('ideas-dot');
 const ideasStatus  = document.getElementById('ideas-status-text');
@@ -398,6 +399,25 @@ async function loadIdeasStatus() {
 }
 
 loadIdeasStatus();
+
+btnIdeasPush.addEventListener('click', async () => {
+  btnIdeasPush.disabled = true;
+  btnIdeasRun.disabled  = true;
+  appendIdeasLog('Posting all current ideas to Slack…');
+
+  try {
+    const res  = await fetch('/api/ideas-cron/push-current', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.message || data.error || 'Unknown error');
+    appendIdeasLog(`Done — ${data.count} ideas posted to Slack ✓`, 'success');
+    appendIdeasLog('From now on the daily cron will only post NEW ideas vs this snapshot.', 'info');
+  } catch (err) {
+    appendIdeasLog(`Error: ${err.message}`, 'error');
+  } finally {
+    btnIdeasPush.disabled = false;
+    btnIdeasRun.disabled  = false;
+  }
+});
 
 btnIdeasRun.addEventListener('click', async () => {
   btnIdeasRun.disabled = true;

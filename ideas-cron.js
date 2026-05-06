@@ -481,4 +481,105 @@ function getStatus() {
   };
 }
 
-module.exports = { startCron, runIdeaCron, getStatus };
+// ── Push current DB ideas to Slack (one-off full dump) ────────────
+async function pushCurrentToSlack() {
+  if (!_pool) return { error: true, message: 'Module not initialised' };
+
+  const { rows } = await _pool.query(
+    `SELECT headline, ideas_json AS ideas, generated_at, products_analysed
+     FROM velocity_ideas WHERE period_days = $1 ORDER BY generated_at DESC LIMIT 1`,
+    [PERIOD_DAYS]
+  );
+
+  if (!rows.length) {
+    return { error: true, message: 'No ideas in database — run the velocity report first' };
+  }
+
+  const { headline, ideas, generated_at } = rows[0];
+
+  const webhookUrl = (process.env.SLACK_IDEAS_WEBHOOK_URL || '').trim().replace(/^["']|["']$/g, '');
+  if (!webhookUrl || !webhookUrl.startsWith('https://')) {
+    return { error: true, message: 'SLACK_IDEAS_WEBHOOK_URL not configured' };
+  }
+
+  const high   = ideas.filter(i => i.priority === 'high');
+  const medium = ideas.filter(i => i.priority === 'medium');
+  const low    = ideas.filter(i => i.priority === 'low');
+  const genDate = new Date(generated_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
+  const appUrl  = (process.env.APP_URL || '').replace(/\/$/, '');
+
+  const blocks = [
+    {
+      type: 'header',
+      text: { type: 'plain_text', text: `💡 Idea Factory — Full Snapshot (${genDate})`, emoji: true },
+    },
+    {
+      type: 'section',
+      text: { type: 'mrkdwn', text: `_${headline}_\n*${ideas.length} ideas total* · from here on only new daily ideas will be posted` },
+    },
+    { type: 'divider' },
+  ];
+
+  if (high.length > 0) {
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `🔴 *High Priority (${high.length})*` } });
+    for (const idea of high) {
+      const productLine = idea.products?.length
+        ? `\n_${idea.products.slice(0, 3).join(' · ')}${idea.products.length > 3 ? '…' : ''}_`
+        : '';
+      blocks.push({
+        type: 'section',
+        text: { type: 'mrkdwn', text: `${idea.icon || '💡'} *${idea.title}*\n${idea.action}${productLine}` },
+      });
+    }
+  }
+
+  if (medium.length > 0) {
+    blocks.push({ type: 'divider' });
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `🟡 *Medium Priority (${medium.length})*` } });
+    for (const idea of medium) {
+      const productLine = idea.products?.length
+        ? `\n_${idea.products.slice(0, 3).join(' · ')}${idea.products.length > 3 ? '…' : ''}_`
+        : '';
+      blocks.push({
+        type: 'section',
+        text: { type: 'mrkdwn', text: `${idea.icon || '💡'} *${idea.title}*\n${idea.action}${productLine}` },
+      });
+    }
+  }
+
+  if (low.length > 0) {
+    blocks.push({ type: 'divider' });
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `🟢 *Low Priority (${low.length})*` } });
+    for (const idea of low) {
+      blocks.push({
+        type: 'section',
+        text: { type: 'mrkdwn', text: `${idea.icon || '💡'} *${idea.title}*\n${idea.action}` },
+      });
+    }
+  }
+
+  if (appUrl) {
+    blocks.push({ type: 'divider' });
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: `<${appUrl}/velocity.html|View Idea Factory in the WMS →>` },
+    });
+  }
+
+  const res = await fetch(webhookUrl, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ blocks }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    console.error(`[ideas-cron] pushCurrentToSlack failed ${res.status}: ${body.slice(0, 200)}`);
+    return { error: true, message: `Slack returned ${res.status}` };
+  }
+
+  console.log(`[ideas-cron] pushCurrentToSlack: posted ${ideas.length} ideas to Slack`);
+  return { ok: true, count: ideas.length };
+}
+
+module.exports = { startCron, runIdeaCron, getStatus, pushCurrentToSlack };
