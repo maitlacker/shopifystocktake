@@ -1763,8 +1763,12 @@ app.get('/api/meta/campaigns', requireAuth, async (req, res) => {
 // ── Xero OAuth & API ───────────────────────────────────────────────
 
 app.get('/auth/xero/connect', requireAuth, (req, res) => {
+  if (!process.env.XERO_CLIENT_ID || !process.env.XERO_CLIENT_SECRET) {
+    return res.status(500).send('XERO_CLIENT_ID or XERO_CLIENT_SECRET env vars are not set on the server.');
+  }
   const redirectUri = `${process.env.APP_URL}/auth/xero/callback`;
   const url = xeroSync.getAuthUrl(redirectUri);
+  console.log('[xero] Auth URL:', url);
   res.redirect(url);
 });
 
