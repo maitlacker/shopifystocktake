@@ -251,6 +251,164 @@ btnGadsDaily.addEventListener('click', () => runGadsSync(7));
 
 loadGadsStatus();
 
+// ── Meta Ads card ──────────────────────────────────────────────────
+const metaDot       = document.getElementById('meta-dot');
+const metaStatusTxt = document.getElementById('meta-status-text');
+const metaLog       = document.getElementById('meta-log');
+const btnMetaConnect = document.getElementById('btn-meta-connect');
+const btnMetaFull    = document.getElementById('btn-meta-full');
+const btnMetaDaily   = document.getElementById('btn-meta-daily');
+
+// Show success/error from OAuth redirect
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('meta_connected')) {
+  history.replaceState({}, '', '/syncing.html');
+}
+if (urlParams.get('xero_connected')) {
+  history.replaceState({}, '', '/syncing.html');
+}
+
+function setMetaStatus(state, text) {
+  metaDot.className = `sync-status-dot sync-status-dot--${state}`;
+  metaStatusTxt.textContent = text;
+}
+
+function appendMetaLog(msg, type = 'info') {
+  metaLog.style.display = 'block';
+  const line = document.createElement('div');
+  line.className   = `sync-log-line sync-log-line--${type}`;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  metaLog.appendChild(line);
+  metaLog.scrollTop = metaLog.scrollHeight;
+}
+
+async function loadMetaStatus() {
+  try {
+    const res  = await fetch('/api/meta/status');
+    const data = await res.json();
+    if (data.connected) {
+      const last = data.lastSync?.last_sync ? `· Last sync ${formatRelative(data.lastSync.last_sync)}` : '· Not yet synced';
+      setMetaStatus('ok', `Connected as ${data.name || 'Meta Ads'} ${last}`);
+      btnMetaConnect.style.display = 'none';
+      btnMetaFull.style.display    = '';
+      btnMetaDaily.style.display   = '';
+    } else {
+      setMetaStatus('idle', data.expired ? 'Token expired — reconnect Meta Ads' : 'Not connected');
+      btnMetaConnect.style.display = '';
+      btnMetaFull.style.display    = 'none';
+      btnMetaDaily.style.display   = 'none';
+    }
+  } catch {
+    setMetaStatus('error', 'Could not load status');
+  }
+}
+
+async function runMetaSync(days) {
+  btnMetaFull.disabled  = true;
+  btnMetaDaily.disabled = true;
+  setMetaStatus('syncing', `Syncing last ${days} days…`);
+  appendMetaLog(`Syncing Meta Ads — last ${days} days…`);
+  try {
+    const res  = await fetch('/api/meta/sync', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Sync failed');
+    appendMetaLog(`Done — ${data.rows} rows fetched, ${data.inserted} inserted, ${data.updated} updated`, 'success');
+    await loadMetaStatus();
+  } catch (err) {
+    setMetaStatus('error', 'Sync failed');
+    appendMetaLog(`Error: ${err.message}`, 'error');
+  } finally {
+    btnMetaFull.disabled  = false;
+    btnMetaDaily.disabled = false;
+  }
+}
+
+btnMetaFull.addEventListener('click',  () => runMetaSync(30));
+btnMetaDaily.addEventListener('click', () => runMetaSync(7));
+
+loadMetaStatus();
+
+// ── Xero card ──────────────────────────────────────────────────────
+const xeroDot        = document.getElementById('xero-dot');
+const xeroStatusTxt  = document.getElementById('xero-status-text');
+const xeroLog        = document.getElementById('xero-log');
+const btnXeroConnect = document.getElementById('btn-xero-connect');
+const btnXeroFull    = document.getElementById('btn-xero-full');
+const btnXeroDaily   = document.getElementById('btn-xero-daily');
+
+function setXeroStatus(state, text) {
+  xeroDot.className = `sync-status-dot sync-status-dot--${state}`;
+  xeroStatusTxt.textContent = text;
+}
+
+function appendXeroLog(msg, type = 'info') {
+  xeroLog.style.display = 'block';
+  const line = document.createElement('div');
+  line.className   = `sync-log-line sync-log-line--${type}`;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  xeroLog.appendChild(line);
+  xeroLog.scrollTop = xeroLog.scrollHeight;
+}
+
+async function loadXeroStatus() {
+  try {
+    const res  = await fetch('/api/xero/status');
+    const data = await res.json();
+    if (data.connected) {
+      const last = data.lastSync?.last_sync ? `· Last sync ${formatRelative(data.lastSync.last_sync)}` : '· Not yet synced';
+      setXeroStatus('ok', `Connected to ${data.tenantName} ${last}`);
+      btnXeroConnect.style.display = 'none';
+      btnXeroFull.style.display    = '';
+      btnXeroDaily.style.display   = '';
+    } else {
+      setXeroStatus('idle', 'Not connected');
+      btnXeroConnect.style.display = '';
+      btnXeroFull.style.display    = 'none';
+      btnXeroDaily.style.display   = 'none';
+    }
+  } catch {
+    setXeroStatus('error', 'Could not load status');
+  }
+}
+
+async function runXeroSync(months) {
+  btnXeroFull.disabled  = true;
+  btnXeroDaily.disabled = true;
+  setXeroStatus('syncing', `Syncing ${months} month${months !== 1 ? 's' : ''} of P&L…`);
+  appendXeroLog(`Syncing Xero P&L — ${months} month${months !== 1 ? 's' : ''}…`);
+  try {
+    const res  = await fetch('/api/xero/sync', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ months }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Sync failed');
+    appendXeroLog(`Done — ${data.months} months synced`, 'success');
+    if (data.data?.length) {
+      const latest = data.data[0];
+      appendXeroLog(
+        `Latest: Revenue $${Number(latest.revenue).toLocaleString('en-AU')} · Gross profit $${Number(latest.grossProfit).toLocaleString('en-AU')} · Net profit $${Number(latest.netProfit).toLocaleString('en-AU')}`,
+        'info'
+      );
+    }
+    await loadXeroStatus();
+  } catch (err) {
+    setXeroStatus('error', 'Sync failed');
+    appendXeroLog(`Error: ${err.message}`, 'error');
+  } finally {
+    btnXeroFull.disabled  = false;
+    btnXeroDaily.disabled = false;
+  }
+}
+
+btnXeroFull.addEventListener('click',  () => runXeroSync(3));
+btnXeroDaily.addEventListener('click', () => runXeroSync(1));
+
+loadXeroStatus();
+
 // ── Stock alert card ───────────────────────────────────────────────
 const btnAlertsRun   = document.getElementById('btn-alerts-run');
 const alertsDot      = document.getElementById('alerts-dot');

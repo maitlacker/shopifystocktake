@@ -14,6 +14,8 @@ const shopifyAnalytics = require('./shopify-analytics');
 const labelMatcher     = require('./label-matcher');
 const Anthropic        = require('@anthropic-ai/sdk');
 const ideasCron        = require('./ideas-cron');
+const metaAds          = require('./meta-ads-sync');
+const xeroSync         = require('./xero-sync');
 
 const anthropicClient = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -1684,6 +1686,142 @@ app.get('/api/velocity/idea-factory/latest', requireAuth, async (req, res) => {
   }
 });
 
+// ── Meta Ads OAuth & API ───────────────────────────────────────────
+
+app.get('/auth/meta/connect', requireAuth, (req, res) => {
+  const appId       = process.env.META_APP_ID;
+  const redirectUri = `${process.env.APP_URL}/auth/meta/callback`;
+  const scopes      = 'ads_read,ads_management,business_management';
+  const url = `https://www.facebook.com/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&response_type=code`;
+  res.redirect(url);
+});
+
+app.get('/auth/meta/callback', requireAuth, async (req, res) => {
+  const { code, error } = req.query;
+  if (error) return res.redirect(`/syncing.html?meta_error=${encodeURIComponent(error)}`);
+  try {
+    const redirectUri = `${process.env.APP_URL}/auth/meta/callback`;
+    await metaAds.handleOAuthCallback(code, redirectUri);
+    res.redirect('/syncing.html?meta_connected=1');
+  } catch (err) {
+    console.error('[meta] OAuth callback error:', err.message);
+    res.redirect(`/syncing.html?meta_error=${encodeURIComponent(err.message)}`);
+  }
+});
+
+app.get('/api/meta/status', requireAuth, async (req, res) => {
+  try {
+    const [connection, lastSync] = await Promise.all([
+      metaAds.getConnectionStatus(),
+      metaAds.getLastSync(),
+    ]);
+    res.json({ ...connection, ...metaAds.getStatus(), lastSync });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/meta/sync', requireAuth, async (req, res) => {
+  const days = Math.min(parseInt(req.body.days) || 30, 90);
+  try {
+    const result = await metaAds.syncDateRange(days);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/meta/campaigns', requireAuth, async (req, res) => {
+  const days = Math.min(parseInt(req.query.days) || 30, 90);
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        campaign_id,
+        campaign_name,
+        SUM(spend)          AS spend,
+        SUM(impressions)    AS impressions,
+        SUM(clicks)         AS clicks,
+        SUM(purchases)      AS purchases,
+        SUM(purchase_value) AS purchase_value,
+        CASE WHEN SUM(spend) > 0
+             THEN ROUND((SUM(purchase_value) / SUM(spend))::NUMERIC, 2)
+             ELSE 0 END     AS roas,
+        CASE WHEN SUM(clicks) > 0
+             THEN ROUND((SUM(spend) / SUM(clicks))::NUMERIC, 2)
+             ELSE 0 END     AS cpc
+      FROM meta_ads_daily
+      WHERE date >= CURRENT_DATE - ($1::int)
+      GROUP BY campaign_id, campaign_name
+      ORDER BY spend DESC
+    `, [days]);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Xero OAuth & API ───────────────────────────────────────────────
+
+app.get('/auth/xero/connect', requireAuth, (req, res) => {
+  const redirectUri = `${process.env.APP_URL}/auth/xero/callback`;
+  const url = xeroSync.getAuthUrl(redirectUri);
+  res.redirect(url);
+});
+
+app.get('/auth/xero/callback', requireAuth, async (req, res) => {
+  const { code, error } = req.query;
+  if (error) return res.redirect(`/syncing.html?xero_error=${encodeURIComponent(error)}`);
+  try {
+    const redirectUri = `${process.env.APP_URL}/auth/xero/callback`;
+    await xeroSync.handleOAuthCallback(code, redirectUri);
+    res.redirect('/syncing.html?xero_connected=1');
+  } catch (err) {
+    console.error('[xero] OAuth callback error:', err.message);
+    res.redirect(`/syncing.html?xero_error=${encodeURIComponent(err.message)}`);
+  }
+});
+
+app.get('/api/xero/status', requireAuth, async (req, res) => {
+  try {
+    const [connection, lastSync] = await Promise.all([
+      xeroSync.getConnectionStatus(),
+      xeroSync.getLastSync(),
+    ]);
+    res.json({ ...connection, ...xeroSync.getStatus(), lastSync });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/xero/sync', requireAuth, async (req, res) => {
+  const months = Math.min(parseInt(req.body.months) || 3, 12);
+  try {
+    const result = await xeroSync.syncProfitAndLoss(months);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/xero/financials', requireAuth, async (req, res) => {
+  const months = Math.min(parseInt(req.query.months) || 6, 24);
+  try {
+    const { rows } = await pool.query(`
+      SELECT period_start, period_end,
+             revenue, cogs, gross_profit, expenses, net_profit,
+             CASE WHEN revenue > 0 THEN ROUND((gross_profit / revenue * 100)::NUMERIC, 1) ELSE 0 END AS gross_margin_pct,
+             CASE WHEN revenue > 0 THEN ROUND((net_profit   / revenue * 100)::NUMERIC, 1) ELSE 0 END AS net_margin_pct
+      FROM xero_financials
+      WHERE report_type = 'ProfitAndLoss'
+        AND period_start >= CURRENT_DATE - ($1::int * 31)
+      ORDER BY period_start DESC
+    `, [months]);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Idea Factory Cron Status & Manual Trigger ─────────────────────
 
 // GET /api/ideas-cron/status
@@ -2420,6 +2558,8 @@ initDb()
     googleAds.startCron();
     shopifyAnalytics.startCron();
     ideasCron.startCron(pool, anthropicClient);
+    metaAds.startCron(pool);
+    xeroSync.startCron(pool);
 
     // Recalculate margin tiers nightly at 02:00
     cron.schedule('0 2 * * *', async () => {

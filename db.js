@@ -271,6 +271,56 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_velocity_ideas_period
       ON velocity_ideas(period_days, generated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS meta_ads_daily (
+      id               SERIAL PRIMARY KEY,
+      campaign_id      TEXT NOT NULL,
+      campaign_name    TEXT NOT NULL,
+      adset_id         TEXT,
+      adset_name       TEXT,
+      date             DATE NOT NULL,
+      spend            DECIMAL(12,2) NOT NULL DEFAULT 0,
+      impressions      BIGINT NOT NULL DEFAULT 0,
+      clicks           BIGINT NOT NULL DEFAULT 0,
+      reach            BIGINT NOT NULL DEFAULT 0,
+      purchases        DECIMAL(10,2) NOT NULL DEFAULT 0,
+      purchase_value   DECIMAL(12,2) NOT NULL DEFAULT 0,
+      synced_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(campaign_id, date)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_meta_ads_daily_date
+      ON meta_ads_daily(date DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_meta_ads_daily_campaign
+      ON meta_ads_daily(campaign_id, date DESC);
+
+    CREATE TABLE IF NOT EXISTS xero_financials (
+      id           SERIAL PRIMARY KEY,
+      period_start DATE NOT NULL,
+      period_end   DATE NOT NULL,
+      report_type  TEXT NOT NULL DEFAULT 'ProfitAndLoss',
+      revenue      DECIMAL(14,2) NOT NULL DEFAULT 0,
+      cogs         DECIMAL(14,2) NOT NULL DEFAULT 0,
+      gross_profit DECIMAL(14,2) NOT NULL DEFAULT 0,
+      expenses     DECIMAL(14,2) NOT NULL DEFAULT 0,
+      net_profit   DECIMAL(14,2) NOT NULL DEFAULT 0,
+      raw_json     JSONB NOT NULL DEFAULT '{}',
+      synced_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(period_start, period_end, report_type)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_xero_financials_period
+      ON xero_financials(period_start DESC);
+
+    CREATE TABLE IF NOT EXISTS xero_tenants (
+      tenant_id       TEXT PRIMARY KEY,
+      tenant_name     TEXT NOT NULL,
+      access_token    TEXT,
+      refresh_token   TEXT,
+      token_expiry    TIMESTAMPTZ,
+      connected_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 }
 

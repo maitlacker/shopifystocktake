@@ -118,6 +118,48 @@
         <div id="gads-log" class="sync-log" style="display:none"></div>
       </div>
 
+      <!-- Meta Ads -->
+      <div class="sync-card" id="card-meta">
+        <div class="sync-card-header">
+          <div class="sync-card-icon">📘</div>
+          <div>
+            <div class="sync-card-title">Meta Ads</div>
+            <div class="sync-card-desc">Imports Facebook &amp; Instagram campaign performance — spend, impressions, clicks, purchases and ROAS. Syncs automatically every day at 2:30am.</div>
+          </div>
+        </div>
+        <div class="sync-status">
+          <span class="sync-status-dot sync-status-dot--idle" id="meta-dot"></span>
+          <span id="meta-status-text">Checking…</span>
+        </div>
+        <div class="sync-card-actions" id="meta-actions">
+          <a href="/auth/meta/connect" class="btn btn-primary" id="btn-meta-connect" style="display:none">🔗 Connect Meta Ads</a>
+          <button id="btn-meta-full" class="btn btn-primary" style="display:none">⟳ Full Sync (30 days)</button>
+          <button id="btn-meta-daily" class="btn btn-secondary" style="display:none">⟳ Sync Last 7 Days</button>
+        </div>
+        <div id="meta-log" class="sync-log" style="display:none"></div>
+      </div>
+
+      <!-- Xero -->
+      <div class="sync-card" id="card-xero">
+        <div class="sync-card-header">
+          <div class="sync-card-icon">📊</div>
+          <div>
+            <div class="sync-card-title">Xero Financials</div>
+            <div class="sync-card-desc">Imports Profit &amp; Loss data — revenue, COGS, gross profit, expenses and net profit by month. Syncs automatically every day at 3am.</div>
+          </div>
+        </div>
+        <div class="sync-status">
+          <span class="sync-status-dot sync-status-dot--idle" id="xero-dot"></span>
+          <span id="xero-status-text">Checking…</span>
+        </div>
+        <div class="sync-card-actions" id="xero-actions">
+          <a href="/auth/xero/connect" class="btn btn-primary" id="btn-xero-connect" style="display:none">🔗 Connect Xero</a>
+          <button id="btn-xero-full" class="btn btn-primary" style="display:none">⟳ Full Sync (3 months)</button>
+          <button id="btn-xero-daily" class="btn btn-secondary" style="display:none">⟳ Sync This Month</button>
+        </div>
+        <div id="xero-log" class="sync-log" style="display:none"></div>
+      </div>
+
       <!-- Idea Factory Cron -->
       <div class="sync-card" id="card-ideas-cron">
         <div class="sync-card-header">
