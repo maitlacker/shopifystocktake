@@ -2619,8 +2619,24 @@ app.get('/api/weekly-pulse/status', (req, res) => {
   res.json(weeklyPulse.getStatus());
 });
 
-// POST /api/weekly-pulse/run  — manual trigger
+// GET /api/weekly-pulse/reports — list of saved reports (restricted)
+app.get('/api/weekly-pulse/reports', async (req, res) => {
+  if (!BI_ALLOWED_EMAILS.includes(req.user?.email)) {
+    return res.status(403).json({ error: 'Access restricted' });
+  }
+  try {
+    const reports = await weeklyPulse.getReports();
+    res.json(reports);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/weekly-pulse/run  — manual trigger (restricted)
 app.post('/api/weekly-pulse/run', async (req, res) => {
+  if (!BI_ALLOWED_EMAILS.includes(req.user?.email)) {
+    return res.status(403).json({ error: 'Access restricted' });
+  }
   try {
     const result = await weeklyPulse.runWeeklyPulse();
     res.json(result);

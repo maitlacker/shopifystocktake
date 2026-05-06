@@ -349,6 +349,18 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_xero_balance_sheet_date
       ON xero_balance_sheet(report_date DESC);
+
+    CREATE TABLE IF NOT EXISTS weekly_pulse_reports (
+      id           SERIAL PRIMARY KEY,
+      period_start DATE NOT NULL,
+      period_end   DATE NOT NULL,
+      content      TEXT NOT NULL,
+      model_used   TEXT,
+      generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_weekly_pulse_generated
+      ON weekly_pulse_reports(generated_at DESC);
   `);
 }
 

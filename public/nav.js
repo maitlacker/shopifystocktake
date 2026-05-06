@@ -20,6 +20,7 @@
       label: 'Reports',
       children: [
         { label: 'BI Dashboard',          href: '/bi-dashboard.html', restrict: BI_ALLOWED },
+        { label: 'Weekly Pulse',          href: '/weekly-pulse.html', restrict: BI_ALLOWED },
         { label: 'Sales Velocity',        href: '/velocity.html' },
         { label: 'Shopify Daily Report',  href: '/shopify-report.html' },
         { label: 'Google Ads',            href: '/google-ads.html' },

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weekly Pulse – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    /* ── Controls bar ── */
+    .wp-bar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 24px;
+    }
+    .wp-select {
+      padding: 9px 12px;
+      font-size: 0.88rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 9px;
+      color: #1a1a2e;
+      background: #fff;
+      min-width: 220px;
+      outline: none;
+      touch-action: manipulation;
+    }
+    .wp-select:focus { border-color: #4f46e5; }
+
+    /* ── Status / error ── */
+    #wpStatus {
+      font-size: 0.88rem;
+      color: #475569;
+      min-height: 1.2em;
+      margin-bottom: 16px;
+    }
+    #wpStatus.is-error { color: #b91c1c; }
+
+    /* ── Report panel ── */
+    .wp-report {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      padding: 32px 36px;
+      max-width: 820px;
+    }
+    @media (max-width: 600px) { .wp-report { padding: 20px 18px; } }
+
+    .wp-meta {
+      font-size: 0.78rem;
+      color: #94a3b8;
+      margin-bottom: 24px;
+      border-bottom: 1px solid #f1f5f9;
+      padding-bottom: 14px;
+    }
+
+    /* ── Rendered report content ── */
+    .wp-content h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin: 28px 0 10px;
+      padding-bottom: 6px;
+      border-bottom: 2px solid #f1f5f9;
+    }
+    .wp-content h3:first-child { margin-top: 0; }
+
+    .wp-content p {
+      font-size: 0.92rem;
+      color: #334155;
+      line-height: 1.7;
+      margin: 0 0 10px;
+    }
+    .wp-content ul {
+      margin: 0 0 12px;
+      padding-left: 0;
+      list-style: none;
+    }
+    .wp-content ul li {
+      font-size: 0.92rem;
+      color: #334155;
+      line-height: 1.7;
+      padding: 3px 0 3px 20px;
+      position: relative;
+    }
+    .wp-content ul li::before {
+      content: '•';
+      position: absolute;
+      left: 4px;
+      color: #4f46e5;
+      font-weight: 700;
+    }
+
+    /* Action items */
+    .wp-action {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      padding: 12px 16px;
+      background: #f8fafc;
+      border-radius: 10px;
+      margin-bottom: 8px;
+      border-left: 3px solid #4f46e5;
+    }
+    .wp-action-num {
+      font-size: 1rem;
+      font-weight: 800;
+      color: #4f46e5;
+      flex-shrink: 0;
+      min-width: 20px;
+    }
+    .wp-action-text {
+      font-size: 0.92rem;
+      color: #1a1a2e;
+      line-height: 1.6;
+    }
+
+    /* ── Empty / loading ── */
+    .wp-empty {
+      text-align: center;
+      padding: 60px 24px;
+      color: #94a3b8;
+      font-size: 0.92rem;
+    }
+    .wp-loading {
+      text-align: center;
+      padding: 60px 24px;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+  <header></header>
+
+  <main>
+    <div class="page-header">
+      <h2 class="page-title">Weekly Business Pulse</h2>
+      <p class="page-subtitle">AI-generated strategic report — Shopify · Google Ads · Meta Ads · Xero</p>
+    </div>
+
+    <!-- Controls -->
+    <div class="wp-bar">
+      <button id="btnGenerate" class="btn btn-primary">▶ Generate New Report</button>
+      <select id="reportSelect" class="wp-select" style="display:none;">
+        <option value="">— Select a past report —</option>
+      </select>
+    </div>
+
+    <div id="wpStatus"></div>
+
+    <!-- Report display -->
+    <div id="wpLoading" class="wp-loading" style="display:none;">Generating… calling Claude with all data sources. Takes ~30 seconds.</div>
+
+    <div id="wpEmpty" class="wp-empty">
+      No reports generated yet.<br>Click <strong>Generate New Report</strong> to run your first analysis.
+    </div>
+
+    <div id="wpPanel" class="wp-report" style="display:none;">
+      <div class="wp-meta" id="wpMeta"></div>
+      <div class="wp-content" id="wpContent"></div>
+    </div>
+
+  </main>
+
+  <script src="weekly-pulse.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

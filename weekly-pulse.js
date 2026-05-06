@@ -192,42 +192,18 @@ Write a weekly business pulse report. Structure it EXACTLY as follows (use these
 *✅ TOP 3 ACTIONS THIS WEEK*
 Numbered 1–3. Specific, actionable tasks — not generic advice. Name the channel, the metric, the specific change to make and why. E.g. "Meta ROAS is 1.6x, below the 2x breakeven — pause the top-of-funnel awareness campaigns and shift that budget to retargeting which is historically stronger."
 
-Tone: Direct, commercially sharp, like a trusted CFO/CMO hybrid. Use AUD. Keep each section tight — this is a Slack message, not a report. Total length target: ~400–500 words.`;
+Tone: Direct, commercially sharp, like a trusted CFO/CMO hybrid. Use AUD. Keep each section tight and scannable. Total length target: ~400–600 words.`;
 
   return prompt;
 }
 
-// ── Split long text into Slack-safe chunks (<3000 chars each) ──────
-function chunkForSlack(text, maxLen = 2900) {
-  if (text.length <= maxLen) return [text];
-  const chunks = [];
-  const paragraphs = text.split('\n\n');
-  let current = '';
-  for (const para of paragraphs) {
-    const candidate = current ? current + '\n\n' + para : para;
-    if (candidate.length > maxLen && current) {
-      chunks.push(current.trim());
-      current = para;
-    } else {
-      current = candidate;
-    }
-  }
-  if (current.trim()) chunks.push(current.trim());
-  return chunks;
-}
-
-// ── Run the pulse ──────────────────────────────────────────────────
+// ── Run the pulse — generates and saves to DB ──────────────────────
 async function runWeeklyPulse() {
   if (isRunning) {
     console.log('[weekly-pulse] Already running, skipping');
     return { skipped: true };
   }
   if (!_anthropic) throw new Error('Anthropic client not initialised');
-
-  const webhook = process.env.SLACK_IDEAS_WEBHOOK_URL || process.env.SLACK_WEBHOOK_URL;
-  if (!webhook || !webhook.startsWith('https://')) {
-    throw new Error('No valid Slack webhook configured (set SLACK_IDEAS_WEBHOOK_URL)');
-  }
 
   isRunning = true;
   console.log('[weekly-pulse] Starting…');
@@ -239,57 +215,39 @@ async function runWeeklyPulse() {
     console.log('[weekly-pulse] Calling Claude Sonnet…');
     const response = await _anthropic.messages.create({
       model:      'claude-sonnet-4-5',
-      max_tokens: 1200,
+      max_tokens: 1400,
       messages:   [{ role: 'user', content: prompt }],
     });
 
     const analysis = response.content[0]?.text || 'No analysis generated.';
     console.log(`[weekly-pulse] Claude responded — ${analysis.length} chars`);
 
-    // Build Slack blocks
-    const dateStr = new Date().toLocaleDateString('en-AU', { day:'numeric', month:'long', year:'numeric' });
-    const textChunks = chunkForSlack(analysis);
+    // Save to DB
+    const { rows } = await _pool.query(
+      `INSERT INTO weekly_pulse_reports (period_start, period_end, content, model_used)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [data.period.start, data.period.end, analysis, 'claude-sonnet-4-5']
+    );
 
-    const blocks = [
-      {
-        type: 'header',
-        text: { type: 'plain_text', text: `📊 Weekly Business Pulse — ${dateStr}`, emoji: true },
-      },
-      ...textChunks.map((chunk) => ({
-        type: 'section',
-        text: { type: 'mrkdwn', text: chunk },
-      })),
-      {
-        type: 'divider',
-      },
-      {
-        type: 'context',
-        elements: [{
-          type: 'mrkdwn',
-          text: `Data sources: Shopify · Google Ads · Meta Ads · Xero P&L + Balance Sheet | Analysis by Claude Sonnet`,
-        }],
-      },
-    ];
-
-    const slackRes = await fetch(webhook, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ blocks }),
-    });
-
-    if (!slackRes.ok) {
-      const errText = await slackRes.text();
-      throw new Error(`Slack post failed ${slackRes.status}: ${errText.slice(0, 100)}`);
-    }
-
-    lastResult = { ok: true, chars: analysis.length, date: new Date().toISOString() };
-    console.log('[weekly-pulse] Posted to Slack ✓');
+    lastResult = { ok: true, chars: analysis.length, id: rows[0].id };
+    console.log(`[weekly-pulse] Saved report id=${rows[0].id}`);
     return lastResult;
 
   } finally {
     isRunning = false;
     lastRun   = new Date();
   }
+}
+
+// ── Fetch saved reports ────────────────────────────────────────────
+async function getReports(limit = 20) {
+  if (!_pool) return [];
+  const { rows } = await _pool.query(
+    `SELECT id, period_start, period_end, content, model_used, generated_at
+     FROM weekly_pulse_reports ORDER BY generated_at DESC LIMIT $1`,
+    [limit]
+  );
+  return rows;
 }
 
 // ── Cron ───────────────────────────────────────────────────────────
@@ -318,8 +276,7 @@ function getStatus() {
     lastRun:    lastRun?.toISOString() || null,
     lastResult,
     schedule:   process.env.WEEKLY_PULSE_CRON || '0 22 * * 0',
-    slackConfigured: !!(process.env.SLACK_IDEAS_WEBHOOK_URL || process.env.SLACK_WEBHOOK_URL),
   };
 }
 
-module.exports = { startCron, runWeeklyPulse, getStatus };
+module.exports = { startCron, runWeeklyPulse, getReports, getStatus };
