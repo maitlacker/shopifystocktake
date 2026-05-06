@@ -104,14 +104,13 @@ async function getValidAccessToken() {
 function getAuthUrl(redirectUri, state) {
   const clientId = process.env.XERO_CLIENT_ID;
   const scopes   = 'openid profile email accounting.reports.read offline_access';
-  const params   = new URLSearchParams({
-    response_type: 'code',
-    client_id:     clientId,
-    redirect_uri:  redirectUri,
-    scope:         scopes,
-    state:         state || 'xero_connect',
-  });
-  return `${XERO_AUTH}?${params}`;
+  // Build manually — URLSearchParams encodes spaces as + but Xero requires %20
+  return `${XERO_AUTH}` +
+    `?response_type=code` +
+    `&client_id=${encodeURIComponent(clientId)}` +
+    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+    `&scope=${scopes.split(' ').map(encodeURIComponent).join('%20')}` +
+    `&state=${encodeURIComponent(state || 'xero_connect')}`;
 }
 
 async function handleOAuthCallback(code, redirectUri) {
