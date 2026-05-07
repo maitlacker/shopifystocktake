@@ -26,36 +26,17 @@ function shopifyHeaders() {
   return { 'X-Shopify-Access-Token': SHOPIFY_TOKEN };
 }
 
-// ── Find cutoff time (last AusPost manifest) ───────────────────────
-// Looks at the 10 most recently fulfilled orders (any status), finds
-// the newest fulfillment.created_at — that's when the last manifest ran.
-// Capped at 24 hours ago so old backorders don't inflate the count.
-async function getCutoffTime() {
-  // Use fulfillment_status=fulfilled with status=any to catch fulfilled
-  // orders regardless of whether they've been archived (closed) yet
-  const url = `${baseUrl()}/orders.json?fulfillment_status=fulfilled&status=any` +
-    `&limit=10&order=updated_at+DESC&fields=id,fulfillments`;
-  const r = await fetch(url, { headers: shopifyHeaders() });
-  if (!r.ok) throw new Error(`Shopify orders (fulfilled): ${r.status}`);
-  const data = await r.json();
-
-  let cutoff = null;
-  for (const order of (data.orders || [])) {
-    for (const f of (order.fulfillments || [])) {
-      if (!cutoff || new Date(f.created_at) > new Date(cutoff)) {
-        cutoff = f.created_at;
-      }
-    }
-  }
-
-  // Hard cap: never look back more than 24 hours (prevents backorders
-  // from flooding the "to ship" count on days with no manifest)
-  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  if (!cutoff || new Date(cutoff) < new Date(dayAgo)) {
-    cutoff = dayAgo;
-  }
-
-  return cutoff;
+// ── Cutoff time — start of today in AEST (UTC+10) ─────────────────
+// We count unfulfilled orders created since AEST midnight today.
+// This naturally excludes old backorders while capturing everything
+// that arrived today and still needs to be picked / packed / shipped.
+function getCutoffTime() {
+  const AEST_OFFSET_MS = 10 * 60 * 60 * 1000; // UTC+10 (AEST)
+  const now = new Date();
+  // Shift to AEST, floor to midnight UTC, shift back
+  const aestNow = new Date(now.getTime() + AEST_OFFSET_MS);
+  aestNow.setUTCHours(0, 0, 0, 0);
+  return new Date(aestNow.getTime() - AEST_OFFSET_MS).toISOString();
 }
 
 // ── Count unfulfilled orders in window ─────────────────────────────
@@ -94,7 +75,7 @@ async function runSync() {
   isRunning = true;
 
   try {
-    const cutoffTime = await getCutoffTime();
+    const cutoffTime = getCutoffTime();
     const { ordersToShip, ordersPacked } = await getUnfulfilledCounts(cutoffTime);
 
     const result = {
