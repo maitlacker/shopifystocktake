@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stocktake – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+
+  <header></header>
+
+  <div class="page-toolbar">
+    <label style="display:flex;align-items:center;gap:8px;font-size:0.82rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">
+      Initials
+      <input id="initials-input" type="text" maxlength="4" placeholder="e.g. JD" autocomplete="off"
+        style="width:64px;padding:7px 10px;font-size:0.95rem;font-weight:700;border:2px solid #e2e8f0;border-radius:8px;color:#1a1a2e;outline:none;text-transform:uppercase;touch-action:manipulation;" />
+    </label>
+    <span id="cache-status" class="cache-status">Inventory not loaded</span>
+    <button id="btn-pdf" class="btn btn-primary" disabled>Export Discrepancy Report (PDF)</button>
+  </div>
+
+  <main>
+    <div class="search-bar">
+      <input
+        type="text"
+        id="search-input"
+        placeholder="Search by style name or SKU..."
+        autocomplete="off"
+        disabled
+      />
+      <span id="search-hint" class="search-hint">Load inventory first</span>
+    </div>
+
+    <div id="results"></div>
+  </main>
+
+  <script src="app.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

@@ -9,7 +9,7 @@
     {
       label: 'Stocktake',
       children: [
-        { label: 'Stocktake',               href: '/' },
+        { label: 'Stocktake',               href: '/stocktake.html' },
         { label: 'Order Picking',           href: '/picking.html' },
         { label: 'Discrepancy Report',      href: '/discrepancies.html' },
         { label: 'Draft & Archived Stock',  href: '/draft-report.html' },
@@ -52,13 +52,11 @@
   ];
 
   function isGroupActive(children) {
-    return children.some((c) =>
-      c.href === '/' ? path === '/' : path.endsWith(c.href)
-    );
+    return children.some((c) => path.endsWith(c.href));
   }
 
   function isItemActive(href) {
-    return href === '/' ? path === '/' : path.endsWith(href);
+    return path.endsWith(href);
   }
 
   const dropdownsHtml = NAV_ITEMS.map((group) => `

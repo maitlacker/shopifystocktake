@@ -3,42 +3,469 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Stocktake – The Self Styler WMS</title>
+  <title>Home – The Self Styler WMS</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+  <style>
+    /* ── Hero ── */
+    .home-hero {
+      background: linear-gradient(135deg, #1a1a2e 0%, #2d2b55 60%, #1a1a3e 100%);
+      padding: 36px 24px 32px;
+      border-bottom: 1px solid rgba(255,255,255,.07);
+    }
+    .home-hero-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .home-greeting {
+      font-size: 1.55rem;
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: -.3px;
+    }
+    .home-subtitle {
+      font-size: 0.88rem;
+      color: rgba(255,255,255,.45);
+      margin-top: 4px;
+      letter-spacing: .2px;
+    }
+    .home-date {
+      font-size: 0.82rem;
+      color: rgba(255,255,255,.4);
+      white-space: nowrap;
+      padding-bottom: 3px;
+    }
+
+    /* ── KPI strip ── */
+    .home-kpi-wrap {
+      background: #fff;
+      border-bottom: 1px solid #e2e8f0;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    }
+    .home-kpi-strip {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      gap: 0;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .home-kpi-strip::-webkit-scrollbar { display: none; }
+
+    .home-kpi {
+      flex: 0 0 auto;
+      padding: 16px 24px 14px;
+      border-right: 1px solid #f1f5f9;
+      min-width: 130px;
+      position: relative;
+    }
+    .home-kpi::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: var(--kpi-color, #4f46e5);
+      border-radius: 0;
+    }
+    .home-kpi:last-child { border-right: none; }
+    .home-kpi-label {
+      font-size: 0.67rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      color: #94a3b8;
+      margin-bottom: 7px;
+      white-space: nowrap;
+    }
+    .home-kpi-value {
+      font-size: 1.55rem;
+      font-weight: 800;
+      color: #0f172a;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .home-kpi-sub {
+      font-size: 0.7rem;
+      color: #94a3b8;
+      margin-top: 5px;
+      white-space: nowrap;
+    }
+    .home-kpi-loading .home-kpi-value {
+      background: #f1f5f9;
+      border-radius: 6px;
+      color: transparent;
+      animation: shimmer 1.4s infinite;
+    }
+    @keyframes shimmer {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: .4; }
+    }
+
+    /* ── Main content ── */
+    .home-body {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 24px 56px;
+    }
+
+    /* ── Module groups ── */
+    .home-group { margin-bottom: 40px; }
+    .home-group-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: #94a3b8;
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .home-tile-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 12px;
+    }
+
+    /* ── Module tiles ── */
+    .home-tile {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px 18px;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color .15s, box-shadow .15s, transform .15s;
+      position: relative;
+      overflow: hidden;
+    }
+    .home-tile:hover {
+      border-color: #a5b4fc;
+      box-shadow: 0 4px 16px rgba(79,70,229,.1);
+      transform: translateY(-1px);
+    }
+    .home-tile-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      background: #f0f0ff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+      flex-shrink: 0;
+    }
+    .home-tile-body { flex: 1; min-width: 0; }
+    .home-tile-name {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 3px;
+    }
+    .home-tile-desc {
+      font-size: 0.78rem;
+      color: #64748b;
+      line-height: 1.45;
+    }
+    .home-tile-arrow {
+      position: absolute;
+      bottom: 12px;
+      right: 14px;
+      font-size: 0.75rem;
+      color: #cbd5e1;
+      transition: color .15s, transform .15s;
+    }
+    .home-tile:hover .home-tile-arrow {
+      color: #4f46e5;
+      transform: translateX(2px);
+    }
+
+    /* Icon tints per group */
+    .home-tile--warehouse .home-tile-icon { background: #eff6ff; }
+    .home-tile--reports   .home-tile-icon { background: #f0fdf4; }
+    .home-tile--scanner   .home-tile-icon { background: #fdf4ff; }
+    .home-tile--ops       .home-tile-icon { background: #fff7ed; }
+    .home-tile--marketing .home-tile-icon { background: #fef2f2; }
+
+    @media (max-width: 600px) {
+      .home-greeting { font-size: 1.25rem; }
+      .home-kpi      { min-width: 110px; padding: 14px 16px 12px; }
+      .home-kpi-value { font-size: 1.3rem; }
+      .home-body     { padding: 20px 14px 48px; }
+      .home-tile-grid { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
 <body>
 
   <header></header>
 
-  <div class="page-toolbar">
-    <label style="display:flex;align-items:center;gap:8px;font-size:0.82rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">
-      Initials
-      <input id="initials-input" type="text" maxlength="4" placeholder="e.g. JD" autocomplete="off"
-        style="width:64px;padding:7px 10px;font-size:0.95rem;font-weight:700;border:2px solid #e2e8f0;border-radius:8px;color:#1a1a2e;outline:none;text-transform:uppercase;touch-action:manipulation;" />
-    </label>
-    <span id="cache-status" class="cache-status">Inventory not loaded</span>
-    <button id="btn-pdf" class="btn btn-primary" disabled>Export Discrepancy Report (PDF)</button>
+  <!-- Hero -->
+  <div class="home-hero">
+    <div class="home-hero-inner">
+      <div>
+        <div class="home-greeting" id="homeGreeting">Welcome</div>
+        <div class="home-subtitle">The Self Styler — Warehouse Management Studio</div>
+      </div>
+      <div class="home-date" id="homeDate"></div>
+    </div>
   </div>
 
-  <main>
-    <div class="search-bar">
-      <input
-        type="text"
-        id="search-input"
-        placeholder="Search by style name or SKU..."
-        autocomplete="off"
-        disabled
-      />
-      <span id="search-hint" class="search-hint">Load inventory first</span>
+  <!-- KPI strip -->
+  <div class="home-kpi-wrap">
+    <div class="home-kpi-strip" id="kpiStrip">
+      <!-- Skeleton placeholders -->
+      <div class="home-kpi home-kpi-loading" style="--kpi-color:#4f46e5">
+        <div class="home-kpi-label">7-Day Revenue</div>
+        <div class="home-kpi-value">$—</div>
+        <div class="home-kpi-sub">Loading…</div>
+      </div>
+      <div class="home-kpi home-kpi-loading" style="--kpi-color:#0891b2">
+        <div class="home-kpi-label">7-Day Orders</div>
+        <div class="home-kpi-value">—</div>
+        <div class="home-kpi-sub">Loading…</div>
+      </div>
+      <div class="home-kpi home-kpi-loading" style="--kpi-color:#ea580c">
+        <div class="home-kpi-label">Google Spend</div>
+        <div class="home-kpi-value">$—</div>
+        <div class="home-kpi-sub">7 days</div>
+      </div>
+      <div class="home-kpi home-kpi-loading" style="--kpi-color:#1d4ed8">
+        <div class="home-kpi-label">Meta Spend</div>
+        <div class="home-kpi-value">$—</div>
+        <div class="home-kpi-sub">7 days</div>
+      </div>
+      <div class="home-kpi home-kpi-loading" style="--kpi-color:#16a34a">
+        <div class="home-kpi-label">MER</div>
+        <div class="home-kpi-value">—x</div>
+        <div class="home-kpi-sub">Revenue ÷ Ad Spend</div>
+      </div>
+      <div class="home-kpi home-kpi-loading" style="--kpi-color:#dc2626">
+        <div class="home-kpi-label">Stock Alerts</div>
+        <div class="home-kpi-value">—</div>
+        <div class="home-kpi-sub">Active</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Module grid -->
+  <div class="home-body">
+
+    <!-- Warehouse -->
+    <div class="home-group">
+      <div class="home-group-title">Warehouse</div>
+      <div class="home-tile-grid">
+
+        <a href="/stocktake.html" class="home-tile home-tile--warehouse">
+          <div class="home-tile-icon">📦</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Stocktake</div>
+            <div class="home-tile-desc">Search products, count physical stock and record discrepancies</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+        <a href="/picking.html" class="home-tile home-tile--warehouse">
+          <div class="home-tile-icon">📋</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Order Picking</div>
+            <div class="home-tile-desc">Load Shopify orders and track picks for warehouse staff</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+        <a href="/discrepancies.html" class="home-tile home-tile--warehouse">
+          <div class="home-tile-icon">🔍</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Discrepancies</div>
+            <div class="home-tile-desc">Review and sign-off on stocktake variances</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+        <a href="/velocity.html" class="home-tile home-tile--warehouse">
+          <div class="home-tile-icon">⚡</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Sales Velocity</div>
+            <div class="home-tile-desc">Identify critically low, dead stock and imbalanced variants</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+        <a href="/draft-report.html" class="home-tile home-tile--warehouse">
+          <div class="home-tile-icon">🗂️</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Draft &amp; Archived</div>
+            <div class="home-tile-desc">Products with remaining stock on discontinued or hidden lines</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+        <a href="/history.html" class="home-tile home-tile--warehouse">
+          <div class="home-tile-icon">📜</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Stocktake History</div>
+            <div class="home-tile-desc">Browse past submissions by product, SKU and date</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+      </div>
     </div>
 
-    <div id="results"></div>
-  </main>
+    <!-- Reports -->
+    <div class="home-group">
+      <div class="home-group-title">Reports &amp; Analytics</div>
+      <div class="home-tile-grid">
 
-  <script src="app.js"></script>
+        <a href="/shopify-report.html" class="home-tile home-tile--reports">
+          <div class="home-tile-icon">🛒</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Shopify Daily</div>
+            <div class="home-tile-desc">Revenue, orders, items sold and sessions with sheet export</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+        <a href="/google-ads.html" class="home-tile home-tile--reports">
+          <div class="home-tile-icon">🚀</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Google Ads</div>
+            <div class="home-tile-desc">Campaign performance, ROAS tracking and PMAX coverage</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+        <a href="/picking-report.html" class="home-tile home-tile--reports">
+          <div class="home-tile-icon">🏃</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Picking Performance</div>
+            <div class="home-tile-desc">Per-staff timing metrics and session history</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+        <a href="/bi-dashboard.html" class="home-tile home-tile--reports"
+           style="display:none" data-restrict="accounts@theselfstyler.com,bianca@theselfstyler.com">
+          <div class="home-tile-icon">📊</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">BI Dashboard</div>
+            <div class="home-tile-desc">Combined view of Shopify, Google Ads, Meta Ads and Xero</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+        <a href="/weekly-pulse.html" class="home-tile home-tile--reports"
+           style="display:none" data-restrict="accounts@theselfstyler.com,bianca@theselfstyler.com">
+          <div class="home-tile-icon">📈</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Weekly Pulse</div>
+            <div class="home-tile-desc">AI-generated weekly strategic report with benchmarks</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+      </div>
+    </div>
+
+    <!-- Scanner -->
+    <div class="home-group">
+      <div class="home-group-title">Scanner</div>
+      <div class="home-tile-grid">
+
+        <a href="/label-scanner.html" class="home-tile home-tile--scanner">
+          <div class="home-tile-icon">🔖</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Scan Label</div>
+            <div class="home-tile-desc">Scan warehouse labels to identify and look up products</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+        <a href="/label-reference.html" class="home-tile home-tile--scanner">
+          <div class="home-tile-icon">🖼️</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Reference Images</div>
+            <div class="home-tile-desc">Browse the label image library for scanning reference</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+        <a href="/scan-history.html" class="home-tile home-tile--scanner">
+          <div class="home-tile-icon">🕒</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Scan History</div>
+            <div class="home-tile-desc">View recent scan activity and results</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+      </div>
+    </div>
+
+    <!-- Operations -->
+    <div class="home-group">
+      <div class="home-group-title">Operations</div>
+      <div class="home-tile-grid">
+
+        <a href="/syncing.html" class="home-tile home-tile--ops">
+          <div class="home-tile-icon">⚙️</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Syncing</div>
+            <div class="home-tile-desc">Manage data syncs — Shopify, Google Ads, Meta Ads, Xero</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+      </div>
+    </div>
+
+    <!-- Marketing -->
+    <div class="home-group">
+      <div class="home-group-title">Marketing</div>
+      <div class="home-tile-grid">
+
+        <a href="/coupon-export.html" class="home-tile home-tile--marketing">
+          <div class="home-tile-icon">🎟️</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Coupon Export</div>
+            <div class="home-tile-desc">Export expiring refund coupons matched to customers for Klaviyo</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+        <a href="/gift-card-export.html" class="home-tile home-tile--marketing">
+          <div class="home-tile-icon">🎁</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Gift Card Export</div>
+            <div class="home-tile-desc">Export gift card balances and customer details</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+        <a href="/margin-tagger.html" class="home-tile home-tile--marketing">
+          <div class="home-tile-icon">🏷️</div>
+          <div class="home-tile-body">
+            <div class="home-tile-name">Margin Tagger</div>
+            <div class="home-tile-desc">Tag products by margin tier for ad targeting</div>
+          </div>
+          <span class="home-tile-arrow">→</span>
+        </a>
+
+      </div>
+    </div>
+
+  </div><!-- /.home-body -->
+
+  <script src="home.js"></script>
   <script src="nav.js"></script>
 </body>
 </html>

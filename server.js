@@ -2646,6 +2646,49 @@ app.post('/api/weekly-pulse/run', async (req, res) => {
   }
 });
 
+// ── Home Dashboard ────────────────────────────────────────────────
+
+// GET /api/home/kpis — lightweight KPI summary for the home page (all authenticated users)
+app.get('/api/home/kpis', async (req, res) => {
+  try {
+    const [shopify, gads, meta, alerts] = await Promise.all([
+      pool.query(`
+        SELECT COALESCE(SUM(revenue), 0)::float AS revenue,
+               COALESCE(SUM(orders),  0)::int   AS orders
+        FROM shopify_daily
+        WHERE date >= CURRENT_DATE - 7::int
+      `),
+      pool.query(`
+        SELECT COALESCE(SUM(cost), 0)::float              AS spend,
+               COALESCE(SUM(conversion_value), 0)::float  AS conv_value
+        FROM google_ads_daily
+        WHERE date >= CURRENT_DATE - 7::int
+      `),
+      pool.query(`
+        SELECT COALESCE(SUM(spend), 0)::float             AS spend,
+               COALESCE(SUM(purchase_value), 0)::float    AS conv_value
+        FROM meta_ads_daily
+        WHERE date >= CURRENT_DATE - 7::int
+      `),
+      pool.query(`SELECT COUNT(*)::int AS count FROM stock_alerts WHERE resolved = false`),
+    ]);
+
+    const revenue      = parseFloat(shopify.rows[0].revenue);
+    const orders       = parseInt(shopify.rows[0].orders, 10);
+    const googleSpend  = parseFloat(gads.rows[0].spend);
+    const metaSpend    = parseFloat(meta.rows[0].spend);
+    const totalAdSpend = googleSpend + metaSpend;
+    const mer          = revenue > 0 && totalAdSpend > 0
+      ? (revenue / totalAdSpend).toFixed(2)
+      : null;
+    const activeAlerts = parseInt(alerts.rows[0].count, 10);
+
+    res.json({ revenue, orders, googleSpend, metaSpend, totalAdSpend, mer, activeAlerts });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Business Intelligence ──────────────────────────────────────────
 
 // GET /api/bi/summary?start=YYYY-MM-DD&end=YYYY-MM-DD
