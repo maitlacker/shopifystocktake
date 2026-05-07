@@ -2705,16 +2705,25 @@ app.get('/api/ops/status', async (req, res) => {
     // sessions since the manifest cutoff. This has data even before the new
     // picked_orders table started filling up.
     const [sessionRows, pickedRows] = await Promise.all([
+      // Proportional estimate from picking_sessions:
+      // - Fully complete sessions (picks_completed >= item_count): all orders counted
+      // - Partial sessions (stockouts, nav-away, last item missed): orders weighted
+      //   by completion ratio so they still contribute rather than being dropped
       pool.query(`
-        SELECT COALESCE(SUM(order_count), 0)::int AS count
+        SELECT COALESCE(SUM(
+          CASE
+            WHEN picks_completed >= item_count
+              THEN order_count
+            WHEN item_count > 0 AND picks_completed > 0
+              THEN ROUND(order_count::float * picks_completed::float / item_count)
+            ELSE 0
+          END
+        ), 0)::int AS count
         FROM picking_sessions
         WHERE first_pick_at >= $1
-          AND item_count > 0
-          AND picks_completed >= item_count
+          AND picks_completed > 0
       `, [cutoff]),
-      // Secondary: individual order records written by the picking page.
-      // Takes over as sessions roll off, and catches partial sessions where
-      // individual orders complete before the whole session does.
+      // Fine-grained per-order tracking (accumulates going forward via picking page)
       pool.query(`
         SELECT COUNT(*)::int AS count
         FROM picked_orders
@@ -2722,8 +2731,8 @@ app.get('/api/ops/status', async (req, res) => {
       `, [cutoff]),
     ]);
 
-    // Use the higher of the two — sessions give historical coverage today,
-    // picked_orders gives granular accuracy going forward.
+    // Use whichever is higher — sessions cover all of today's historical
+    // activity; picked_orders adds per-order precision going forward.
     const ordersPicked = Math.max(
       sessionRows.rows[0].count,
       pickedRows.rows[0].count
