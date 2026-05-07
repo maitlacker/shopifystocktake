@@ -133,6 +133,23 @@ function clearPickState() {
   } catch (_) {}
 }
 
+// ── Note popup ─────────────────────────────────────────────────────
+function showNotePopup(text) {
+  const popup = document.getElementById('note-popup');
+  if (!popup) return;
+  popup.textContent = text;
+  popup.classList.add('visible');
+}
+
+function hideNotePopup() {
+  const popup = document.getElementById('note-popup');
+  if (popup) popup.classList.remove('visible');
+}
+
+// Global safety net: lift finger anywhere → hide popup
+document.addEventListener('pointerup',     hideNotePopup);
+document.addEventListener('pointercancel', hideNotePopup);
+
 // Save on page hide (tab close, navigation away, iPhone home button)
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') saveSession(true);
@@ -213,6 +230,10 @@ function renderList(data) {
       ? `<div class="pick-variant">${escHtml(item.variantTitle)}</div>`
       : '';
 
+    const noteHtml = item.note
+      ? `<button class="pick-note-btn" data-note="${escHtml(item.note)}" title="Order note">&#128203;</button>`
+      : '';
+
     return `
       <div class="pick-item" data-id="${id}" id="pick-${id}">
         <div class="pick-tick"><span class="pick-tick-icon">&#10003;</span></div>
@@ -228,6 +249,7 @@ function renderList(data) {
             <div class="pick-qty${isMulti ? ' multi' : ''}">${item.qty}</div>
             ${item.stock !== null ? `<div class="pick-stock">${item.stock} left</div>` : ''}
           </div>
+          ${noteHtml}
         </div>
       </div>
     `;
@@ -257,6 +279,16 @@ function renderList(data) {
         clickTimers[id] = setTimeout(() => { clickTimers[id] = null; }, 400);
       }
     });
+  });
+
+  // Note icon: hold to show, release to hide
+  document.querySelectorAll('.pick-note-btn').forEach(btn => {
+    btn.addEventListener('pointerdown', e => {
+      e.stopPropagation(); // don't count as a pick tap
+      e.preventDefault();  // suppress context menu on long-press
+      showNotePopup(btn.dataset.note);
+    });
+    btn.addEventListener('pointerleave', hideNotePopup);
   });
 }
 

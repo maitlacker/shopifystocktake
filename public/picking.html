@@ -260,6 +260,50 @@
     }
     .pick-complete-msg.visible { display: block; }
 
+    /* Note icon (shown on items with an order note) */
+    .pick-note-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      background: #fef9c3;
+      border: 1.5px solid #fde047;
+      font-size: 14px;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+      flex-shrink: 0;
+      padding: 0;
+      line-height: 1;
+    }
+
+    /* Note popup — appears on hold, centred on screen */
+    #note-popup {
+      display: none;
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      max-width: min(380px, calc(100vw - 32px));
+      max-height: 55vh;
+      overflow-y: auto;
+      background: #1e293b;
+      color: #f1f5f9;
+      border-radius: 14px;
+      padding: 18px 22px;
+      font-size: 0.95rem;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+      z-index: 9999;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+      pointer-events: none;
+    }
+    #note-popup.visible { display: block; }
+
     /* iPad optimisations */
     @media (max-width: 768px) {
       .pick-form { padding: 16px; gap: 10px; }
@@ -321,6 +365,9 @@
 
     <!-- Results -->
     <div id="pick-result"></div>
+
+    <!-- Note popup (hold note icon to reveal) -->
+    <div id="note-popup"></div>
   </main>
 
   <script src="picking.js"></script>

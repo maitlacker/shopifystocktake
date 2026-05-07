@@ -897,7 +897,7 @@ app.get('/api/picking/orders', async (req, res) => {
     const items = [];
     const orderNumbersSeen = new Set();
     let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json` +
-      `?status=any&limit=250&fields=id,name,order_number,line_items`;
+      `?status=any&limit=250&fields=id,name,order_number,line_items,note`;
     let done = false;
 
     while (url && !done) {
@@ -925,6 +925,7 @@ app.get('/api/picking/orders', async (req, res) => {
             qty:          item.quantity,
             image:        variantImageMap[String(item.variant_id)] || null,
             stock:        variantStockMap[String(item.variant_id)] ?? null,
+            note:         order.note || null,
           });
         }
       }
