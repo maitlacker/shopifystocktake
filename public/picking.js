@@ -1,6 +1,8 @@
 let pickState    = {};
 let lastTap      = {};
 let currentItems = [];
+let currentStart = null;
+let currentEnd   = null;
 
 // ── Session tracking ───────────────────────────────────────────────
 let session = null; // active session data
@@ -95,6 +97,42 @@ async function saveSession(force = false) {
   } catch (_) { /* best effort */ }
 }
 
+// ── Pick-state persistence (survive page refresh) ──────────────────
+function pickStateKey() {
+  return `pick_state_${currentStart}_${currentEnd}`;
+}
+
+function persistPickState() {
+  if (!currentStart || !currentEnd) return;
+  try {
+    localStorage.setItem(pickStateKey(), JSON.stringify(pickState));
+  } catch (_) { /* quota exceeded — non-critical */ }
+}
+
+function restorePickState() {
+  if (!currentStart || !currentEnd) return;
+  try {
+    const saved = localStorage.getItem(pickStateKey());
+    if (!saved) return;
+    const restored = JSON.parse(saved);
+    pickState = restored;
+    // Re-apply .picked class to matching DOM elements
+    Object.keys(pickState).forEach(id => {
+      if (pickState[id]) {
+        const el = document.getElementById('pick-' + id);
+        if (el) el.classList.add('picked');
+      }
+    });
+  } catch (_) { /* malformed data — ignore */ }
+}
+
+function clearPickState() {
+  if (!currentStart || !currentEnd) return;
+  try {
+    localStorage.removeItem(pickStateKey());
+  } catch (_) {}
+}
+
 // Save on page hide (tab close, navigation away, iPhone home button)
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') saveSession(true);
@@ -127,6 +165,8 @@ async function loadOrders() {
     pickState    = {};
     lastTap      = {};
     session      = null;
+    currentStart = start;
+    currentEnd   = end;
 
     if (!data.items.length) {
       resultEl.innerHTML = `<div class="pick-state">No items found for orders #${start}–#${end}.<br>Check the order numbers and try again.</div>`;
@@ -134,6 +174,7 @@ async function loadOrders() {
     }
 
     renderList(data);
+    restorePickState();   // re-apply any saved ticks from localStorage
     sessionStart(data);
     updateProgress();
 
@@ -232,6 +273,7 @@ function togglePicked(el, id) {
     el.classList.remove('picked');
     sessionRecordUnpick();
   }
+  persistPickState();
   updateProgress();
 }
 
@@ -276,11 +318,15 @@ function updateProgress() {
   const completeMsg = document.getElementById('complete-msg');
   const justCompleted = picked === total && total > 0;
   completeMsg.classList.toggle('visible', justCompleted);
-  if (justCompleted) saveSession();
+  if (justCompleted) {
+    saveSession();
+    clearPickState(); // pick list complete — no need to persist anymore
+  }
 }
 
 // ── Reset ──────────────────────────────────────────────────────────
 function resetAll() {
+  clearPickState();
   pickState = {};
   lastTap   = {};
   document.querySelectorAll('.pick-item.picked').forEach(el => el.classList.remove('picked'));
@@ -297,6 +343,7 @@ function addToEnd(n) {
 
 // ── Cancel ────────────────────────────────────────────────────────
 function cancelPick() {
+  clearPickState();
   document.getElementById('start-order').value = '';
   document.getElementById('end-order').value   = '';
   document.getElementById('pick-result').innerHTML = '';
@@ -305,6 +352,8 @@ function cancelPick() {
   pickState    = {};
   lastTap      = {};
   currentItems = [];
+  currentStart = null;
+  currentEnd   = null;
   document.getElementById('start-order').focus();
 }
 
