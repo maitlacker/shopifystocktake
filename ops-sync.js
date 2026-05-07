@@ -6,7 +6,7 @@
 //   ordersToShip — unfulfilled orders in the current window
 //   ordersPacked — those with "Picked" in their order note
 // Results are cached in app_settings (key: ops_status).
-// ordersPicked is queried live from the picked_orders table.
+// ordersPicked is derived live from picking_sessions + picked_orders.
 
 const fetch = require('node-fetch');
 const cron  = require('node-cron');
@@ -27,12 +27,16 @@ function shopifyHeaders() {
 }
 
 // ── Find cutoff time (last AusPost manifest) ───────────────────────
-// Returns the created_at of the most recent fulfillment across the
-// last 10 closed orders, or start-of-today as a fallback.
+// Looks at the 10 most recently fulfilled orders (any status), finds
+// the newest fulfillment.created_at — that's when the last manifest ran.
+// Capped at 24 hours ago so old backorders don't inflate the count.
 async function getCutoffTime() {
-  const url = `${baseUrl()}/orders.json?status=closed&limit=10&order=updated_at+DESC&fields=id,fulfillments`;
-  const r   = await fetch(url, { headers: shopifyHeaders() });
-  if (!r.ok) throw new Error(`Shopify orders (closed): ${r.status}`);
+  // Use fulfillment_status=fulfilled with status=any to catch fulfilled
+  // orders regardless of whether they've been archived (closed) yet
+  const url = `${baseUrl()}/orders.json?fulfillment_status=fulfilled&status=any` +
+    `&limit=10&order=updated_at+DESC&fields=id,fulfillments`;
+  const r = await fetch(url, { headers: shopifyHeaders() });
+  if (!r.ok) throw new Error(`Shopify orders (fulfilled): ${r.status}`);
   const data = await r.json();
 
   let cutoff = null;
@@ -44,13 +48,11 @@ async function getCutoffTime() {
     }
   }
 
-  if (!cutoff) {
-    // Fallback: midnight today AEST (UTC+10)
-    const d = new Date();
-    d.setUTCHours(d.getUTCHours() - 10);          // shift to AEST
-    d.setHours(0, 0, 0, 0);
-    d.setUTCHours(d.getUTCHours() + 10);           // back to UTC
-    cutoff = d.toISOString();
+  // Hard cap: never look back more than 24 hours (prevents backorders
+  // from flooding the "to ship" count on days with no manifest)
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  if (!cutoff || new Date(cutoff) < new Date(dayAgo)) {
+    cutoff = dayAgo;
   }
 
   return cutoff;

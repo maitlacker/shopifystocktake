@@ -2695,29 +2695,45 @@ app.get('/api/home/kpis', async (req, res) => {
 // GET /api/ops/status — today's pipeline counts (all authenticated users)
 app.get('/api/ops/status', async (req, res) => {
   try {
-    const [settingsRow, pickedRow] = await Promise.all([
-      pool.query("SELECT value FROM app_settings WHERE key = 'ops_status'"),
-      // will refine cutoff below after we know it
-      pool.query("SELECT COUNT(*)::int AS count FROM picked_orders WHERE picked_at >= CURRENT_DATE"),
+    const settingsRow = await pool.query(
+      "SELECT value FROM app_settings WHERE key = 'ops_status'"
+    );
+    const cached = settingsRow.rows[0] ? JSON.parse(settingsRow.rows[0].value) : {};
+    const cutoff = cached.cutoffTime || new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
+
+    // Primary source: picking_sessions — sum order_count from fully-completed
+    // sessions since the manifest cutoff. This has data even before the new
+    // picked_orders table started filling up.
+    const [sessionRows, pickedRows] = await Promise.all([
+      pool.query(`
+        SELECT COALESCE(SUM(order_count), 0)::int AS count
+        FROM picking_sessions
+        WHERE first_pick_at >= $1
+          AND item_count > 0
+          AND picks_completed >= item_count
+      `, [cutoff]),
+      // Secondary: individual order records written by the picking page.
+      // Takes over as sessions roll off, and catches partial sessions where
+      // individual orders complete before the whole session does.
+      pool.query(`
+        SELECT COUNT(*)::int AS count
+        FROM picked_orders
+        WHERE picked_at >= $1
+      `, [cutoff]),
     ]);
 
-    const cached = settingsRow.rows[0] ? JSON.parse(settingsRow.rows[0].value) : {};
-
-    // If we have a cutoff, re-count picked orders from that point
-    let ordersPicked = pickedRow.rows[0].count;
-    if (cached.cutoffTime) {
-      const { rows } = await pool.query(
-        "SELECT COUNT(*)::int AS count FROM picked_orders WHERE picked_at >= $1",
-        [cached.cutoffTime]
-      );
-      ordersPicked = rows[0].count;
-    }
+    // Use the higher of the two — sessions give historical coverage today,
+    // picked_orders gives granular accuracy going forward.
+    const ordersPicked = Math.max(
+      sessionRows.rows[0].count,
+      pickedRows.rows[0].count
+    );
 
     res.json({
       ordersToShip: cached.ordersToShip ?? null,
       ordersPicked,
       ordersPacked: cached.ordersPacked ?? null,
-      cutoffTime:   cached.cutoffTime   ?? null,
+      cutoffTime:   cutoff,
       lastSynced:   cached.lastSynced   ?? null,
     });
   } catch (err) {
