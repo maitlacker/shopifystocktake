@@ -93,6 +93,44 @@ function revealRestricted(email) {
   });
 }
 
+// ── Ops pipeline ──────────────────────────────────────────────────
+function renderOpsStatus(d) {
+  const ship   = d.ordersToShip ?? '—';
+  const picked = d.ordersPicked ?? '—';
+  const packed = d.ordersPacked ?? '—';
+
+  document.getElementById('opsShip').textContent   = ship;
+  document.getElementById('opsPicked').textContent = picked;
+  document.getElementById('opsPacked').textContent = packed;
+
+  // Progress bar: picked / ordersToShip
+  const pct = (d.ordersToShip > 0 && d.ordersPicked != null)
+    ? Math.min(100, Math.round((d.ordersPicked / d.ordersToShip) * 100))
+    : 0;
+  document.getElementById('opsBar').style.width = pct + '%';
+
+  const progressEl = document.getElementById('opsProgressText');
+  if (d.ordersToShip != null && d.ordersPicked != null) {
+    progressEl.textContent = `${pct}% of ship queue picked · ${d.ordersPacked ?? 0} packed`;
+  } else {
+    progressEl.textContent = 'No data yet — sync runs every 5 minutes';
+  }
+
+  const syncEl = document.getElementById('opsSyncTime');
+  if (d.lastSynced) {
+    const ago = Math.round((Date.now() - new Date(d.lastSynced)) / 60000);
+    syncEl.textContent = ago < 2 ? 'Just synced' : `Synced ${ago}m ago`;
+  }
+}
+
+async function loadOpsStatus() {
+  try {
+    const r = await fetch('/api/ops/status');
+    if (!r.ok) return;
+    renderOpsStatus(await r.json());
+  } catch (_) {}
+}
+
 // ── Boot ───────────────────────────────────────────────────────────
 setDate();
 
@@ -106,3 +144,7 @@ fetch('/api/me')
   .catch(() => {});
 
 loadKpis();
+loadOpsStatus();
+
+// Auto-refresh ops pipeline every 5 minutes
+setInterval(loadOpsStatus, 5 * 60 * 1000);

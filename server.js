@@ -17,6 +17,7 @@ const ideasCron        = require('./ideas-cron');
 const metaAds          = require('./meta-ads-sync');
 const xeroSync         = require('./xero-sync');
 const weeklyPulse      = require('./weekly-pulse');
+const opsSync          = require('./ops-sync');
 
 const anthropicClient = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -2689,6 +2690,62 @@ app.get('/api/home/kpis', async (req, res) => {
   }
 });
 
+// ── Operations Status ─────────────────────────────────────────────
+
+// GET /api/ops/status — today's pipeline counts (all authenticated users)
+app.get('/api/ops/status', async (req, res) => {
+  try {
+    const [settingsRow, pickedRow] = await Promise.all([
+      pool.query("SELECT value FROM app_settings WHERE key = 'ops_status'"),
+      // will refine cutoff below after we know it
+      pool.query("SELECT COUNT(*)::int AS count FROM picked_orders WHERE picked_at >= CURRENT_DATE"),
+    ]);
+
+    const cached = settingsRow.rows[0] ? JSON.parse(settingsRow.rows[0].value) : {};
+
+    // If we have a cutoff, re-count picked orders from that point
+    let ordersPicked = pickedRow.rows[0].count;
+    if (cached.cutoffTime) {
+      const { rows } = await pool.query(
+        "SELECT COUNT(*)::int AS count FROM picked_orders WHERE picked_at >= $1",
+        [cached.cutoffTime]
+      );
+      ordersPicked = rows[0].count;
+    }
+
+    res.json({
+      ordersToShip: cached.ordersToShip ?? null,
+      ordersPicked,
+      ordersPacked: cached.ordersPacked ?? null,
+      cutoffTime:   cached.cutoffTime   ?? null,
+      lastSynced:   cached.lastSynced   ?? null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/ops/order-picked — called silently by picking.js when all
+// items in an order are ticked off
+app.post('/api/ops/order-picked', async (req, res) => {
+  const { orderName, initials } = req.body || {};
+  if (!orderName) return res.status(400).json({ error: 'orderName required' });
+
+  try {
+    await pool.query(`
+      INSERT INTO picked_orders (order_name, picker_initials, picked_at)
+      VALUES ($1, $2, NOW())
+      ON CONFLICT (order_name) DO UPDATE
+        SET picker_initials = EXCLUDED.picker_initials,
+            picked_at       = NOW()
+    `, [orderName, initials || null]);
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Business Intelligence ──────────────────────────────────────────
 
 // GET /api/bi/summary?start=YYYY-MM-DD&end=YYYY-MM-DD
@@ -2832,6 +2889,7 @@ initDb()
     metaAds.startCron(pool);
     xeroSync.startCron(pool);
     weeklyPulse.startCron(pool, anthropicClient);
+    opsSync.startCron(pool);
 
     // Recalculate margin tiers nightly at 02:00
     cron.schedule('0 2 * * *', async () => {

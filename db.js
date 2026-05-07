@@ -361,6 +361,16 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_weekly_pulse_generated
       ON weekly_pulse_reports(generated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS picked_orders (
+      id               SERIAL PRIMARY KEY,
+      order_name       TEXT NOT NULL UNIQUE,
+      picker_initials  TEXT,
+      picked_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_picked_orders_picked_at
+      ON picked_orders(picked_at DESC);
   `);
 }
 

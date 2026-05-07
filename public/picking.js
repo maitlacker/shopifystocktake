@@ -224,11 +224,41 @@ function togglePicked(el, id) {
   if (pickState[id]) {
     el.classList.add('picked');
     sessionRecordPick();
+    // Check if all items for this order are now fully picked
+    const idx  = parseInt(id.replace('item-', ''), 10);
+    const item = currentItems[idx];
+    if (item) checkOrderCompletion(item.orderNumber);
   } else {
     el.classList.remove('picked');
     sessionRecordUnpick();
   }
   updateProgress();
+}
+
+// ── Order-level completion tracking (for home dashboard) ───────────
+function checkOrderCompletion(orderNumber) {
+  // Collect all item IDs that belong to this order
+  const orderItemIds = currentItems
+    .map((item, idx) => (item.orderNumber === orderNumber ? 'item-' + idx : null))
+    .filter(Boolean);
+
+  if (!orderItemIds.length) return;
+
+  // If every item for this order is ticked, record it silently
+  if (orderItemIds.every((id) => pickState[id])) {
+    recordOrderPicked(orderNumber);
+  }
+}
+
+async function recordOrderPicked(orderNumber) {
+  try {
+    const initials = (document.getElementById('pick-initials')?.value || '').toUpperCase().trim();
+    await fetch('/api/ops/order-picked', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ orderName: '#' + orderNumber, initials }),
+    });
+  } catch (_) { /* silent — non-critical */ }
 }
 
 // ── Progress ───────────────────────────────────────────────────────

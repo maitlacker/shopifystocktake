@@ -107,6 +107,102 @@
       50%       { opacity: .4; }
     }
 
+    /* ── Ops pipeline ── */
+    .ops-wrap {
+      background: #fff;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .ops-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 20px 24px 18px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .ops-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .09em;
+      color: #94a3b8;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .ops-stages {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+      min-width: 0;
+    }
+    .ops-stage {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 9px;
+      border: 1px solid #e2e8f0;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .ops-stage--ship  { background: #eff6ff; border-color: #bfdbfe; }
+    .ops-stage--pick  { background: #f0fdf4; border-color: #bbf7d0; }
+    .ops-stage--pack  { background: #fdf4ff; border-color: #e9d5ff; }
+    .ops-stage-num {
+      font-size: 1.45rem;
+      font-weight: 800;
+      line-height: 1;
+      color: #0f172a;
+    }
+    .ops-stage--ship .ops-stage-num { color: #1d4ed8; }
+    .ops-stage--pick .ops-stage-num { color: #16a34a; }
+    .ops-stage--pack .ops-stage-num { color: #7c3aed; }
+    .ops-stage-lbl {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #64748b;
+    }
+    .ops-arrow {
+      color: #cbd5e1;
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+    .ops-progress-wrap {
+      flex: 1;
+      min-width: 120px;
+    }
+    .ops-progress-bg {
+      height: 6px;
+      background: #f1f5f9;
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .ops-progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #4f46e5, #7c3aed);
+      border-radius: 99px;
+      transition: width .4s ease;
+      width: 0%;
+    }
+    .ops-progress-text {
+      font-size: 0.7rem;
+      color: #94a3b8;
+      margin-top: 5px;
+    }
+    .ops-sync-time {
+      font-size: 0.7rem;
+      color: #cbd5e1;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    @media (max-width: 700px) {
+      .ops-inner   { gap: 12px; }
+      .ops-stage   { padding: 6px 12px; }
+      .ops-stage-num { font-size: 1.2rem; }
+    }
+
     /* ── Main content ── */
     .home-body {
       max-width: 1100px;
@@ -253,6 +349,36 @@
         <div class="home-kpi-value">—</div>
         <div class="home-kpi-sub">Active</div>
       </div>
+    </div>
+  </div>
+
+  <!-- Today's Pipeline -->
+  <div class="ops-wrap">
+    <div class="ops-inner">
+      <div class="ops-label">Today's Pipeline</div>
+      <div class="ops-stages">
+        <div class="ops-stage ops-stage--ship">
+          <div class="ops-stage-num" id="opsShip">—</div>
+          <div class="ops-stage-lbl">To Ship</div>
+        </div>
+        <div class="ops-arrow">›</div>
+        <div class="ops-stage ops-stage--pick">
+          <div class="ops-stage-num" id="opsPicked">—</div>
+          <div class="ops-stage-lbl">Picked</div>
+        </div>
+        <div class="ops-arrow">›</div>
+        <div class="ops-stage ops-stage--pack">
+          <div class="ops-stage-num" id="opsPacked">—</div>
+          <div class="ops-stage-lbl">Packed</div>
+        </div>
+      </div>
+      <div class="ops-progress-wrap">
+        <div class="ops-progress-bg">
+          <div class="ops-progress-bar" id="opsBar"></div>
+        </div>
+        <div class="ops-progress-text" id="opsProgressText">Loading…</div>
+      </div>
+      <div class="ops-sync-time" id="opsSyncTime"></div>
     </div>
   </div>
 
