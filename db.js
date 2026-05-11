@@ -371,6 +371,65 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_picked_orders_picked_at
       ON picked_orders(picked_at DESC);
+
+    -- ── Restock Planner ──────────────────────────────────────────────
+
+    -- Global defaults (singleton row, id=1 always)
+    CREATE TABLE IF NOT EXISTS restock_settings (
+      id              INT PRIMARY KEY DEFAULT 1,
+      sea_lead_days   INT NOT NULL DEFAULT 60,
+      air_lead_days   INT NOT NULL DEFAULT 14,
+      cover_weeks     INT NOT NULL DEFAULT 8,
+      velocity_days   INT NOT NULL DEFAULT 42,
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    INSERT INTO restock_settings (id) VALUES (1) ON CONFLICT DO NOTHING;
+
+    -- Per-style lead-time overrides and restock toggle
+    CREATE TABLE IF NOT EXISTS product_restock_config (
+      product_id      BIGINT PRIMARY KEY,
+      product_title   TEXT NOT NULL DEFAULT '',
+      sea_lead_days   INT,
+      air_lead_days   INT,
+      cover_weeks     INT,
+      restock_enabled BOOL NOT NULL DEFAULT true,
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    -- Active purchase orders (qty_by_variant keyed by variant title)
+    CREATE TABLE IF NOT EXISTS restock_orders (
+      id                SERIAL PRIMARY KEY,
+      product_id        BIGINT NOT NULL,
+      product_title     TEXT NOT NULL,
+      freight_mode      TEXT NOT NULL CHECK (freight_mode IN ('sea','air')),
+      ordered_at        DATE NOT NULL,
+      expected_delivery DATE NOT NULL,
+      qty_by_variant    JSONB NOT NULL DEFAULT '{}',
+      total_qty         INT NOT NULL DEFAULT 0,
+      status            TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending','received','cancelled')),
+      notes             TEXT,
+      created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_restock_orders_product
+      ON restock_orders(product_id, status);
+    CREATE INDEX IF NOT EXISTS idx_restock_orders_delivery
+      ON restock_orders(expected_delivery) WHERE status = 'pending';
+
+    -- One row per product per alert type; cleared when order is received
+    CREATE TABLE IF NOT EXISTS restock_alerts_log (
+      id             SERIAL PRIMARY KEY,
+      product_id     BIGINT NOT NULL,
+      product_title  TEXT NOT NULL DEFAULT '',
+      alert_type     TEXT NOT NULL,
+      rating         TEXT,
+      days_remaining INT,
+      alerted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(product_id, alert_type)
+    );
+    CREATE INDEX IF NOT EXISTS idx_restock_alerts_log_product
+      ON restock_alerts_log(product_id);
   `);
 }
 

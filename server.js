@@ -18,6 +18,7 @@ const metaAds          = require('./meta-ads-sync');
 const xeroSync         = require('./xero-sync');
 const weeklyPulse      = require('./weekly-pulse');
 const opsSync          = require('./ops-sync');
+const restockSync      = require('./restock-sync');
 
 const anthropicClient = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -946,6 +947,153 @@ app.get('/api/picking/orders', async (req, res) => {
     res.json({ orders, orderCount: orders.length, items });
   } catch (err) {
     console.error('[picking] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Restock Planner ───────────────────────────────────────────────
+
+// GET /api/restock/settings
+app.get('/api/restock/settings', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM restock_settings WHERE id = 1');
+    res.json(rows[0] || { sea_lead_days: 60, air_lead_days: 14, cover_weeks: 8, velocity_days: 42 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/restock/settings
+app.post('/api/restock/settings', async (req, res) => {
+  const { sea_lead_days, air_lead_days, cover_weeks, velocity_days } = req.body;
+  try {
+    await pool.query(
+      `INSERT INTO restock_settings (id, sea_lead_days, air_lead_days, cover_weeks, velocity_days, updated_at)
+       VALUES (1,$1,$2,$3,$4,NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         sea_lead_days = EXCLUDED.sea_lead_days,
+         air_lead_days = EXCLUDED.air_lead_days,
+         cover_weeks   = EXCLUDED.cover_weeks,
+         velocity_days = EXCLUDED.velocity_days,
+         updated_at    = NOW()`,
+      [sea_lead_days || 60, air_lead_days || 14, cover_weeks || 8, velocity_days || 42]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/restock/analysis — returns cached analysis from app_settings
+app.get('/api/restock/analysis', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`SELECT value FROM app_settings WHERE key = 'restock_analysis'`);
+    if (!rows.length) return res.json({ products: [], generatedAt: null });
+    res.json(JSON.parse(rows[0].value));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/restock/analysis/refresh — kick off a new analysis run
+app.post('/api/restock/analysis/refresh', async (req, res) => {
+  restockSync.runAnalysis().catch(err => console.error('[restock] Refresh error:', err.message));
+  res.json({ ok: true, message: 'Analysis started — check back in ~30 seconds' });
+});
+
+// GET /api/restock/orders
+app.get('/api/restock/orders', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM restock_orders
+       ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'received' THEN 1 ELSE 2 END,
+                expected_delivery ASC`
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/restock/orders
+app.post('/api/restock/orders', async (req, res) => {
+  const { productId, productTitle, freightMode, orderedAt, expectedDelivery,
+          qtyByVariant, totalQty, notes } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO restock_orders
+         (product_id, product_title, freight_mode, ordered_at, expected_delivery,
+          qty_by_variant, total_qty, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [productId, productTitle, freightMode, orderedAt, expectedDelivery,
+       JSON.stringify(qtyByVariant || {}), totalQty || 0, notes || null]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/restock/orders/:id
+app.patch('/api/restock/orders/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { status, notes, expectedDelivery } = req.body;
+  try {
+    if (status === 'received') {
+      // Clear alert log so this product can generate new alerts in the next cycle
+      const { rows: r } = await pool.query('SELECT product_id FROM restock_orders WHERE id=$1', [id]);
+      if (r.length) {
+        await pool.query('DELETE FROM restock_alerts_log WHERE product_id=$1', [r[0].product_id]);
+        console.log(`[restock] Alert log cleared for product ${r[0].product_id} (order received)`);
+      }
+    }
+    const { rows } = await pool.query(
+      `UPDATE restock_orders SET
+         status            = COALESCE($1, status),
+         notes             = COALESCE($2, notes),
+         expected_delivery = COALESCE($3::date, expected_delivery),
+         updated_at        = NOW()
+       WHERE id = $4 RETURNING *`,
+      [status || null, notes !== undefined ? notes : null, expectedDelivery || null, id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Order not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/restock/config
+app.get('/api/restock/config', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM product_restock_config ORDER BY product_title ASC');
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/restock/config/:productId
+app.post('/api/restock/config/:productId', async (req, res) => {
+  const productId = parseInt(req.params.productId);
+  const { productTitle, seaLeadDays, airLeadDays, coverWeeks, restockEnabled } = req.body;
+  try {
+    await pool.query(
+      `INSERT INTO product_restock_config
+         (product_id, product_title, sea_lead_days, air_lead_days, cover_weeks, restock_enabled, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,NOW())
+       ON CONFLICT (product_id) DO UPDATE SET
+         product_title   = EXCLUDED.product_title,
+         sea_lead_days   = EXCLUDED.sea_lead_days,
+         air_lead_days   = EXCLUDED.air_lead_days,
+         cover_weeks     = EXCLUDED.cover_weeks,
+         restock_enabled = EXCLUDED.restock_enabled,
+         updated_at      = NOW()`,
+      [productId, productTitle || '', seaLeadDays || null, airLeadDays || null,
+       coverWeeks || null, restockEnabled !== false]
+    );
+    res.json({ ok: true });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -2916,6 +3064,7 @@ initDb()
     xeroSync.startCron(pool);
     weeklyPulse.startCron(pool, anthropicClient);
     opsSync.startCron(pool);
+    restockSync.startCron(pool);
 
     // Recalculate margin tiers nightly at 02:00
     cron.schedule('0 2 * * *', async () => {
