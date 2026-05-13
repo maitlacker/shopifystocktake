@@ -441,21 +441,38 @@ function renderOrders(orders) {
 
 async function markOrderReceived(id) {
   if (!confirm('Mark this order as received? This will reset the alert log for this product so future alerts can fire again.')) return;
-  await fetch(`/api/restock/orders/${id}`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: 'received' }),
-  });
-  loadOrders();
-  showToast('Order marked received — alert log cleared');
+  try {
+    const res = await fetch(`/api/restock/orders/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'received' }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error(err.error || 'Update failed');
+    }
+    loadOrders();
+    showToast('Order marked received — alert log cleared');
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
 }
 
 async function cancelOrder(id) {
   if (!confirm('Cancel this restock order?')) return;
-  await fetch(`/api/restock/orders/${id}`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: 'cancelled' }),
-  });
-  loadOrders();
+  try {
+    const res = await fetch(`/api/restock/orders/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'cancelled' }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error(err.error || 'Update failed');
+    }
+    loadOrders();
+    showToast('Order cancelled');
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
 }
 
 // ── Log Order modal ────────────────────────────────────────────────
@@ -545,16 +562,20 @@ async function submitOrder() {
   if (totalQty === 0) { alert('Please enter at least one quantity.'); return; }
 
   try {
-    await fetch('/api/restock/orders', {
+    const res = await fetch('/api/restock/orders', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ productId, productTitle, freightMode, orderedAt,
         expectedDelivery, qtyByVariant, totalQty, notes: notes || null }),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error(err.error || 'Save failed');
+    }
     closeModal();
     loadOrders();
-    showToast('Restock order logged');
+    showToast('Restock order logged ✓');
   } catch (err) {
-    alert('Error: ' + err.message);
+    alert('Error saving order: ' + err.message);
   }
 }
 
