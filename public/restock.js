@@ -343,10 +343,12 @@ function expandRow(p, expanded) {
 
   // Incoming PO summary
   const incomingHtml = p.incomingOrders.length
-    ? '<div style="font-size:0.82rem;color:#4f46e5;margin-bottom:10px">' +
+    ? '<div style="font-size:0.82rem;margin-bottom:10px">' +
       p.incomingOrders.map(o =>
-        `📦 <strong>${o.freightMode.toUpperCase()}</strong> · ${o.totalQty} units · due ${o.expectedDelivery}`
-      ).join('  ·  ') + '</div>'
+        `<span style="color:#4f46e5">📦 <strong>${o.freightMode.toUpperCase()}</strong> · ${o.totalQty} units · due ${String(o.expectedDelivery).slice(0,10)}</span>` +
+        `<button onclick="deleteOrder(${o.orderId});event.stopPropagation()" title="Delete this order"
+           style="margin-left:8px;background:none;border:none;color:#ef4444;font-size:0.8rem;cursor:pointer;padding:0 4px;font-weight:700">✕</button>`
+      ).join('<span style="color:#cbd5e1">  &nbsp;</span>') + '</div>'
     : '';
 
   // Config override form
@@ -530,7 +532,8 @@ async function deleteOrder(id) {
       throw new Error(err.error || 'Delete failed');
     }
     loadOrders();
-    showToast('Order deleted');
+    showToast('Order deleted — refreshing analysis…');
+    silentRefreshAnalysis();
   } catch (err) {
     alert('Error: ' + err.message);
   }
