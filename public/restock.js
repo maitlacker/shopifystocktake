@@ -102,6 +102,30 @@ async function runAnalysis() {
   }
 }
 
+// Silent background refresh — no UI changes, just updates the table when done
+async function silentRefreshAnalysis() {
+  try {
+    await fetch('/api/restock/analysis/refresh', { method: 'POST' });
+    const prevGenerated = window._lastGeneratedAt || '';
+    let attempts = 0;
+    const poller = setInterval(async () => {
+      attempts++;
+      try {
+        const r = await fetch('/api/restock/analysis');
+        if (r.ok) {
+          const data = await r.json();
+          if (data.generatedAt && data.generatedAt !== prevGenerated) {
+            clearInterval(poller);
+            renderAnalysis(data);
+            showToast('Analysis updated ✓');
+          }
+        }
+      } catch (_) {}
+      if (attempts >= 24) clearInterval(poller); // 2-min timeout
+    }, 5000);
+  } catch (_) {}
+}
+
 function renderAnalysis(data) {
   window._lastGeneratedAt = data.generatedAt;
   allProducts = data.products || [];
@@ -573,7 +597,8 @@ async function submitOrder() {
     }
     closeModal();
     loadOrders();
-    showToast('Restock order logged ✓');
+    showToast('Restock order logged ✓ — refreshing analysis…');
+    silentRefreshAnalysis();
   } catch (err) {
     alert('Error saving order: ' + err.message);
   }
