@@ -445,9 +445,12 @@ function renderOrders(orders) {
     const actions = isPending
       ? `<button class="btn btn-secondary" style="padding:5px 10px;font-size:0.75rem;margin-right:4px"
            onclick="markOrderReceived(${o.id})">Mark Received</button>
-         <button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5"
-           onclick="cancelOrder(${o.id})">Cancel</button>`
-      : '';
+         <button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;margin-right:4px"
+           onclick="cancelOrder(${o.id})">Cancel</button>
+         <button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fef2f2;color:#991b1b;border:1px solid #fca5a5"
+           onclick="deleteOrder(${o.id})" title="Permanently delete this order">🗑</button>`
+      : `<button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fef2f2;color:#991b1b;border:1px solid #fca5a5"
+           onclick="deleteOrder(${o.id})" title="Permanently delete this order">🗑</button>`;
 
     return `<tr>
       <td><strong>${escHtml(o.product_title)}</strong></td>
@@ -494,6 +497,21 @@ async function cancelOrder(id) {
     }
     loadOrders();
     showToast('Order cancelled');
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+async function deleteOrder(id) {
+  if (!confirm('Permanently delete this restock order? This cannot be undone.')) return;
+  try {
+    const res = await fetch(`/api/restock/orders/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error(err.error || 'Delete failed');
+    }
+    loadOrders();
+    showToast('Order deleted');
   } catch (err) {
     alert('Error: ' + err.message);
   }

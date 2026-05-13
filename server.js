@@ -1063,6 +1063,18 @@ app.patch('/api/restock/orders/:id', async (req, res) => {
   }
 });
 
+// DELETE /api/restock/orders/:id
+app.delete('/api/restock/orders/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const { rowCount } = await pool.query('DELETE FROM restock_orders WHERE id = $1', [id]);
+    if (!rowCount) return res.status(404).json({ error: 'Order not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/restock/config
 app.get('/api/restock/config', async (req, res) => {
   try {
