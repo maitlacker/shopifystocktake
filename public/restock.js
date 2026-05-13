@@ -301,18 +301,37 @@ function expandRow(p, expanded) {
       ? `<span class="rs-suggest">${v.suggestedAirQty}</span>`
       : `<span class="rs-suggest zero">covered</span>`;
     const dStr = v.effectiveDaysRemaining !== null ? v.effectiveDaysRemaining + 'd' : '—';
-    return `<tr>
+
+    // OOS: show demand velocity (from older period) with an OOS badge.
+    // The recent vel is 0 due to no stock, not no demand.
+    const velDisplay = v.isOos
+      ? `<span style="color:#9ca3af;text-decoration:line-through;font-size:0.75em">${v.recentDailyVel.toFixed(3)}</span>
+         <span style="background:#fef3c7;color:#92400e;font-size:0.68rem;font-weight:700;padding:1px 5px;border-radius:4px;margin-left:3px"
+               title="OOS — using older-period velocity (${v.demandDailyVel.toFixed(3)}) for suggestions">OOS*</span>`
+      : v.recentDailyVel.toFixed(3);
+
+    return `<tr${v.isOos ? ' style="opacity:0.8"' : ''}>
       <td>${escHtml(v.title)}</td>
       <td>${v.inventory}</td>
       <td>${v.incomingQty > 0 ? '+' + v.incomingQty : '—'}</td>
-      <td>${v.recentDailyVel.toFixed(3)}</td>
+      <td>${velDisplay}</td>
       <td>${dStr}</td>
       <td>${seaStr}</td>
       <td>${airStr}</td>
     </tr>`;
   }).join('');
 
+  const hasOos = p.variants.some(v => v.isOos);
+  const oosNote = hasOos
+    ? `<div style="font-size:0.75rem;color:#92400e;background:#fef3c7;border:1px solid #fde68a;
+         border-radius:6px;padding:6px 10px;margin-bottom:10px">
+         ⚠️ <strong>OOS*</strong> — one or more sizes are out of stock. Recent velocity is 0 due to no available units,
+         not lack of demand. Suggestions use the older-period velocity as a demand proxy.
+       </div>`
+    : '';
+
   const sizeTable = `
+    ${oosNote}
     <table class="rs-size-table">
       <thead><tr>
         <th>Size</th><th>Stock</th><th>Incoming</th>

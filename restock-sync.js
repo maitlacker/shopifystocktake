@@ -245,15 +245,22 @@ async function runAnalysis() {
           return sum + qty;
         }, 0);
 
-        const currentStock           = Math.max(0, v.inventory_quantity || 0);
-        const effectiveStock         = currentStock + incomingQty;
-        const daysRemaining          = recentVel > 0 ? Math.round(currentStock   / recentVel) : null;
-        const effectiveDaysRemaining = recentVel > 0 ? Math.round(effectiveStock / recentVel) : null;
+        const currentStock = Math.max(0, v.inventory_quantity || 0);
+        const effectiveStock = currentStock + incomingQty;
+
+        // If a variant has no stock and no incoming, recent velocity is suppressed
+        // by lack of available units — not lack of demand. Use the older period as
+        // the demand proxy so suggestions aren't falsely zeroed out.
+        const isOos = currentStock === 0 && incomingQty === 0;
+        const demandVel = (isOos && olderVel > recentVel) ? olderVel : recentVel;
+
+        const daysRemaining          = demandVel > 0 ? Math.round(currentStock   / demandVel) : null;
+        const effectiveDaysRemaining = demandVel > 0 ? Math.round(effectiveStock / demandVel) : null;
 
         // Suggested order = units needed to reach cover target after delivery
-        const coverTarget    = recentVel * effectiveCoverWeeks * 7;
-        const projAtSea      = Math.max(0, effectiveStock - recentVel * effectiveSeaLeadDays);
-        const projAtAir      = Math.max(0, effectiveStock - recentVel * effectiveAirLeadDays);
+        const coverTarget     = demandVel * effectiveCoverWeeks * 7;
+        const projAtSea       = Math.max(0, effectiveStock - demandVel * effectiveSeaLeadDays);
+        const projAtAir       = Math.max(0, effectiveStock - demandVel * effectiveAirLeadDays);
         const suggestedSeaQty = Math.max(0, Math.ceil(coverTarget - projAtSea));
         const suggestedAirQty = Math.max(0, Math.ceil(coverTarget - projAtAir));
 
@@ -265,9 +272,11 @@ async function runAnalysis() {
           effectiveStock,
           soldRecent,
           soldOlder,
-          recentDailyVel:        Math.round(recentVel * 1000) / 1000,
-          olderDailyVel:         Math.round(olderVel  * 1000) / 1000,
-          avgDailyVel:           Math.round(avgVel    * 1000) / 1000,
+          isOos,
+          recentDailyVel:        Math.round(recentVel  * 1000) / 1000,
+          olderDailyVel:         Math.round(olderVel   * 1000) / 1000,
+          demandDailyVel:        Math.round(demandVel  * 1000) / 1000,
+          avgDailyVel:           Math.round(avgVel     * 1000) / 1000,
           daysRemaining,
           effectiveDaysRemaining,
           suggestedSeaQty,
@@ -282,14 +291,22 @@ async function runAnalysis() {
       const styleRecentVel  = totalSoldRecent / halfDays;
       const styleOlderVel   = totalSoldOlder  / halfDays;
       const styleAvgVel     = totalSold       / velocity_days;
+
+      // If ≥50% of variants are OOS, recent velocity is unreliable for rating.
+      // Use older velocity as the demand proxy to avoid false F ratings.
+      const oosVariantCount = variants.filter(v => v.isOos).length;
+      const broadlyOos = oosVariantCount > 0 && oosVariantCount >= Math.ceil(variants.length * 0.5);
+      const ratingRecentVel = broadlyOos ? Math.max(styleRecentVel, styleOlderVel) : styleRecentVel;
+
       const styleTrendRatio = styleOlderVel > 0
-        ? styleRecentVel / styleOlderVel
-        : (styleRecentVel > 0 ? 2.0 : 0);
+        ? ratingRecentVel / styleOlderVel
+        : (ratingRecentVel > 0 ? 2.0 : 0);
 
-      const rating = calculateRating(styleAvgVel, styleRecentVel, styleOlderVel, totalSold);
+      const rating = calculateRating(styleAvgVel, ratingRecentVel, styleOlderVel, totalSold);
 
-      // Effective runway = min days across variants that have recent sales
-      const activeVars = variants.filter(v => v.recentDailyVel > 0);
+      // Effective runway = min days across variants with demand (includes OOS variants
+      // with historical sales — their 0d runway is a real signal)
+      const activeVars = variants.filter(v => v.demandDailyVel > 0);
       let minDaysRemaining = null;
       let criticalVariant  = null;
       if (activeVars.length) {
