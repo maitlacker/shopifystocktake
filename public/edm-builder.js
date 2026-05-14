@@ -5,6 +5,53 @@ let lastResult      = null;   // { html, subjectA, subjectB, previewText, sendTi
 let loadedTemplate  = null;   // { name, html } — set when user loads a template file
 let currentTab      = 'preview';
 let imgCounter      = 0;
+let prodCounter     = 0;
+
+/* ── Product rows ───────────────────────────────────────────────── */
+function addProduct() {
+  const id   = ++prodCounter;
+  const row  = document.createElement('div');
+  row.className = 'prod-row';
+  row.id = `prod-row-${id}`;
+  row.innerHTML = `
+    <input class="edm-input" id="prod-url-${id}" type="url"
+           placeholder="https://theselfstyler.com.au/products/product-name"
+           oninput="clearProdStatus(${id})" />
+    <button class="img-remove-btn" onclick="removeProduct(${id})" title="Remove">×</button>
+  `;
+  document.getElementById('prod-rows').appendChild(row);
+}
+
+function removeProduct(id) {
+  const el = document.getElementById(`prod-row-${id}`);
+  if (el) el.remove();
+}
+
+function clearProdStatus(id) {
+  const existing = document.getElementById(`prod-status-${id}`);
+  if (existing) existing.remove();
+}
+
+function setProdStatus(id, type, label) {
+  clearProdStatus(id);
+  const row = document.getElementById(`prod-row-${id}`);
+  if (!row) return;
+  const span = document.createElement('span');
+  span.className = `prod-status ${type}`;
+  span.id = `prod-status-${id}`;
+  span.textContent = label;
+  // Insert before the × button
+  row.insertBefore(span, row.lastElementChild);
+}
+
+function getProducts() {
+  const rows = document.querySelectorAll('#prod-rows .prod-row');
+  return Array.from(rows).map(row => {
+    const id  = row.id.replace('prod-row-', '');
+    const url = (document.getElementById(`prod-url-${id}`)?.value || '').trim();
+    return { id, url };
+  }).filter(p => p.url);
+}
 
 /* ── Image rows ─────────────────────────────────────────────────── */
 function addImage() {
@@ -82,12 +129,15 @@ async function generateEDM() {
   clearFormError();
   clearOutputError();
 
+  const prodList = getProducts();
+
   const payload = {
     campaignName:    document.getElementById('f-name').value.trim(),
     goal,
     details:         document.getElementById('f-details').value.trim(),
     ctaText:         document.getElementById('f-cta-text').value.trim() || 'Shop Now',
     ctaUrl:          document.getElementById('f-cta-url').value.trim(),
+    products:        prodList.map(p => ({ url: p.url })),
     images:          getImages(),
     tone:            getSelectedTone(),
     brandName:       document.getElementById('f-brand-name').value.trim() || 'The Self Styler',
@@ -116,6 +166,19 @@ async function generateEDM() {
 
     lastResult = data;
     renderOutput(data);
+
+    // Show per-product fetch status badges if the server returned them
+    if (data.productResults) {
+      data.productResults.forEach(r => {
+        const row = prodList.find(p => p.url === r.url);
+        if (!row) return;
+        if (r.ok) {
+          setProdStatus(row.id, 'ok', `✓ ${r.title}`);
+        } else {
+          setProdStatus(row.id, 'err', `✗ ${r.error}`);
+        }
+      });
+    }
 
   } catch (err) {
     showOutputError('Generation failed: ' + err.message);

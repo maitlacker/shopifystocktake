@@ -3306,7 +3306,8 @@ app.post('/api/edm/generate', requireAuth, async (req, res) => {
     details         = '',
     ctaText         = 'Shop Now',
     ctaUrl          = '',
-    images          = [],          // [{ url, role, linkUrl }]
+    products        = [],          // [{ url }] — resolved against Shopify API
+    images          = [],          // [{ url, role, linkUrl }] — non-product images
     tone            = 'friendly',
     brandName       = 'The Self Styler',
     brandColour     = '#6366f1',
@@ -3320,6 +3321,68 @@ app.post('/api/edm/generate', requireAuth, async (req, res) => {
   if (!goal && !details) {
     return res.status(400).json({ error: 'At least a campaign goal or details are required.' });
   }
+
+  // ── Resolve product URLs against Shopify Admin API ────────────────
+  function extractProductHandle(url) {
+    const m = String(url || '').match(/\/products\/([^/?#\s]+)/);
+    return m ? m[1] : null;
+  }
+
+  const productResults = [];   // returned to client for status badges
+  const resolvedProducts = []; // handed to Claude
+
+  for (const p of products) {
+    if (!p.url) continue;
+    const handle = extractProductHandle(p.url);
+    if (!handle) {
+      productResults.push({ url: p.url, ok: false, error: 'No /products/ handle found in URL' });
+      continue;
+    }
+    try {
+      const r = await fetch(
+        `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products.json` +
+        `?handle=${encodeURIComponent(handle)}&fields=title,body_html,images,variants,handle&limit=1`,
+        { headers: shopifyHeaders() }
+      );
+      if (!r.ok) throw new Error(`Shopify API ${r.status}`);
+      const data  = await r.json();
+      const prod  = data.products?.[0];
+      if (!prod) throw new Error('Product not found');
+
+      const title       = prod.title;
+      const imageUrl    = prod.images?.[0]?.src || null;
+      const price       = prod.variants?.[0]?.price ? `AUD $${prod.variants[0].price}` : null;
+      const description = prod.body_html
+        ? prod.body_html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 200)
+        : null;
+
+      resolvedProducts.push({ url: p.url, title, imageUrl, price, description });
+      productResults.push({ url: p.url, ok: true, title });
+    } catch (e) {
+      resolvedProducts.push({ url: p.url, title: null, imageUrl: null, price: null, description: null, error: e.message });
+      productResults.push({ url: p.url, ok: false, error: e.message });
+    }
+  }
+
+  console.log(`[edm/generate] Resolved ${resolvedProducts.length} products (${productResults.filter(r=>r.ok).length} ok)`);
+
+  // Build products section for prompt
+  const productsSection = resolvedProducts.length
+    ? resolvedProducts.map((p, i) => {
+        if (p.error && !p.title) {
+          return `  Product ${i + 1}: URL = ${p.url}\n    ⚠ Could not fetch product (${p.error}) — use a placeholder`;
+        }
+        return [
+          `  Product ${i + 1}:`,
+          `    Title: ${p.title}`,
+          p.price       ? `    Price: ${p.price}` : null,
+          `    Product page URL: ${p.url}`,
+          `      → Wrap this product's image AND title in <a href="${p.url}" target="_blank" style="text-decoration:none;color:inherit">`,
+          p.imageUrl    ? `    Image URL: ${p.imageUrl}\n      → Use this EXACT URL as the <img src> — do not alter it` : `    Image: none available — use a styled placeholder div`,
+          p.description ? `    Description snippet: ${p.description}` : null,
+        ].filter(Boolean).join('\n');
+      }).join('\n\n')
+    : null;
 
   // Build images section for prompt (shared by both modes)
   const imagesSection = images.length
@@ -3364,8 +3427,13 @@ ${details || '(none provided)'}
 ## Call-to-Action
 - CTA Button Text: ${ctaText}
 - CTA URL: ${ctaUrl || 'https://theselfstyler.com.au'}
+${productsSection ? `
+## Products to Feature
+${productsSection}
 
-## Images
+For EACH product above: use the exact provided Image URL as <img src>, wrap both the image and the product title in <a href="[Product page URL]" target="_blank"> for click-through, display the price, and draw on the description for copy inspiration.
+` : ''}
+## Additional Images
 ${imagesSection}`;
 
   let prompt;
@@ -3496,7 +3564,7 @@ Respond ONLY with a JSON object (no markdown fences, no explanation) with exactl
     }
 
     console.log(`[edm/generate] Done — HTML length ${parsed.html.length} chars`);
-    res.json(parsed);
+    res.json({ ...parsed, productResults });
 
   } catch (err) {
     console.error('[edm/generate] Error:', err.message);
