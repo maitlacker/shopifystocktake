@@ -3301,16 +3301,19 @@ app.post('/api/edm/generate', requireAuth, async (req, res) => {
   }
 
   const {
-    campaignName = '',
-    goal         = '',
-    details      = '',
-    ctaText      = 'Shop Now',
-    ctaUrl       = '',
-    images       = [],          // [{ url, role, linkUrl }]
-    tone         = 'friendly',
-    brandName    = 'The Self Styler',
-    brandColour  = '#6366f1',
-    existingHtml = '',          // if set: populate-template mode
+    campaignName    = '',
+    goal            = '',
+    details         = '',
+    ctaText         = 'Shop Now',
+    ctaUrl          = '',
+    images          = [],          // [{ url, role, linkUrl }]
+    tone            = 'friendly',
+    brandName       = 'The Self Styler',
+    brandColour     = '#6366f1',
+    logoUrl         = '',          // used to build header in scratch mode
+    footerImageUrl  = '',          // optional footer banner
+    footerImageLink = '',          // optional click-through link for footer image
+    existingHtml    = '',          // if set: populate-template mode
   } = req.body;
 
   if (!goal && !details) {
@@ -3327,6 +3330,27 @@ app.post('/api/edm/generate', requireAuth, async (req, res) => {
         return line;
       }).join('\n')
     : '  (no images provided — keep/replace any existing image placeholders as appropriate)';
+
+  // Logo header instruction (shared)
+  const logoInstruction = logoUrl
+    ? `- Header: centre the brand logo at the very top of the email using:
+    <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding:20px 0 16px">
+      <img src="${logoUrl}" alt="${brandName}" style="max-width:180px;height:auto;display:block" />
+    </td></tr></table>
+    Place this header row before the hero/banner section.`
+    : `- Header: create a simple text-based header with the brand name "${brandName}" in large bold font, centred, as a fallback since no logo URL was provided.`;
+
+  // Footer image instruction (shared)
+  const footerImageInstruction = footerImageUrl
+    ? (() => {
+        const imgTag = `<img src="${footerImageUrl}" alt="${brandName}" style="display:block;max-width:100%;height:auto" />`;
+        const wrapped = footerImageLink
+          ? `<a href="${footerImageLink}" target="_blank" style="display:block;text-decoration:none">${imgTag}</a>`
+          : imgTag;
+        return `- Footer image: place the following HTML directly above the unsubscribe/copyright line in the footer:
+    ${wrapped}`;
+      })()
+    : '';
 
   // Brief block reused in both prompts
   const briefBlock = `## Campaign Brief
@@ -3362,6 +3386,8 @@ CHANGE these things:
 5. CTA button href — use "${ctaUrl || 'https://theselfstyler.com.au'}"
 6. Any secondary product images — replace with provided image URLs if available
 7. Klaviyo personalisation tag in greeting: {{ first_name|default:'there' }}
+${logoUrl ? `8. Header logo image src — update to: ${logoUrl}` : ''}
+${footerImageUrl ? `9. Footer image — ${footerImageInstruction}` : ''}
 
 DO NOT CHANGE these things:
 - Overall table/div structure and layout
@@ -3398,13 +3424,15 @@ ${briefBlock}
 
 ### Design
 - Responsive HTML (mobile-first, max-width 600px, centered)
-- Clean fashion-forward layout: hero banner, body copy, CTA button, footer
+- Clean fashion-forward layout: header (logo), hero banner, body copy, CTA button, footer
+- ${logoInstruction}
 - Use the brand colour ${brandColour} for the CTA button and key accents
 - Font: system fonts stack — -apple-system, Arial, sans-serif
 - Background: #ffffff for content, #f8f8f8 for outer body
 - CTA button: bold, rounded (border-radius 4px), high contrast white text on brand colour
-- Images: use provided URLs as <img> src attributes; if none provided, insert a styled placeholder div
-- Footer: "© ${new Date().getFullYear()} ${brandName} · Unsubscribe" with Klaviyo unsubscribe tag {{ unsubscribe_url }}
+- Body images: use provided URLs as <img> src attributes; if none provided, insert a styled placeholder div
+- ${footerImageInstruction || `Footer: no footer image provided — use a clean text-only footer`}
+- Footer text: "© ${new Date().getFullYear()} ${brandName} · Unsubscribe" with Klaviyo unsubscribe tag {{ unsubscribe_url }}
 - Add Klaviyo merge tags where natural: {{ first_name|default:'there' }} in greeting
 
 ### HTML Rules

@@ -83,16 +83,19 @@ async function generateEDM() {
   clearOutputError();
 
   const payload = {
-    campaignName: document.getElementById('f-name').value.trim(),
+    campaignName:    document.getElementById('f-name').value.trim(),
     goal,
-    details:      document.getElementById('f-details').value.trim(),
-    ctaText:      document.getElementById('f-cta-text').value.trim() || 'Shop Now',
-    ctaUrl:       document.getElementById('f-cta-url').value.trim(),
-    images:       getImages(),
-    tone:         getSelectedTone(),
-    brandName:    document.getElementById('f-brand-name').value.trim() || 'The Self Styler',
-    brandColour:  document.getElementById('f-brand-colour').value.trim() || '#6366f1',
-    existingHtml: loadedTemplate ? loadedTemplate.html : '',
+    details:         document.getElementById('f-details').value.trim(),
+    ctaText:         document.getElementById('f-cta-text').value.trim() || 'Shop Now',
+    ctaUrl:          document.getElementById('f-cta-url').value.trim(),
+    images:          getImages(),
+    tone:            getSelectedTone(),
+    brandName:       document.getElementById('f-brand-name').value.trim() || 'The Self Styler',
+    brandColour:     document.getElementById('f-brand-colour').value.trim() || '#6366f1',
+    logoUrl:         document.getElementById('f-logo-url').value.trim(),
+    footerImageUrl:  document.getElementById('f-footer-img-url').value.trim(),
+    footerImageLink: document.getElementById('f-footer-img-link').value.trim(),
+    existingHtml:    loadedTemplate ? loadedTemplate.html : '',
   };
 
   setLoading(true);
