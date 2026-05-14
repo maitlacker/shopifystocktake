@@ -3291,6 +3291,134 @@ app.get('/api/bi/summary', async (req, res) => {
   }
 });
 
+// ── EDM Builder ───────────────────────────────────────────────────
+
+// POST /api/edm/generate
+// Accepts campaign brief, proxies to Anthropic, returns { html, subjectA, subjectB, previewText, sendTime, instructions }
+app.post('/api/edm/generate', requireAuth, async (req, res) => {
+  if (!anthropicClient) {
+    return res.status(503).json({ error: 'ANTHROPIC_API_KEY is not configured on this server.' });
+  }
+
+  const {
+    campaignName = '',
+    goal         = '',
+    details      = '',
+    ctaText      = 'Shop Now',
+    ctaUrl       = '',
+    images       = [],          // [{ url, role }]
+    tone         = 'friendly',
+    brandName    = 'The Self Styler',
+    brandColour  = '#6366f1',
+  } = req.body;
+
+  if (!goal && !details) {
+    return res.status(400).json({ error: 'At least a campaign goal or details are required.' });
+  }
+
+  // Build images section for prompt
+  const imagesSection = images.length
+    ? images.map((img, i) => `  Image ${i + 1}: Role = "${img.role || 'product'}", URL = ${img.url || '(none)'}`).join('\n')
+    : '  (no images provided — use placeholder boxes styled consistently)';
+
+  const prompt = `You are an expert email marketing designer and copywriter for a fashion e-commerce brand. Create a complete, production-ready HTML email campaign for Klaviyo.
+
+## Brand Details
+- Brand Name: ${brandName}
+- Brand Colour (primary): ${brandColour}
+- Tone: ${tone}
+
+## Campaign Brief
+- Campaign Name: ${campaignName || '(untitled)'}
+- Goal: ${goal}
+- Details / Context:
+${details || '(none provided)'}
+
+## Call-to-Action
+- CTA Button Text: ${ctaText}
+- CTA URL: ${ctaUrl || 'https://theselfstyler.com.au'}
+
+## Images
+${imagesSection}
+
+## Requirements for the HTML Email
+
+### Design
+- Responsive HTML (mobile-first, max-width 600px, centered)
+- Clean fashion-forward layout: hero banner, body copy, CTA button, footer
+- Use the brand colour ${brandColour} for the CTA button and key accents
+- Font: system fonts stack — -apple-system, Arial, sans-serif
+- Background: #ffffff for content, #f8f8f8 for outer body
+- CTA button: bold, rounded (border-radius 4px), high contrast white text on brand colour
+- Images: use provided URLs as <img> src attributes; if none provided, insert a styled placeholder div
+- Footer: "© ${new Date().getFullYear()} ${brandName} · Unsubscribe" with Klaviyo unsubscribe tag {{ unsubscribe_url }}
+- Add Klaviyo merge tags where natural: {{ first_name|default:'there' }} in greeting
+
+### HTML Rules
+- Inline all CSS (no <style> blocks — Klaviyo strips them)
+- Use table-based layout for Outlook compatibility
+- No JavaScript
+- All <img> tags must have alt attributes
+- Include <!-- [if mso]> hacks for Outlook button rendering
+
+### Copy
+- Write all headline, body copy, and CTA text yourself based on the campaign brief
+- Keep subject-line-worthy headline visible in the hero
+- Copy tone must match: ${tone}
+
+## Output Format
+Respond ONLY with a JSON object (no markdown fences, no explanation) with exactly these keys:
+{
+  "html": "<the complete HTML email as a single string — escape internal double-quotes with \\">",
+  "subjectA": "Subject line variant A (max 50 chars)",
+  "subjectB": "Subject line variant B — different angle, also max 50 chars",
+  "previewText": "Preview/preheader text shown in inbox before opening (max 90 chars)",
+  "sendTime": "Recommended send day and time with reasoning (1–2 sentences)",
+  "instructions": "Brief Klaviyo setup notes: segment suggestion, any personalisation tags used, A/B test recommendation (2–4 dot points as a single string separated by \\n)"
+}`;
+
+  try {
+    console.log(`[edm/generate] Generating EDM for "${campaignName || goal.slice(0,40)}"`);
+
+    const message = await anthropicClient.messages.create({
+      model:      'claude-sonnet-4-5',
+      max_tokens: 8000,
+      messages:   [{ role: 'user', content: prompt }],
+    });
+
+    const rawText = message.content[0]?.text || '';
+
+    // Strip markdown fences if Claude wraps the JSON
+    const jsonText = rawText
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch (e) {
+      console.error('[edm/generate] JSON parse failed. Raw (first 600):', jsonText.slice(0, 600));
+      return res.status(500).json({ error: 'AI returned malformed JSON. Please try again.' });
+    }
+
+    // Validate required keys exist
+    const required = ['html', 'subjectA', 'subjectB', 'previewText', 'sendTime', 'instructions'];
+    const missing  = required.filter(k => !parsed[k]);
+    if (missing.length) {
+      console.error('[edm/generate] Missing keys:', missing);
+      return res.status(500).json({ error: `AI response missing fields: ${missing.join(', ')}` });
+    }
+
+    console.log(`[edm/generate] Done — HTML length ${parsed.html.length} chars`);
+    res.json(parsed);
+
+  } catch (err) {
+    console.error('[edm/generate] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 

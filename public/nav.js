@@ -56,6 +56,7 @@
         { label: 'Coupon Export',    href: '/coupon-export.html' },
         { label: 'Gift Card Export', href: '/gift-card-export.html' },
         { label: 'Margin Tagger',    href: '/margin-tagger.html' },
+        { label: 'EDM Builder',      href: '/edm-builder.html' },
       ],
     },
   ];

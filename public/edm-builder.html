@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EDM Builder — The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* ── Layout ──────────────────────────────────────────────────── */
+    body { overflow: hidden; }
+    .edm-root {
+      display: flex;
+      height: calc(100vh - 52px);   /* subtract nav height */
+      overflow: hidden;
+    }
+
+    /* ── Left panel: brief form ──────────────────────────────────── */
+    .edm-panel {
+      width: 420px;
+      min-width: 340px;
+      flex-shrink: 0;
+      background: #fff;
+      border-right: 1px solid #e2e8f0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .edm-panel-head {
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid #e2e8f0;
+      flex-shrink: 0;
+    }
+    .edm-panel-head h1 {
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: #1e293b;
+      margin: 0 0 2px;
+    }
+    .edm-panel-head p {
+      font-size: 0.78rem;
+      color: #64748b;
+      margin: 0;
+    }
+    .edm-form-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px 20px;
+    }
+
+    /* ── Form sections ───────────────────────────────────────────── */
+    .edm-section {
+      margin-bottom: 20px;
+    }
+    .edm-section-title {
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: #94a3b8;
+      margin-bottom: 10px;
+    }
+    .edm-field {
+      margin-bottom: 11px;
+    }
+    .edm-label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #475569;
+      margin-bottom: 4px;
+    }
+    .edm-input,
+    .edm-textarea,
+    .edm-select {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 7px 10px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      color: #1e293b;
+      background: #fff;
+      font-family: inherit;
+      transition: border-color 0.15s;
+    }
+    .edm-input:focus,
+    .edm-textarea:focus,
+    .edm-select:focus {
+      outline: none;
+      border-color: #6366f1;
+    }
+    .edm-textarea {
+      resize: vertical;
+      min-height: 72px;
+    }
+
+    /* ── Tone pills ──────────────────────────────────────────────── */
+    .tone-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .tone-pill {
+      padding: 5px 12px;
+      border-radius: 20px;
+      border: 1.5px solid #e2e8f0;
+      background: #f8fafc;
+      color: #64748b;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .tone-pill:hover { border-color: #6366f1; color: #6366f1; }
+    .tone-pill.selected {
+      background: #ede9fe;
+      border-color: #6366f1;
+      color: #4f46e5;
+    }
+
+    /* ── Image rows ──────────────────────────────────────────────── */
+    .img-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .img-row .edm-input { flex: 1; }
+    .img-role-sel {
+      width: 110px;
+      flex-shrink: 0;
+      padding: 7px 8px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      color: #475569;
+      background: #fff;
+      font-family: inherit;
+    }
+    .img-role-sel:focus { outline: none; border-color: #6366f1; }
+    .img-remove-btn {
+      width: 28px;
+      height: 28px;
+      flex-shrink: 0;
+      border: none;
+      border-radius: 6px;
+      background: #fee2e2;
+      color: #dc2626;
+      font-size: 1rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+    .img-remove-btn:hover { background: #fca5a5; }
+    .add-img-btn {
+      font-size: 0.78rem;
+      color: #6366f1;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+      padding: 0;
+      margin-top: 4px;
+    }
+    .add-img-btn:hover { text-decoration: underline; }
+
+    /* ── Brand colour row ────────────────────────────────────────── */
+    .colour-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .colour-row input[type="color"] {
+      width: 42px;
+      height: 36px;
+      padding: 2px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 8px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .colour-row .edm-input { flex: 1; font-family: monospace; }
+
+    /* ── Generate button ─────────────────────────────────────────── */
+    .edm-panel-foot {
+      padding: 14px 20px;
+      border-top: 1px solid #e2e8f0;
+      flex-shrink: 0;
+    }
+    .edm-gen-btn {
+      width: 100%;
+      padding: 11px;
+      background: #6366f1;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 0.92rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .edm-gen-btn:hover:not(:disabled) { background: #4f46e5; }
+    .edm-gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .edm-gen-btn .spinner {
+      width: 16px; height: 16px;
+      border: 2.5px solid rgba(255,255,255,0.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: none;
+    }
+    .edm-gen-btn.loading .spinner { display: block; }
+    .edm-gen-btn.loading .btn-label { opacity: 0.7; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Right panel: output ─────────────────────────────────────── */
+    .edm-output {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: #f8fafc;
+    }
+
+    /* ── Tab bar ─────────────────────────────────────────────────── */
+    .edm-tabs {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      border-bottom: 1px solid #e2e8f0;
+      background: #fff;
+      padding: 0 16px;
+      flex-shrink: 0;
+    }
+    .edm-tab {
+      padding: 12px 16px;
+      font-size: 0.83rem;
+      font-weight: 600;
+      color: #64748b;
+      border-bottom: 2.5px solid transparent;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+      background: none;
+      border-left: none;
+      border-right: none;
+      border-top: none;
+    }
+    .edm-tab:hover { color: #6366f1; }
+    .edm-tab.active { color: #6366f1; border-bottom-color: #6366f1; }
+
+    .edm-tab-actions {
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
+      padding: 8px 0;
+    }
+    .edm-action-btn {
+      padding: 6px 14px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      border-radius: 7px;
+      border: 1.5px solid #e2e8f0;
+      background: #fff;
+      color: #475569;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .edm-action-btn:hover { border-color: #6366f1; color: #6366f1; }
+    .edm-action-btn.copied { border-color: #16a34a; color: #16a34a; }
+
+    /* ── Tab panes ───────────────────────────────────────────────── */
+    .edm-pane {
+      display: none;
+      flex: 1;
+      overflow: hidden;
+    }
+    .edm-pane.active { display: flex; flex-direction: column; }
+
+    /* Preview iframe */
+    #pane-preview { position: relative; }
+    #preview-iframe {
+      width: 100%;
+      flex: 1;
+      border: none;
+      background: #fff;
+    }
+
+    /* HTML code pane */
+    #pane-html {
+      background: #0f172a;
+      overflow: hidden;
+    }
+    #html-pre {
+      flex: 1;
+      overflow: auto;
+      padding: 20px;
+      margin: 0;
+      font-size: 0.78rem;
+      line-height: 1.6;
+      color: #e2e8f0;
+      font-family: 'Consolas', 'Monaco', monospace;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    /* Subject lines pane */
+    #pane-subjects {
+      padding: 24px;
+      gap: 16px;
+      overflow-y: auto;
+    }
+    .subj-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px 20px;
+    }
+    .subj-card-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: #94a3b8;
+      margin-bottom: 8px;
+    }
+    .subj-card-value {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1e293b;
+      margin-bottom: 10px;
+    }
+    .subj-char-count {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      margin-bottom: 10px;
+    }
+    .subj-copy-btn {
+      padding: 5px 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      border-radius: 6px;
+      border: 1.5px solid #e2e8f0;
+      background: #f8fafc;
+      color: #475569;
+      cursor: pointer;
+    }
+    .subj-copy-btn:hover { border-color: #6366f1; color: #6366f1; }
+    .subj-copy-btn.copied { border-color: #16a34a; color: #16a34a; }
+
+    .send-time-card {
+      background: #f0f9ff;
+      border: 1px solid #bae6fd;
+      border-radius: 12px;
+      padding: 16px 20px;
+    }
+    .send-time-card .subj-card-label { color: #0284c7; }
+    .send-time-card .subj-card-value { font-size: 0.9rem; font-weight: 600; color: #0369a1; }
+
+    .instructions-card {
+      background: #fafaf7;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px 20px;
+    }
+    .instructions-card .subj-card-label { color: #64748b; }
+    .instructions-card .instr-list {
+      font-size: 0.83rem;
+      color: #334155;
+      line-height: 1.7;
+      white-space: pre-line;
+    }
+
+    /* ── Empty / Error states ────────────────────────────────────── */
+    .edm-empty {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      color: #94a3b8;
+      text-align: center;
+      padding: 40px;
+    }
+    .edm-empty-icon { font-size: 2.5rem; }
+    .edm-empty-title { font-size: 1rem; font-weight: 700; color: #cbd5e1; }
+    .edm-empty-sub { font-size: 0.82rem; }
+
+    .edm-error-bar {
+      background: #fee2e2;
+      border: 1px solid #fca5a5;
+      color: #991b1b;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 0.83rem;
+      font-weight: 600;
+      margin: 12px 16px 0;
+      display: none;
+    }
+
+    /* ── Loading overlay ─────────────────────────────────────────── */
+    #loading-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(248,250,252,0.85);
+      z-index: 10;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+    }
+    #loading-overlay.show { display: flex; }
+    .loading-spinner-lg {
+      width: 44px; height: 44px;
+      border: 4px solid #e2e8f0;
+      border-top-color: #6366f1;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .loading-text {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #64748b;
+    }
+    .loading-sub {
+      font-size: 0.78rem;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+  <header></header>
+
+  <div class="edm-root">
+
+    <!-- ── LEFT: Brief Form ──────────────────────────────────────── -->
+    <div class="edm-panel">
+      <div class="edm-panel-head">
+        <h1>✉️ EDM Builder</h1>
+        <p>Fill in your campaign brief · AI generates a Klaviyo-ready email</p>
+      </div>
+
+      <div class="edm-form-scroll">
+
+        <!-- Campaign Info -->
+        <div class="edm-section">
+          <div class="edm-section-title">Campaign Info</div>
+          <div class="edm-field">
+            <label class="edm-label" for="f-name">Campaign Name <span style="color:#94a3b8;font-weight:400">(optional)</span></label>
+            <input class="edm-input" id="f-name" type="text" placeholder="e.g. May Sale Launch" />
+          </div>
+          <div class="edm-field">
+            <label class="edm-label" for="f-goal">Goal <span style="color:#dc2626">*</span></label>
+            <input class="edm-input" id="f-goal" type="text" placeholder="e.g. Announce 20% off site-wide sale" />
+          </div>
+          <div class="edm-field">
+            <label class="edm-label" for="f-details">Details / Context</label>
+            <textarea class="edm-textarea" id="f-details" rows="4"
+              placeholder="What's the story? New arrivals, key products, offer end date, mood, etc."></textarea>
+          </div>
+        </div>
+
+        <!-- CTA -->
+        <div class="edm-section">
+          <div class="edm-section-title">Call to Action</div>
+          <div class="edm-field">
+            <label class="edm-label" for="f-cta-text">Button Text</label>
+            <input class="edm-input" id="f-cta-text" type="text" value="Shop Now" />
+          </div>
+          <div class="edm-field">
+            <label class="edm-label" for="f-cta-url">Button URL</label>
+            <input class="edm-input" id="f-cta-url" type="url" placeholder="https://theselfstyler.com.au/collections/sale" />
+          </div>
+        </div>
+
+        <!-- Images -->
+        <div class="edm-section">
+          <div class="edm-section-title">Images</div>
+          <div id="img-rows"></div>
+          <button class="add-img-btn" onclick="addImage()">+ Add image</button>
+        </div>
+
+        <!-- Tone -->
+        <div class="edm-section">
+          <div class="edm-section-title">Tone</div>
+          <div class="tone-pills" id="tone-pills">
+            <span class="tone-pill selected" data-tone="friendly"    onclick="selectTone(this)">Friendly</span>
+            <span class="tone-pill"          data-tone="luxe"        onclick="selectTone(this)">Luxe</span>
+            <span class="tone-pill"          data-tone="playful"     onclick="selectTone(this)">Playful</span>
+            <span class="tone-pill"          data-tone="urgent"      onclick="selectTone(this)">Urgent</span>
+            <span class="tone-pill"          data-tone="minimalist"  onclick="selectTone(this)">Minimalist</span>
+            <span class="tone-pill"          data-tone="bold"        onclick="selectTone(this)">Bold</span>
+          </div>
+        </div>
+
+        <!-- Brand Defaults -->
+        <div class="edm-section">
+          <div class="edm-section-title">Brand Defaults</div>
+          <div class="edm-field">
+            <label class="edm-label" for="f-brand-name">Brand Name</label>
+            <input class="edm-input" id="f-brand-name" type="text" value="The Self Styler" />
+          </div>
+          <div class="edm-field">
+            <label class="edm-label">Brand Colour</label>
+            <div class="colour-row">
+              <input type="color" id="f-colour-picker" value="#6366f1" oninput="syncColour(this.value)" />
+              <input class="edm-input" id="f-brand-colour" type="text" value="#6366f1"
+                     placeholder="#6366f1" oninput="syncColourPicker(this.value)" />
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /edm-form-scroll -->
+
+      <div class="edm-panel-foot">
+        <div class="edm-error-bar" id="form-error"></div>
+        <button class="edm-gen-btn" id="gen-btn" onclick="generateEDM()">
+          <span class="spinner"></span>
+          <span class="btn-label">✨ Generate Email</span>
+        </button>
+      </div>
+    </div><!-- /edm-panel -->
+
+    <!-- ── RIGHT: Output ─────────────────────────────────────────── -->
+    <div class="edm-output" style="position:relative">
+
+      <div id="loading-overlay">
+        <div class="loading-spinner-lg"></div>
+        <div class="loading-text">Building your email…</div>
+        <div class="loading-sub">This takes about 20–40 seconds</div>
+      </div>
+
+      <!-- Tab bar -->
+      <div class="edm-tabs">
+        <button class="edm-tab active" id="tab-preview"  onclick="switchTab('preview')">Preview</button>
+        <button class="edm-tab"        id="tab-html"     onclick="switchTab('html')">HTML Code</button>
+        <button class="edm-tab"        id="tab-subjects" onclick="switchTab('subjects')">Subject Lines</button>
+        <div class="edm-tab-actions">
+          <button class="edm-action-btn" id="copy-html-btn" onclick="copyHtml()" style="display:none">Copy HTML</button>
+        </div>
+      </div>
+
+      <!-- Error bar (output panel) -->
+      <div class="edm-error-bar" id="output-error" style="margin:12px 16px 0;display:none"></div>
+
+      <!-- Preview pane -->
+      <div class="edm-pane active" id="pane-preview">
+        <div class="edm-empty" id="preview-empty">
+          <div class="edm-empty-icon">✉️</div>
+          <div class="edm-empty-title">No email generated yet</div>
+          <div class="edm-empty-sub">Fill in the brief on the left and click Generate Email</div>
+        </div>
+        <iframe id="preview-iframe" style="display:none" title="Email Preview"></iframe>
+      </div>
+
+      <!-- HTML code pane -->
+      <div class="edm-pane" id="pane-html">
+        <pre id="html-pre"></pre>
+      </div>
+
+      <!-- Subject lines pane -->
+      <div class="edm-pane" id="pane-subjects" style="display:none; flex-direction:column">
+        <div class="edm-empty" id="subjects-empty">
+          <div class="edm-empty-icon">📋</div>
+          <div class="edm-empty-title">Subject lines will appear here</div>
+          <div class="edm-empty-sub">Generate an email first</div>
+        </div>
+        <div id="subjects-content" style="display:none; flex-direction:column; gap:14px; padding:24px; overflow-y:auto; flex:1">
+          <!-- filled by JS -->
+        </div>
+      </div>
+
+    </div><!-- /edm-output -->
+  </div><!-- /edm-root -->
+
+  <script src="edm-builder.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>
