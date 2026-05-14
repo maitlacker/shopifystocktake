@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Suppliers — The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .sup-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
+    .sup-header h1 { font-size:1.4rem; font-weight:700; color:#1e293b; margin:0; }
+
+    .sup-table-wrap { background:#fff; border-radius:12px; border:1px solid #e2e8f0; overflow:hidden; }
+    .sup-table { width:100%; border-collapse:collapse; font-size:0.88rem; }
+    .sup-table th { background:#f8fafc; color:#64748b; font-weight:600; font-size:0.78rem;
+                    text-transform:uppercase; letter-spacing:0.05em; padding:10px 14px;
+                    border-bottom:1px solid #e2e8f0; text-align:left; }
+    .sup-table td { padding:12px 14px; border-bottom:1px solid #f1f5f9; color:#334155; vertical-align:top; }
+    .sup-table tr:last-child td { border-bottom:none; }
+    .sup-table tr:hover td { background:#f8fafc; }
+
+    .sup-currency-badge { display:inline-block; background:#ede9fe; color:#5b21b6;
+                          font-weight:700; font-size:0.72rem; padding:2px 8px;
+                          border-radius:20px; }
+
+    /* Modal */
+    .sup-modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4);
+                         z-index:1000; align-items:center; justify-content:center; }
+    .sup-modal-overlay.open { display:flex; }
+    .sup-modal { background:#fff; border-radius:14px; padding:28px; width:100%;
+                 max-width:520px; box-shadow:0 20px 60px rgba(0,0,0,0.2); }
+    .sup-modal h2 { font-size:1.1rem; font-weight:700; color:#1e293b; margin:0 0 20px; }
+    .sup-field { margin-bottom:14px; }
+    .sup-field label { display:block; font-size:0.78rem; font-weight:600; color:#475569;
+                       margin-bottom:4px; text-transform:uppercase; letter-spacing:0.04em; }
+    .sup-field input, .sup-field select, .sup-field textarea {
+      width:100%; padding:9px 12px; border:1.5px solid #e2e8f0; border-radius:8px;
+      font-size:0.9rem; color:#1e293b; box-sizing:border-box;
+      transition:border-color 0.15s; }
+    .sup-field input:focus, .sup-field select:focus, .sup-field textarea:focus {
+      outline:none; border-color:#6366f1; }
+    .sup-field textarea { resize:vertical; min-height:72px; }
+    .sup-row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .sup-modal-footer { display:flex; justify-content:flex-end; gap:10px; margin-top:20px; }
+    .btn-cancel { background:#f1f5f9; color:#475569; border:none; padding:9px 18px;
+                  border-radius:8px; font-weight:600; cursor:pointer; font-size:0.88rem; }
+    .btn-cancel:hover { background:#e2e8f0; }
+    .empty-row td { text-align:center; color:#94a3b8; padding:40px; font-size:0.9rem; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main class="container" style="padding:28px 20px">
+
+    <div class="sup-header">
+      <h1>Suppliers</h1>
+      <button class="btn" onclick="openModal()">+ Add Supplier</button>
+    </div>
+
+    <div class="sup-table-wrap">
+      <table class="sup-table">
+        <thead>
+          <tr>
+            <th>Company</th>
+            <th>Location</th>
+            <th>Currency</th>
+            <th>Contact</th>
+            <th>Email</th>
+            <th>Phone</th>
+            <th style="width:90px"></th>
+          </tr>
+        </thead>
+        <tbody id="sup-tbody">
+          <tr class="empty-row"><td colspan="7">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Modal -->
+    <div class="sup-modal-overlay" id="sup-modal">
+      <div class="sup-modal">
+        <h2 id="modal-title">Add Supplier</h2>
+        <input type="hidden" id="sup-id" />
+
+        <div class="sup-field">
+          <label>Company Name *</label>
+          <input type="text" id="sup-company" placeholder="e.g. Shanghai Textiles Co." />
+        </div>
+        <div class="sup-row2">
+          <div class="sup-field">
+            <label>Location</label>
+            <input type="text" id="sup-location" placeholder="e.g. Shanghai, China" />
+          </div>
+          <div class="sup-field">
+            <label>Default Currency *</label>
+            <select id="sup-currency">
+              <option value="AUD">AUD — Australian Dollar</option>
+              <option value="USD">USD — US Dollar</option>
+              <option value="CNY">CNY — Chinese Yuan</option>
+              <option value="EUR">EUR — Euro</option>
+              <option value="GBP">GBP — British Pound</option>
+              <option value="HKD">HKD — Hong Kong Dollar</option>
+            </select>
+          </div>
+        </div>
+        <div class="sup-row2">
+          <div class="sup-field">
+            <label>Contact Name</label>
+            <input type="text" id="sup-contact" placeholder="Name" />
+          </div>
+          <div class="sup-field">
+            <label>Phone</label>
+            <input type="tel" id="sup-phone" placeholder="+86 …" />
+          </div>
+        </div>
+        <div class="sup-field">
+          <label>Email</label>
+          <input type="email" id="sup-email" placeholder="contact@supplier.com" />
+        </div>
+        <div class="sup-field">
+          <label>Notes</label>
+          <textarea id="sup-notes" placeholder="Payment terms, lead times, any other notes…"></textarea>
+        </div>
+
+        <div class="sup-modal-footer">
+          <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+          <button class="btn" id="sup-save-btn" onclick="saveSupplier()">Save Supplier</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+  <script src="suppliers.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

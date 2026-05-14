@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Production Order — The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* ── Layout ── */
+    .po-back { color:#6366f1; font-size:0.85rem; font-weight:600; text-decoration:none;
+               display:inline-flex; align-items:center; gap:4px; margin-bottom:16px; }
+    .po-back:hover { color:#4f46e5; }
+    .po-page-header { display:flex; align-items:center; justify-content:space-between;
+                      margin-bottom:24px; flex-wrap:wrap; gap:12px; }
+    .po-page-header h1 { font-size:1.4rem; font-weight:700; color:#1e293b; margin:0; }
+    .po-status-actions { display:flex; gap:8px; align-items:center; }
+
+    .po-section { background:#fff; border:1px solid #e2e8f0; border-radius:12px;
+                  padding:22px 24px; margin-bottom:20px; }
+    .po-section-title { font-size:0.78rem; font-weight:700; color:#64748b;
+                        text-transform:uppercase; letter-spacing:0.07em; margin:0 0 18px; }
+
+    /* ── Form fields ── */
+    .po-field { margin-bottom:14px; }
+    .po-field label { display:block; font-size:0.75rem; font-weight:600; color:#475569;
+                      margin-bottom:4px; text-transform:uppercase; letter-spacing:0.04em; }
+    .po-field input, .po-field select, .po-field textarea {
+      width:100%; padding:9px 12px; border:1.5px solid #e2e8f0; border-radius:8px;
+      font-size:0.9rem; color:#1e293b; box-sizing:border-box; transition:border-color 0.15s;
+      background:#fff; }
+    .po-field input:focus, .po-field select:focus, .po-field textarea:focus {
+      outline:none; border-color:#6366f1; }
+    .po-field input[readonly] { background:#f8fafc; color:#64748b; }
+    .po-grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    .po-grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
+    .po-grid4 { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:14px; }
+
+    /* ── Lines ── */
+    .po-lines-header { display:flex; align-items:center; justify-content:space-between;
+                       margin-bottom:14px; }
+    .po-line { border:1.5px solid #e2e8f0; border-radius:10px; padding:16px;
+               margin-bottom:12px; position:relative; }
+    .po-line.new-line { border-color:#6366f1; background:#fafaff; }
+    .po-line-top { display:grid; grid-template-columns:110px 1fr 1fr auto; gap:12px;
+                   align-items:end; margin-bottom:12px; }
+    .po-line-mid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;
+                   align-items:end; margin-bottom:12px; }
+    .po-line-delete { background:none; border:none; color:#ef4444; font-size:1.1rem;
+                      cursor:pointer; padding:6px; line-height:1; }
+
+    /* ── Size grid ── */
+    .po-size-grid { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .po-size-cell { text-align:center; }
+    .po-size-cell label { display:block; font-size:0.7rem; font-weight:700; color:#64748b;
+                          margin-bottom:3px; text-transform:uppercase; }
+    .po-size-cell input { width:54px; padding:6px 4px; border:1.5px solid #e2e8f0;
+                          border-radius:6px; text-align:center; font-size:0.88rem;
+                          font-weight:600; color:#1e293b; }
+    .po-size-cell input:focus { outline:none; border-color:#6366f1; }
+    .po-size-total { font-weight:800; color:#6366f1; font-size:0.9rem; white-space:nowrap;
+                     align-self:flex-end; padding-bottom:4px; }
+
+    /* ── Autocomplete ── */
+    .po-autocomplete { position:relative; }
+    .po-autocomplete-list { position:absolute; top:100%; left:0; right:0; background:#fff;
+                            border:1.5px solid #6366f1; border-radius:8px; z-index:200;
+                            max-height:220px; overflow-y:auto; box-shadow:0 8px 24px rgba(0,0,0,0.12); }
+    .po-autocomplete-item { padding:8px 12px; cursor:pointer; font-size:0.85rem;
+                            border-bottom:1px solid #f1f5f9; }
+    .po-autocomplete-item:last-child { border-bottom:none; }
+    .po-autocomplete-item:hover { background:#f0f0ff; }
+    .po-autocomplete-item .sku { font-size:0.72rem; color:#94a3b8; }
+
+    /* ── Footer / totals ── */
+    .po-totals { display:grid; grid-template-columns:1fr 280px; gap:24px; align-items:start; }
+    .po-totals-right { }
+    .po-total-row { display:flex; justify-content:space-between; align-items:center;
+                    padding:8px 0; border-bottom:1px solid #f1f5f9; font-size:0.9rem; }
+    .po-total-row:last-child { border-bottom:none; }
+    .po-total-row.grand { font-size:1.05rem; font-weight:800; color:#1e293b;
+                          padding-top:12px; border-top:2px solid #e2e8f0; }
+    .po-total-label { color:#64748b; }
+    .po-total-value { font-weight:700; color:#1e293b; }
+    .po-gst-row { display:flex; align-items:center; gap:8px; }
+    .po-gst-row input[type=checkbox] { width:16px; height:16px; cursor:pointer; accent-color:#6366f1; }
+    .po-shipping-input { width:120px; padding:6px 10px; border:1.5px solid #e2e8f0;
+                         border-radius:6px; font-size:0.88rem; text-align:right; }
+    .po-shipping-input:focus { outline:none; border-color:#6366f1; }
+
+    /* ── Status badge ── */
+    .po-status-badge { display:inline-block; padding:3px 12px; border-radius:20px;
+                       font-size:0.75rem; font-weight:700; text-transform:uppercase; }
+    .po-status-badge.draft     { background:#f1f5f9; color:#64748b; }
+    .po-status-badge.confirmed { background:#dbeafe; color:#1d4ed8; }
+    .po-status-badge.received  { background:#dcfce7; color:#166534; }
+    .po-status-badge.cancelled { background:#fee2e2; color:#991b1b; }
+
+    /* ── Buttons ── */
+    .btn-outline { background:#fff; border:1.5px solid #e2e8f0; color:#475569; padding:9px 18px;
+                   border-radius:8px; font-weight:600; cursor:pointer; font-size:0.88rem; }
+    .btn-outline:hover { border-color:#6366f1; color:#6366f1; }
+    .btn-danger { background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; padding:9px 18px;
+                  border-radius:8px; font-weight:600; cursor:pointer; font-size:0.88rem; }
+    .btn-danger:hover { background:#fecaca; }
+    .btn-confirm { background:#16a34a; color:#fff; border:none; padding:9px 18px;
+                   border-radius:8px; font-weight:600; cursor:pointer; font-size:0.88rem; }
+    .btn-confirm:hover { background:#15803d; }
+
+    .po-exrate-info { font-size:0.78rem; color:#64748b; margin-top:4px; }
+    .po-exrate-info span { color:#6366f1; font-weight:700; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main class="container" style="padding:24px 20px">
+
+    <a href="/production-orders.html" class="po-back">← Back to Production Orders</a>
+
+    <div class="po-page-header">
+      <h1 id="po-page-title">New Production Order</h1>
+      <div class="po-status-actions">
+        <span id="po-status-badge" class="po-status-badge draft" style="display:none">Draft</span>
+        <button id="btn-delete" class="btn-danger" style="display:none" onclick="deletePO()">Delete PO</button>
+        <button id="btn-confirm-po" class="btn-confirm" style="display:none" onclick="confirmPO()">✓ Confirm PO</button>
+        <button id="btn-save" class="btn" onclick="savePO()">Save Draft</button>
+      </div>
+    </div>
+
+    <!-- Header -->
+    <div class="po-section">
+      <p class="po-section-title">Header</p>
+      <div class="po-grid3">
+        <div class="po-field">
+          <label>Supplier *</label>
+          <select id="po-supplier" onchange="onSupplierChange()">
+            <option value="">— Select Supplier —</option>
+          </select>
+        </div>
+        <div class="po-field">
+          <label>PO Number *</label>
+          <input type="text" id="po-number" placeholder="e.g. PO-2026-001" />
+        </div>
+        <div class="po-field">
+          <label>Currency</label>
+          <input type="text" id="po-currency" readonly value="AUD" />
+        </div>
+      </div>
+      <div class="po-grid4">
+        <div class="po-field">
+          <label>Order Date *</label>
+          <input type="date" id="po-order-date" />
+        </div>
+        <div class="po-field">
+          <label>Delivery Date</label>
+          <input type="date" id="po-delivery-date" />
+        </div>
+        <div class="po-field">
+          <label>Freight Mode</label>
+          <select id="po-freight">
+            <option value="sea">🚢 Sea</option>
+            <option value="air">✈️ Air</option>
+          </select>
+        </div>
+        <div class="po-field">
+          <label>Exchange Rate (to AUD)</label>
+          <input type="number" id="po-exchange-rate" value="1.0000" step="0.0001" min="0.0001"
+                 oninput="recalcTotals()" />
+          <div class="po-exrate-info" id="po-exrate-info"></div>
+        </div>
+      </div>
+      <div class="po-field">
+        <label>Notes</label>
+        <input type="text" id="po-notes" placeholder="Any internal notes for this order…" />
+      </div>
+    </div>
+
+    <!-- Lines -->
+    <div class="po-section">
+      <div class="po-lines-header">
+        <p class="po-section-title" style="margin:0">Line Items</p>
+        <button class="btn btn-secondary" onclick="addLine()">+ Add Line</button>
+      </div>
+      <div id="po-lines-container">
+        <p style="color:#94a3b8;font-size:0.88rem;text-align:center;padding:20px 0">
+          Click <strong>+ Add Line</strong> to add your first product.
+        </p>
+      </div>
+    </div>
+
+    <!-- Footer / Totals -->
+    <div class="po-section">
+      <p class="po-section-title">Order Summary</p>
+      <div class="po-totals">
+        <div id="po-lines-summary" style="font-size:0.85rem;color:#64748b"></div>
+        <div class="po-totals-right">
+          <div class="po-total-row">
+            <span class="po-total-label">Subtotal</span>
+            <span class="po-total-value" id="tot-subtotal">AUD 0.00</span>
+          </div>
+          <div class="po-total-row">
+            <span class="po-total-label">Shipping Estimate</span>
+            <span><input type="number" id="tot-shipping" class="po-shipping-input"
+                          value="0" min="0" step="0.01" oninput="recalcTotals()" placeholder="0.00" /></span>
+          </div>
+          <div class="po-total-row">
+            <span class="po-total-label">
+              <span class="po-gst-row">
+                <input type="checkbox" id="tot-gst" onchange="recalcTotals()" />
+                <label for="tot-gst" style="cursor:pointer;font-size:0.88rem;color:#64748b">Include 10% GST</label>
+              </span>
+            </span>
+            <span class="po-total-value" id="tot-gst-amount" style="color:#94a3b8">—</span>
+          </div>
+          <div class="po-total-row grand">
+            <span>Total (AUD)</span>
+            <span id="tot-grand">AUD 0.00</span>
+          </div>
+          <div id="tot-foreign" style="text-align:right;font-size:0.8rem;color:#94a3b8;margin-top:4px"></div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+  <script src="production-order.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

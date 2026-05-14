@@ -43,6 +43,13 @@
       ],
     },
     {
+      label: 'Production',
+      children: [
+        { label: 'Production Orders', href: '/production-orders.html' },
+        { label: 'Suppliers',         href: '/suppliers.html' },
+      ],
+    },
+    {
       label: 'Marketing',
       children: [
         { label: 'Coupon Export',    href: '/coupon-export.html' },

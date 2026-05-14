@@ -1115,6 +1115,170 @@ app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
+// ── Exchange Rate ──────────────────────────────────────────────────
+const exRateCache = {};
+async function getExchangeRates(base) {
+  const key = base.toUpperCase();
+  const cached = exRateCache[key];
+  if (cached && (Date.now() - cached.fetchedAt) < 3_600_000) return cached.rates;
+  const r = await fetch(`https://open.er-api.com/v6/latest/${key}`);
+  if (!r.ok) throw new Error(`Exchange rate API: ${r.status}`);
+  const data = await r.json();
+  exRateCache[key] = { rates: data.rates, fetchedAt: Date.now() };
+  return data.rates;
+}
+
+app.get('/api/exchange-rate', async (req, res) => {
+  const base = (req.query.base || 'AUD').toUpperCase();
+  try {
+    const rates = await getExchangeRates(base);
+    res.json({ base, rates });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Suppliers ──────────────────────────────────────────────────────
+app.get('/api/suppliers', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM suppliers ORDER BY company_name ASC');
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/suppliers', async (req, res) => {
+  const { companyName, location, currency, contactName, email, phone, notes } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO suppliers (company_name,location,currency,contact_name,email,phone,notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [companyName, location||null, currency||'AUD', contactName||null, email||null, phone||null, notes||null]
+    );
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/suppliers/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { companyName, location, currency, contactName, email, phone, notes } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `UPDATE suppliers SET company_name=$1,location=$2,currency=$3,contact_name=$4,
+       email=$5,phone=$6,notes=$7,updated_at=NOW() WHERE id=$8 RETURNING *`,
+      [companyName, location||null, currency||'AUD', contactName||null, email||null, phone||null, notes||null, id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/suppliers/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    await pool.query('DELETE FROM suppliers WHERE id=$1', [id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Production Orders ──────────────────────────────────────────────
+app.get('/api/production-orders', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT po.*,
+        COALESCE((SELECT SUM(l.total_qty)  FROM production_order_lines l WHERE l.order_id=po.id),0) AS total_items,
+        COALESCE((SELECT COUNT(*)          FROM production_order_lines l WHERE l.order_id=po.id),0) AS line_count
+      FROM production_orders po
+      ORDER BY po.order_date DESC, po.created_at DESC`);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/production-orders/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const { rows: [po] } = await pool.query('SELECT * FROM production_orders WHERE id=$1', [id]);
+    if (!po) return res.status(404).json({ error: 'Not found' });
+    const { rows: lines } = await pool.query(
+      'SELECT * FROM production_order_lines WHERE order_id=$1 ORDER BY line_number ASC', [id]);
+    res.json({ ...po, lines });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+async function upsertLines(client, orderId, lines) {
+  await client.query('DELETE FROM production_order_lines WHERE order_id=$1', [orderId]);
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    await client.query(
+      `INSERT INTO production_order_lines
+         (order_id,line_number,line_type,product_id,product_code,product_name,
+          size_set,quantities,total_qty,unit_price,freight_override)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [orderId, i+1, l.lineType||'restock', l.productId||null, l.productCode||null,
+       l.productName||'', l.sizeSet||'numeric', JSON.stringify(l.quantities||{}),
+       l.totalQty||0, l.unitPrice||0, l.freightOverride||null]
+    );
+  }
+}
+
+app.post('/api/production-orders', async (req, res) => {
+  const { poNumber, supplierId, supplierName, orderDate, deliveryDate, freightMode,
+          currency, exchangeRate, shippingCost, includeGst, notes, lines=[] } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows:[po] } = await client.query(
+      `INSERT INTO production_orders
+         (po_number,supplier_id,supplier_name,order_date,delivery_date,freight_mode,
+          currency,exchange_rate,shipping_cost,include_gst,notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [poNumber, supplierId||null, supplierName||'', orderDate, deliveryDate||null,
+       freightMode||'sea', currency||'AUD', exchangeRate||1, shippingCost||0, includeGst||false, notes||null]
+    );
+    await upsertLines(client, po.id, lines);
+    await client.query('COMMIT');
+    res.json(po);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally { client.release(); }
+});
+
+app.put('/api/production-orders/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { poNumber, supplierId, supplierName, orderDate, deliveryDate, freightMode,
+          currency, exchangeRate, shippingCost, includeGst, notes, status, lines } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows:[po] } = await client.query(
+      `UPDATE production_orders SET
+         po_number=$1,supplier_id=$2,supplier_name=$3,order_date=$4,delivery_date=$5,
+         freight_mode=$6,currency=$7,exchange_rate=$8,shipping_cost=$9,include_gst=$10,
+         notes=$11,status=COALESCE($12,status),updated_at=NOW()
+       WHERE id=$13 RETURNING *`,
+      [poNumber, supplierId||null, supplierName||'', orderDate, deliveryDate||null,
+       freightMode||'sea', currency||'AUD', exchangeRate||1, shippingCost||0,
+       includeGst||false, notes||null, status||null, id]
+    );
+    if (!po) { await client.query('ROLLBACK'); return res.status(404).json({ error:'Not found' }); }
+    if (lines !== undefined) await upsertLines(client, id, lines);
+    await client.query('COMMIT');
+    res.json(po);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally { client.release(); }
+});
+
+app.delete('/api/production-orders/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    await pool.query('DELETE FROM production_order_lines WHERE order_id=$1', [id]);
+    await pool.query('DELETE FROM production_orders WHERE id=$1', [id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Product routes ─────────────────────────────────────────────────
 app.get('/api/products/refresh', async (req, res) => {
   try {

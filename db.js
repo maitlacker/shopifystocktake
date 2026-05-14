@@ -430,6 +430,67 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_restock_alerts_log_product
       ON restock_alerts_log(product_id);
+
+    -- ── Production / Purchase Orders ─────────────────────────────────
+
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id            SERIAL PRIMARY KEY,
+      company_name  TEXT NOT NULL,
+      location      TEXT,
+      currency      TEXT NOT NULL DEFAULT 'AUD',
+      contact_name  TEXT,
+      email         TEXT,
+      phone         TEXT,
+      notes         TEXT,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_suppliers_name
+      ON suppliers(company_name);
+
+    CREATE TABLE IF NOT EXISTS production_orders (
+      id              SERIAL PRIMARY KEY,
+      po_number       TEXT NOT NULL,
+      supplier_id     INT,
+      supplier_name   TEXT NOT NULL DEFAULT '',
+      order_date      DATE NOT NULL DEFAULT CURRENT_DATE,
+      delivery_date   DATE,
+      freight_mode    TEXT NOT NULL DEFAULT 'sea'
+                      CHECK (freight_mode IN ('sea','air')),
+      currency        TEXT NOT NULL DEFAULT 'AUD',
+      exchange_rate   DECIMAL(10,4) NOT NULL DEFAULT 1.0,
+      shipping_cost   DECIMAL(12,2) NOT NULL DEFAULT 0,
+      include_gst     BOOLEAN NOT NULL DEFAULT FALSE,
+      status          TEXT NOT NULL DEFAULT 'draft'
+                      CHECK (status IN ('draft','confirmed','received','cancelled')),
+      notes           TEXT,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_production_orders_supplier
+      ON production_orders(supplier_id);
+    CREATE INDEX IF NOT EXISTS idx_production_orders_date
+      ON production_orders(order_date DESC);
+
+    CREATE TABLE IF NOT EXISTS production_order_lines (
+      id               SERIAL PRIMARY KEY,
+      order_id         INT NOT NULL,
+      line_number      INT NOT NULL DEFAULT 1,
+      line_type        TEXT NOT NULL DEFAULT 'restock'
+                       CHECK (line_type IN ('restock','new')),
+      product_id       BIGINT,
+      product_code     TEXT,
+      product_name     TEXT NOT NULL DEFAULT '',
+      size_set         TEXT NOT NULL DEFAULT 'numeric',
+      quantities       JSONB NOT NULL DEFAULT '{}',
+      total_qty        INT NOT NULL DEFAULT 0,
+      unit_price       DECIMAL(12,2) NOT NULL DEFAULT 0,
+      freight_override TEXT,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_po_lines_order
+      ON production_order_lines(order_id, line_number);
   `);
 }
 
