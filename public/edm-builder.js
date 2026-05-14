@@ -8,21 +8,28 @@ let imgCounter  = 0;
 /* ── Image rows ─────────────────────────────────────────────────── */
 function addImage() {
   const id  = ++imgCounter;
-  const row = document.createElement('div');
-  row.className = 'img-row';
-  row.id = `img-row-${id}`;
-  row.innerHTML = `
-    <input class="edm-input" id="img-url-${id}" type="url" placeholder="https://cdn.shopify.com/…image.jpg" />
-    <select class="img-role-sel" id="img-role-${id}">
-      <option value="hero">Hero banner</option>
-      <option value="product">Product shot</option>
-      <option value="lifestyle">Lifestyle</option>
-      <option value="logo">Logo</option>
-      <option value="footer">Footer image</option>
-    </select>
-    <button class="img-remove-btn" onclick="removeImage(${id})" title="Remove">×</button>
+  const wrap = document.createElement('div');
+  wrap.className = 'img-row-wrap';
+  wrap.id = `img-row-${id}`;
+  wrap.innerHTML = `
+    <div class="img-row">
+      <input class="edm-input" id="img-url-${id}" type="url" placeholder="https://cdn.shopify.com/…image.jpg" />
+      <select class="img-role-sel" id="img-role-${id}">
+        <option value="hero">Hero banner</option>
+        <option value="product">Product shot</option>
+        <option value="lifestyle">Lifestyle</option>
+        <option value="logo">Logo</option>
+        <option value="footer">Footer image</option>
+      </select>
+      <button class="img-remove-btn" onclick="removeImage(${id})" title="Remove">×</button>
+    </div>
+    <div class="img-link-row">
+      <span class="img-link-icon">🔗</span>
+      <input class="edm-input" id="img-link-${id}" type="url"
+             placeholder="Optional: click-through link for this image" />
+    </div>
   `;
-  document.getElementById('img-rows').appendChild(row);
+  document.getElementById('img-rows').appendChild(wrap);
 }
 
 function removeImage(id) {
@@ -31,12 +38,13 @@ function removeImage(id) {
 }
 
 function getImages() {
-  const rows = document.querySelectorAll('#img-rows .img-row');
-  return Array.from(rows).map(row => {
-    const id   = row.id.replace('img-row-', '');
-    const url  = (document.getElementById(`img-url-${id}`)?.value || '').trim();
-    const role = document.getElementById(`img-role-${id}`)?.value || 'product';
-    return { url, role };
+  const wraps = document.querySelectorAll('#img-rows .img-row-wrap');
+  return Array.from(wraps).map(wrap => {
+    const id      = wrap.id.replace('img-row-', '');
+    const url     = (document.getElementById(`img-url-${id}`)?.value  || '').trim();
+    const role    = document.getElementById(`img-role-${id}`)?.value  || 'product';
+    const linkUrl = (document.getElementById(`img-link-${id}`)?.value || '').trim();
+    return { url, role, linkUrl };
   }).filter(img => img.url);
 }
 
@@ -219,6 +227,45 @@ function copyText(text, btn) {
       }
     } catch (_) {}
   });
+}
+
+/* ── Template upload ────────────────────────────────────────────── */
+function triggerTemplateUpload() {
+  document.getElementById('template-file-input').click();
+}
+
+function handleTemplateUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function (e) {
+    const html = e.target.result;
+
+    // Treat it exactly like a generated result — populate both panes
+    if (!lastResult) lastResult = {};
+    lastResult.html = html;
+
+    // Preview tab
+    document.getElementById('preview-empty').style.display = 'none';
+    const iframe = document.getElementById('preview-iframe');
+    iframe.style.display = 'block';
+    iframe.srcdoc = html;
+
+    // HTML code tab
+    document.getElementById('html-pre').textContent = html;
+    document.getElementById('copy-html-btn').style.display = '';
+
+    switchTab('preview');
+    clearOutputError();
+  };
+  reader.onerror = function () {
+    showOutputError('Could not read the file. Make sure it is a valid HTML file.');
+  };
+  reader.readAsText(file);
+
+  // Reset so the same file can be re-loaded if needed
+  input.value = '';
 }
 
 /* ── Loading state ──────────────────────────────────────────────── */

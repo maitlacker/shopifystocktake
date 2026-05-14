@@ -120,13 +120,27 @@
     }
 
     /* ── Image rows ──────────────────────────────────────────────── */
+    .img-row-wrap { margin-bottom: 10px; }
     .img-row {
       display: flex;
       gap: 6px;
       align-items: center;
-      margin-bottom: 6px;
     }
     .img-row .edm-input { flex: 1; }
+    .img-link-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 4px;
+      padding-left: 2px;
+    }
+    .img-link-icon { font-size: 0.85rem; flex-shrink: 0; line-height: 1; }
+    .img-link-row .edm-input {
+      flex: 1;
+      font-size: 0.78rem;
+      color: #64748b;
+      padding: 5px 9px;
+    }
     .img-role-sel {
       width: 110px;
       flex-shrink: 0;
@@ -545,8 +559,11 @@
         <button class="edm-tab"        id="tab-html"     onclick="switchTab('html')">HTML Code</button>
         <button class="edm-tab"        id="tab-subjects" onclick="switchTab('subjects')">Subject Lines</button>
         <div class="edm-tab-actions">
+          <button class="edm-action-btn" onclick="triggerTemplateUpload()">📂 Load Template</button>
           <button class="edm-action-btn" id="copy-html-btn" onclick="copyHtml()" style="display:none">Copy HTML</button>
         </div>
+        <input type="file" id="template-file-input" accept=".html,.htm" style="display:none"
+               onchange="handleTemplateUpload(this)" />
       </div>
 
       <!-- Error bar (output panel) -->

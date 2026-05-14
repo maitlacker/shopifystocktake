@@ -3318,7 +3318,13 @@ app.post('/api/edm/generate', requireAuth, async (req, res) => {
 
   // Build images section for prompt
   const imagesSection = images.length
-    ? images.map((img, i) => `  Image ${i + 1}: Role = "${img.role || 'product'}", URL = ${img.url || '(none)'}`).join('\n')
+    ? images.map((img, i) => {
+        let line = `  Image ${i + 1}: Role = "${img.role || 'product'}", URL = ${img.url || '(none)'}`;
+        if (img.linkUrl) {
+          line += `\n    → Wrap this <img> in <a href="${img.linkUrl}" target="_blank" style="display:block;text-decoration:none"> so the whole image is clickable`;
+        }
+        return line;
+      }).join('\n')
     : '  (no images provided — use placeholder boxes styled consistently)';
 
   const prompt = `You are an expert email marketing designer and copywriter for a fashion e-commerce brand. Create a complete, production-ready HTML email campaign for Klaviyo.
