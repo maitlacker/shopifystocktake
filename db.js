@@ -491,6 +491,18 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_po_lines_order
       ON production_order_lines(order_id, line_number);
+
+    CREATE TABLE IF NOT EXISTS production_budgets (
+      id         SERIAL PRIMARY KEY,
+      year       INT NOT NULL,
+      month      INT NOT NULL CHECK (month BETWEEN 1 AND 12),
+      budget_aud DECIMAL(14,2) NOT NULL DEFAULT 0,
+      notes      TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(year, month)
+    );
+    CREATE INDEX IF NOT EXISTS idx_production_budgets_year
+      ON production_budgets(year, month);
   `);
 }
 

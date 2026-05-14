@@ -46,6 +46,7 @@
       label: 'Production',
       children: [
         { label: 'Production Orders', href: '/production-orders.html' },
+        { label: 'Monthly Budgets',   href: '/production-budget.html' },
         { label: 'Suppliers',         href: '/suppliers.html' },
       ],
     },

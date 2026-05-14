@@ -6,37 +6,76 @@
   <title>Production Orders — The Self Styler WMS</title>
   <link rel="stylesheet" href="style.css" />
   <style>
-    .po-list-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; }
+    .po-list-header { display:flex; align-items:center; justify-content:space-between;
+                      margin-bottom:18px; flex-wrap:wrap; gap:10px; }
     .po-list-header h1 { font-size:1.4rem; font-weight:700; color:#1e293b; margin:0; }
 
-    .po-filters { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+    .po-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+                  margin-bottom:14px; }
     .po-filter-btn { padding:6px 14px; border-radius:20px; border:1.5px solid #e2e8f0;
                      background:#fff; color:#64748b; font-size:0.82rem; font-weight:600;
                      cursor:pointer; transition:all 0.15s; }
     .po-filter-btn.active { background:#6366f1; color:#fff; border-color:#6366f1; }
     .po-filter-btn:hover:not(.active) { border-color:#6366f1; color:#6366f1; }
 
-    .po-table-wrap { background:#fff; border-radius:12px; border:1px solid #e2e8f0; overflow:hidden; }
-    .po-table { width:100%; border-collapse:collapse; font-size:0.88rem; }
-    .po-table th { background:#f8fafc; color:#64748b; font-weight:600; font-size:0.78rem;
-                   text-transform:uppercase; letter-spacing:0.05em; padding:10px 14px;
-                   border-bottom:1px solid #e2e8f0; text-align:left; }
-    .po-table td { padding:11px 14px; border-bottom:1px solid #f1f5f9; color:#334155; vertical-align:middle; }
-    .po-table tr:last-child td { border-bottom:none; }
-    .po-table tr:hover td { background:#f8fafc; cursor:pointer; }
+    .po-toggle { display:flex; align-items:center; gap:7px; margin-left:auto;
+                 padding:6px 14px; border-radius:20px; border:1.5px solid #e2e8f0;
+                 background:#fff; color:#64748b; font-size:0.82rem; font-weight:600;
+                 cursor:pointer; transition:all 0.15s; }
+    .po-toggle.on { border-color:#0ea5e9; color:#0ea5e9; background:#f0f9ff; }
+    .po-toggle-dot { width:10px; height:10px; border-radius:50%;
+                     background:currentColor; display:inline-block; }
 
-    .po-status { display:inline-block; padding:2px 10px; border-radius:20px;
-                 font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; }
+    /* Table */
+    .po-table-wrap { background:#fff; border-radius:12px; border:1px solid #e2e8f0;
+                     overflow-x:auto; }
+    .po-table { width:100%; border-collapse:collapse; font-size:0.85rem; min-width:900px; }
+    .po-table th { background:#f8fafc; color:#64748b; font-weight:600; font-size:0.75rem;
+                   text-transform:uppercase; letter-spacing:0.05em; padding:10px 12px;
+                   border-bottom:1px solid #e2e8f0; text-align:left; white-space:nowrap; }
+    .po-table td { padding:10px 12px; border-bottom:1px solid #f1f5f9; color:#334155;
+                   vertical-align:top; }
+    .po-table tr.po-data-row:hover td { background:#f8fafc; cursor:pointer; }
+    .po-table tr:last-child td { border-bottom:none; }
+
+    /* Month group header row */
+    .po-month-row td { background:#f0f9ff; font-weight:700; color:#0369a1;
+                       border-top:2px solid #bae6fd; border-bottom:1px solid #bae6fd;
+                       padding:8px 12px; font-size:0.82rem; }
+    .po-month-label { font-size:0.95rem; }
+    .po-month-stats { font-size:0.78rem; color:#0284c7; font-weight:600; }
+    .po-budget-chip { display:inline-block; padding:2px 8px; border-radius:10px;
+                      font-size:0.72rem; font-weight:700; margin-left:8px; }
+    .po-budget-chip.under { background:#dcfce7; color:#166534; }
+    .po-budget-chip.over  { background:#fee2e2; color:#991b1b; }
+    .po-budget-chip.none  { background:#f1f5f9; color:#64748b; }
+
+    /* Cells */
+    .po-num { font-weight:700; color:#6366f1; font-size:0.88rem; white-space:nowrap; }
+    .po-line-block { margin-bottom:4px; }
+    .po-line-block:last-child { margin-bottom:0; }
+    .po-product-name { font-weight:600; color:#1e293b; font-size:0.83rem;
+                       white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+                       max-width:180px; }
+    .po-product-code { font-size:0.72rem; color:#94a3b8; }
+    .po-qty-pills { display:flex; flex-wrap:wrap; gap:3px; margin-top:3px; }
+    .po-qty-pill { background:#f1f5f9; border-radius:4px; padding:1px 5px;
+                   font-size:0.7rem; color:#475569; white-space:nowrap; }
+    .po-qty-pill.nonzero { background:#ede9fe; color:#5b21b6; }
+    .po-aud-total { font-weight:700; color:#1e293b; white-space:nowrap; }
+    .po-aud-gst { font-size:0.7rem; color:#94a3b8; }
+
+    .po-status { display:inline-block; padding:2px 9px; border-radius:20px;
+                 font-size:0.7rem; font-weight:700; text-transform:uppercase; }
     .po-status.draft     { background:#f1f5f9; color:#64748b; }
     .po-status.confirmed { background:#dbeafe; color:#1d4ed8; }
     .po-status.received  { background:#dcfce7; color:#166534; }
     .po-status.cancelled { background:#fee2e2; color:#991b1b; }
 
-    .po-freight-badge { font-size:0.75rem; font-weight:700; }
-    .po-freight-badge.sea { color:#0369a1; }
-    .po-freight-badge.air { color:#7c3aed; }
+    .po-freight-sm { font-size:0.78rem; font-weight:700; }
+    .po-freight-sm.sea { color:#0369a1; }
+    .po-freight-sm.air { color:#7c3aed; }
 
-    .po-num { font-weight:700; color:#6366f1; font-size:0.9rem; }
     .empty-cell { text-align:center; color:#94a3b8; padding:48px; font-size:0.9rem; }
   </style>
 </head>
@@ -49,30 +88,34 @@
       <button class="btn" onclick="window.location.href='/production-order.html'">+ New PO</button>
     </div>
 
-    <div class="po-filters">
-      <button class="po-filter-btn active" data-status="all"       onclick="setFilter('all',this)">All</button>
-      <button class="po-filter-btn"        data-status="draft"     onclick="setFilter('draft',this)">Draft</button>
-      <button class="po-filter-btn"        data-status="confirmed" onclick="setFilter('confirmed',this)">Confirmed</button>
-      <button class="po-filter-btn"        data-status="received"  onclick="setFilter('received',this)">Received</button>
-      <button class="po-filter-btn"        data-status="cancelled" onclick="setFilter('cancelled',this)">Cancelled</button>
+    <div class="po-toolbar">
+      <button class="po-filter-btn active" onclick="setFilter('all',this)">All</button>
+      <button class="po-filter-btn" onclick="setFilter('draft',this)">Draft</button>
+      <button class="po-filter-btn" onclick="setFilter('confirmed',this)">Confirmed</button>
+      <button class="po-filter-btn" onclick="setFilter('received',this)">Received</button>
+      <button class="po-filter-btn" onclick="setFilter('cancelled',this)">Cancelled</button>
+      <button class="po-toggle" id="month-toggle" onclick="toggleMonthView()">
+        <span class="po-toggle-dot"></span> Group by Month
+      </button>
     </div>
 
     <div class="po-table-wrap">
       <table class="po-table">
         <thead>
           <tr>
-            <th>PO Number</th>
+            <th>PO #</th>
             <th>Supplier</th>
+            <th>Products</th>
+            <th>Size / QTY Breakdown</th>
             <th>Order Date</th>
             <th>Delivery</th>
             <th>Freight</th>
-            <th>Lines</th>
-            <th>Total Units</th>
+            <th>AUD Total</th>
             <th>Status</th>
           </tr>
         </thead>
         <tbody id="po-tbody">
-          <tr><td colspan="8" class="empty-cell">Loading…</td></tr>
+          <tr><td colspan="9" class="empty-cell">Loading…</td></tr>
         </tbody>
       </table>
     </div>

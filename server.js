@@ -1185,11 +1185,75 @@ app.get('/api/production-orders', async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT po.*,
-        COALESCE((SELECT SUM(l.total_qty)  FROM production_order_lines l WHERE l.order_id=po.id),0) AS total_items,
-        COALESCE((SELECT COUNT(*)          FROM production_order_lines l WHERE l.order_id=po.id),0) AS line_count
+        COALESCE((SELECT SUM(l.total_qty) FROM production_order_lines l WHERE l.order_id=po.id),0) AS total_items,
+        COALESCE((SELECT COUNT(*)         FROM production_order_lines l WHERE l.order_id=po.id),0) AS line_count,
+        COALESCE(
+          ROUND((SELECT SUM(l.total_qty * l.unit_price) FROM production_order_lines l WHERE l.order_id=po.id)
+                * po.exchange_rate + po.shipping_cost, 2)
+        , 0) AS subtotal_aud,
+        COALESCE(
+          (SELECT json_agg(json_build_object(
+            'code', l.product_code,
+            'name', l.product_name,
+            'qty',  l.total_qty,
+            'quantities', l.quantities,
+            'size_set',   l.size_set
+          ) ORDER BY l.line_number)
+          FROM production_order_lines l WHERE l.order_id=po.id)
+        , '[]'::json) AS line_summaries
       FROM production_orders po
-      ORDER BY po.order_date DESC, po.created_at DESC`);
+      ORDER BY po.delivery_date ASC NULLS LAST, po.order_date DESC`);
     res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Production Budgets ─────────────────────────────────────────────
+app.get('/api/production-budgets', async (req, res) => {
+  const year = parseInt(req.query.year) || new Date().getFullYear();
+  try {
+    // Return all 12 months — fill missing months with 0
+    const { rows } = await pool.query(
+      'SELECT * FROM production_budgets WHERE year=$1 ORDER BY month ASC', [year]);
+    const budgetMap = {};
+    rows.forEach(r => { budgetMap[r.month] = r; });
+    // Compute actuals from production orders (exclude cancelled)
+    const { rows: actuals } = await pool.query(`
+      SELECT
+        EXTRACT(MONTH FROM delivery_date)::int AS month,
+        ROUND(SUM(
+          COALESCE((SELECT SUM(l.total_qty * l.unit_price) FROM production_order_lines l WHERE l.order_id=po.id),0)
+          * po.exchange_rate + po.shipping_cost
+        ) * CASE WHEN po.include_gst THEN 1.1 ELSE 1.0 END, 2) AS actual_aud
+      FROM production_orders po
+      WHERE EXTRACT(YEAR FROM delivery_date) = $1
+        AND status NOT IN ('cancelled')
+      GROUP BY EXTRACT(MONTH FROM delivery_date)`, [year]);
+    const actualMap = {};
+    actuals.forEach(r => { actualMap[r.month] = parseFloat(r.actual_aud) || 0; });
+    const result = Array.from({length:12},(_,i)=>i+1).map(m => ({
+      year, month: m,
+      budget_aud: budgetMap[m] ? parseFloat(budgetMap[m].budget_aud) : 0,
+      notes:      budgetMap[m]?.notes || null,
+      actual_aud: actualMap[m] || 0,
+    }));
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/production-budgets/:year/:month', async (req, res) => {
+  const year  = parseInt(req.params.year);
+  const month = parseInt(req.params.month);
+  const { budgetAud, notes } = req.body;
+  try {
+    const { rows } = await pool.query(`
+      INSERT INTO production_budgets (year, month, budget_aud, notes, updated_at)
+      VALUES ($1,$2,$3,$4,NOW())
+      ON CONFLICT (year, month) DO UPDATE SET
+        budget_aud = EXCLUDED.budget_aud,
+        notes      = EXCLUDED.notes,
+        updated_at = NOW()
+      RETURNING *`, [year, month, budgetAud || 0, notes || null]);
+    res.json(rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
