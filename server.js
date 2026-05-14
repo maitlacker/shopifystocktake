@@ -3385,7 +3385,7 @@ CHANGE these things:
 3. Body copy paragraphs — replace with campaign-specific copy (tone: ${tone})
 4. CTA button text — use "${ctaText}"
 5. CTA button href — use "${ctaUrl || 'https://theselfstyler.com.au'}"
-6. Any secondary product images — replace with provided image URLs if available
+6. Any secondary product images — replace ONLY with image URLs explicitly listed in the Images section above. Never guess or construct Shopify CDN URLs. If no URL is provided for a product, leave the existing image src unchanged or replace with a styled placeholder div
 7. Klaviyo personalisation tag in greeting: {{ first_name|default:'there' }}
 ${logoUrl ? `8. Header logo image src — update to: ${logoUrl}` : ''}
 ${footerImageUrl ? `9. Footer image — ${footerImageInstruction}` : ''}
@@ -3433,7 +3433,7 @@ ${briefBlock}
 - Font: system fonts stack — -apple-system, Arial, sans-serif
 - Background: #ffffff for content, #f8f8f8 for outer body
 - CTA button: bold, rounded (border-radius 4px), high contrast white text on brand colour
-- Body images: use provided URLs as <img> src attributes; if none provided, insert a styled placeholder div
+- Body images: ONLY use image URLs that are explicitly listed in the Images section above. Do NOT construct, guess, or invent any image URLs — Shopify CDN URLs contain randomised hash segments that cannot be predicted. For any product that does not have an explicit URL provided, render a styled placeholder div (background:#f1f5f9, min-height:300px, display:flex, align-items:center, justify-content:center, with a grey italic label like "[ Product Image ]")
 - ${footerImageInstruction || `Footer: no footer image provided — use a clean text-only footer`}
 - Footer text: "© ${new Date().getFullYear()} ${brandName} · Unsubscribe" with Klaviyo unsubscribe tag {{ unsubscribe_url }}
 - Add Klaviyo merge tags where natural: {{ first_name|default:'there' }} in greeting
