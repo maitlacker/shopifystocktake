@@ -95,6 +95,7 @@ async function generateEDM() {
     logoUrl:         document.getElementById('f-logo-url').value.trim(),
     footerImageUrl:  document.getElementById('f-footer-img-url').value.trim(),
     footerImageLink: document.getElementById('f-footer-img-link').value.trim(),
+    imageFirst:      document.getElementById('f-image-first').checked,
     existingHtml:    loadedTemplate ? loadedTemplate.html : '',
   };
 

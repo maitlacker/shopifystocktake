@@ -3313,6 +3313,7 @@ app.post('/api/edm/generate', requireAuth, async (req, res) => {
     logoUrl         = '',          // used to build header in scratch mode
     footerImageUrl  = '',          // optional footer banner
     footerImageLink = '',          // optional click-through link for footer image
+    imageFirst      = true,        // hero image before body text
     existingHtml    = '',          // if set: populate-template mode
   } = req.body;
 
@@ -3388,6 +3389,7 @@ CHANGE these things:
 7. Klaviyo personalisation tag in greeting: {{ first_name|default:'there' }}
 ${logoUrl ? `8. Header logo image src — update to: ${logoUrl}` : ''}
 ${footerImageUrl ? `9. Footer image — ${footerImageInstruction}` : ''}
+${imageFirst ? '10. Layout: if the hero image is not already the first content block after the header, move it above the headline and body copy.' : ''}
 
 DO NOT CHANGE these things:
 - Overall table/div structure and layout
@@ -3426,6 +3428,7 @@ ${briefBlock}
 - Responsive HTML (mobile-first, max-width 600px, centered)
 - Clean fashion-forward layout: header (logo), hero banner, body copy, CTA button, footer
 - ${logoInstruction}
+- Layout order: ${imageFirst ? 'IMPORTANT — the hero/main image must appear FIRST in the content area, before any headline or body copy text. Structure: logo header → hero image → headline → body copy → CTA button.' : 'Structure: logo header → headline → hero image → body copy → CTA button.'}
 - Use the brand colour ${brandColour} for the CTA button and key accents
 - Font: system fonts stack — -apple-system, Arial, sans-serif
 - Background: #ffffff for content, #f8f8f8 for outer body
