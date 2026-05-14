@@ -1,9 +1,10 @@
 'use strict';
 
 /* ── State ─────────────────────────────────────────────────────── */
-let lastResult  = null;   // { html, subjectA, subjectB, previewText, sendTime, instructions }
-let currentTab  = 'preview';
-let imgCounter  = 0;
+let lastResult      = null;   // { html, subjectA, subjectB, previewText, sendTime, instructions }
+let loadedTemplate  = null;   // { name, html } — set when user loads a template file
+let currentTab      = 'preview';
+let imgCounter      = 0;
 
 /* ── Image rows ─────────────────────────────────────────────────── */
 function addImage() {
@@ -91,6 +92,7 @@ async function generateEDM() {
     tone:         getSelectedTone(),
     brandName:    document.getElementById('f-brand-name').value.trim() || 'The Self Styler',
     brandColour:  document.getElementById('f-brand-colour').value.trim() || '#6366f1',
+    existingHtml: loadedTemplate ? loadedTemplate.html : '',
   };
 
   setLoading(true);
@@ -130,6 +132,7 @@ function renderOutput(data) {
   // -- HTML tab
   document.getElementById('html-pre').textContent = data.html;
   document.getElementById('copy-html-btn').style.display = '';
+  document.getElementById('clear-btn').style.display = '';
 
   // -- Subjects tab
   document.getElementById('subjects-empty').style.display = 'none';
@@ -242,19 +245,22 @@ function handleTemplateUpload(input) {
   reader.onload = function (e) {
     const html = e.target.result;
 
-    // Treat it exactly like a generated result — populate both panes
+    // Store for generate-with-template mode
+    loadedTemplate = { name: file.name, html };
+    showTemplateIndicator(file.name);
+
+    // Also preview it immediately
     if (!lastResult) lastResult = {};
     lastResult.html = html;
 
-    // Preview tab
     document.getElementById('preview-empty').style.display = 'none';
     const iframe = document.getElementById('preview-iframe');
     iframe.style.display = 'block';
     iframe.srcdoc = html;
 
-    // HTML code tab
     document.getElementById('html-pre').textContent = html;
     document.getElementById('copy-html-btn').style.display = '';
+    document.getElementById('clear-btn').style.display = '';
 
     switchTab('preview');
     clearOutputError();
@@ -266,6 +272,44 @@ function handleTemplateUpload(input) {
 
   // Reset so the same file can be re-loaded if needed
   input.value = '';
+}
+
+function removeTemplate() {
+  loadedTemplate = null;
+  document.getElementById('tpl-indicator').style.display = 'none';
+  // Don't clear the output — user may still want to see/copy it.
+  // Next generate will now build from scratch.
+}
+
+function showTemplateIndicator(name) {
+  document.getElementById('tpl-name').textContent = name;
+  document.getElementById('tpl-indicator').style.display = 'flex';
+}
+
+function clearOutput() {
+  lastResult  = null;
+
+  // Reset preview pane
+  document.getElementById('preview-empty').style.display = '';
+  const iframe = document.getElementById('preview-iframe');
+  iframe.style.display = 'none';
+  iframe.srcdoc = '';
+
+  // Reset HTML code pane
+  document.getElementById('html-pre').textContent = '';
+
+  // Reset subjects pane
+  document.getElementById('subjects-empty').style.display = '';
+  const content = document.getElementById('subjects-content');
+  content.style.display = 'none';
+  content.innerHTML = '';
+
+  // Hide action buttons
+  document.getElementById('copy-html-btn').style.display = 'none';
+  document.getElementById('clear-btn').style.display = 'none';
+
+  clearOutputError();
+  switchTab('preview');
 }
 
 /* ── Loading state ──────────────────────────────────────────────── */

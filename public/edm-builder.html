@@ -181,6 +181,47 @@
     }
     .add-img-btn:hover { text-decoration: underline; }
 
+    /* ── Template loaded indicator ───────────────────────────────── */
+    .tpl-indicator {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      background: #f0fdf4;
+      border: 1.5px solid #86efac;
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-bottom: 12px;
+      font-size: 0.8rem;
+    }
+    .tpl-indicator .tpl-icon { font-size: 1rem; flex-shrink: 0; }
+    .tpl-indicator .tpl-name {
+      flex: 1;
+      color: #166534;
+      font-weight: 600;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .tpl-indicator .tpl-mode {
+      font-size: 0.72rem;
+      color: #4ade80;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      flex-shrink: 0;
+    }
+    .tpl-remove-btn {
+      background: none;
+      border: none;
+      color: #dc2626;
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+      padding: 0;
+      flex-shrink: 0;
+    }
+    .tpl-remove-btn:hover { color: #991b1b; }
+
     /* ── Brand colour row ────────────────────────────────────────── */
     .colour-row {
       display: flex;
@@ -536,6 +577,12 @@
       </div><!-- /edm-form-scroll -->
 
       <div class="edm-panel-foot">
+        <div class="tpl-indicator" id="tpl-indicator">
+          <span class="tpl-icon">📄</span>
+          <span class="tpl-name" id="tpl-name"></span>
+          <span class="tpl-mode">Populate mode</span>
+          <button class="tpl-remove-btn" onclick="removeTemplate()" title="Remove template">×</button>
+        </div>
         <div class="edm-error-bar" id="form-error"></div>
         <button class="edm-gen-btn" id="gen-btn" onclick="generateEDM()">
           <span class="spinner"></span>
@@ -561,6 +608,7 @@
         <div class="edm-tab-actions">
           <button class="edm-action-btn" onclick="triggerTemplateUpload()">📂 Load Template</button>
           <button class="edm-action-btn" id="copy-html-btn" onclick="copyHtml()" style="display:none">Copy HTML</button>
+          <button class="edm-action-btn" id="clear-btn" onclick="clearOutput()" style="display:none;color:#dc2626;border-color:#fca5a5">🗑 Clear</button>
         </div>
         <input type="file" id="template-file-input" accept=".html,.htm" style="display:none"
                onchange="handleTemplateUpload(this)" />

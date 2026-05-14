@@ -3306,17 +3306,18 @@ app.post('/api/edm/generate', requireAuth, async (req, res) => {
     details      = '',
     ctaText      = 'Shop Now',
     ctaUrl       = '',
-    images       = [],          // [{ url, role }]
+    images       = [],          // [{ url, role, linkUrl }]
     tone         = 'friendly',
     brandName    = 'The Self Styler',
     brandColour  = '#6366f1',
+    existingHtml = '',          // if set: populate-template mode
   } = req.body;
 
   if (!goal && !details) {
     return res.status(400).json({ error: 'At least a campaign goal or details are required.' });
   }
 
-  // Build images section for prompt
+  // Build images section for prompt (shared by both modes)
   const imagesSection = images.length
     ? images.map((img, i) => {
         let line = `  Image ${i + 1}: Role = "${img.role || 'product'}", URL = ${img.url || '(none)'}`;
@@ -3325,18 +3326,13 @@ app.post('/api/edm/generate', requireAuth, async (req, res) => {
         }
         return line;
       }).join('\n')
-    : '  (no images provided — use placeholder boxes styled consistently)';
+    : '  (no images provided — keep/replace any existing image placeholders as appropriate)';
 
-  const prompt = `You are an expert email marketing designer and copywriter for a fashion e-commerce brand. Create a complete, production-ready HTML email campaign for Klaviyo.
-
-## Brand Details
-- Brand Name: ${brandName}
-- Brand Colour (primary): ${brandColour}
-- Tone: ${tone}
-
-## Campaign Brief
+  // Brief block reused in both prompts
+  const briefBlock = `## Campaign Brief
 - Campaign Name: ${campaignName || '(untitled)'}
 - Goal: ${goal}
+- Tone: ${tone}
 - Details / Context:
 ${details || '(none provided)'}
 
@@ -3345,7 +3341,58 @@ ${details || '(none provided)'}
 - CTA URL: ${ctaUrl || 'https://theselfstyler.com.au'}
 
 ## Images
-${imagesSection}
+${imagesSection}`;
+
+  let prompt;
+
+  if (existingHtml) {
+    // ── Populate-template mode ──────────────────────────────────────
+    prompt = `You are an expert email marketing copywriter. You have been given an existing HTML email template for the brand "${brandName}". Your job is to populate it with fresh campaign content based on the brief below.
+
+${briefBlock}
+
+## Your Task
+Update the template HTML to reflect this specific campaign. Follow these rules precisely:
+
+CHANGE these things:
+1. Hero/banner image src — replace with the Image 1 URL if provided; if the image has a link, wrap in the supplied <a> tag
+2. Headline and hero text — rewrite for this campaign's goal and tone
+3. Body copy paragraphs — replace with campaign-specific copy (tone: ${tone})
+4. CTA button text — use "${ctaText}"
+5. CTA button href — use "${ctaUrl || 'https://theselfstyler.com.au'}"
+6. Any secondary product images — replace with provided image URLs if available
+7. Klaviyo personalisation tag in greeting: {{ first_name|default:'there' }}
+
+DO NOT CHANGE these things:
+- Overall table/div structure and layout
+- Inline CSS styles, colours, fonts, spacing
+- Footer content, unsubscribe link ({{ unsubscribe_url }}), social icons
+- Any existing Klaviyo block tags ({% ... %}) or conditional logic
+- Image dimensions and alignment attributes
+
+## Output Format
+Respond ONLY with a JSON object (no markdown fences, no explanation) with exactly these keys:
+{
+  "html": "<the complete updated HTML as a single string — escape internal double-quotes with \\">",
+  "subjectA": "Subject line variant A (max 50 chars)",
+  "subjectB": "Subject line variant B — different angle, also max 50 chars",
+  "previewText": "Preview/preheader text shown in inbox before opening (max 90 chars)",
+  "sendTime": "Recommended send day and time with reasoning (1–2 sentences)",
+  "instructions": "Brief Klaviyo setup notes for this campaign (2–4 dot points as a single string separated by \\n)"
+}
+
+## Existing Template HTML
+${existingHtml}`;
+
+  } else {
+    // ── Generate-from-scratch mode ──────────────────────────────────
+    prompt = `You are an expert email marketing designer and copywriter for a fashion e-commerce brand. Create a complete, production-ready HTML email campaign for Klaviyo.
+
+## Brand Details
+- Brand Name: ${brandName}
+- Brand Colour (primary): ${brandColour}
+
+${briefBlock}
 
 ## Requirements for the HTML Email
 
@@ -3365,7 +3412,7 @@ ${imagesSection}
 - Use table-based layout for Outlook compatibility
 - No JavaScript
 - All <img> tags must have alt attributes
-- Include <!-- [if mso]> hacks for Outlook button rendering
+- Include <!--[if mso]> hacks for Outlook button rendering
 
 ### Copy
 - Write all headline, body copy, and CTA text yourself based on the campaign brief
@@ -3382,6 +3429,7 @@ Respond ONLY with a JSON object (no markdown fences, no explanation) with exactl
   "sendTime": "Recommended send day and time with reasoning (1–2 sentences)",
   "instructions": "Brief Klaviyo setup notes: segment suggestion, any personalisation tags used, A/B test recommendation (2–4 dot points as a single string separated by \\n)"
 }`;
+  }
 
   try {
     console.log(`[edm/generate] Generating EDM for "${campaignName || goal.slice(0,40)}"`);
