@@ -3321,6 +3321,7 @@ app.get('/api/stock-value/audit', requireAuth, async (req, res) => {
       if (!r.ok) throw new Error(`Products API ${r.status}`);
       const data = await r.json();
       for (const p of (data.products || [])) {
+        if ((p.title || '').toLowerCase().includes('x-redo')) continue;
         for (const v of (p.variants || [])) {
           const qty = parseInt(v.inventory_quantity, 10) || 0;
           if (qty !== 0) {

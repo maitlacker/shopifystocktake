@@ -43,7 +43,7 @@ async function runSync(pool) {
     const variants = [];  // { inventory_item_id, price, qty }
     let skippedUntracked = 0;
     let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products.json` +
-              `?status=active&limit=250&fields=id,variants`;
+              `?status=active&limit=250&fields=id,title,variants`;
 
     while (url) {
       const r = await fetch(url, { headers: shopifyHeaders() });
@@ -57,6 +57,9 @@ async function runSync(pool) {
       const data = await r.json();
 
       for (const p of (data.products || [])) {
+        // Exclude internal/adjustment products
+        if ((p.title || '').toLowerCase().includes('x-redo')) continue;
+
         for (const v of (p.variants || [])) {
           const qty = parseInt(v.inventory_quantity, 10) || 0;
           if (qty <= 0) continue;
