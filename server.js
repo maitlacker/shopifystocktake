@@ -19,6 +19,7 @@ const xeroSync         = require('./xero-sync');
 const weeklyPulse      = require('./weekly-pulse');
 const opsSync          = require('./ops-sync');
 const restockSync      = require('./restock-sync');
+const stockValueSync   = require('./stock-value-sync');
 
 const anthropicClient = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -3291,6 +3292,37 @@ app.get('/api/bi/summary', async (req, res) => {
   }
 });
 
+// ── Total Stock Value ──────────────────────────────────────────────
+
+// GET /api/stock-value/history?days=90
+app.get('/api/stock-value/history', requireAuth, async (req, res) => {
+  const days = Math.min(Math.max(parseInt(req.query.days, 10) || 90, 1), 1095);
+  try {
+    const { rows } = await pool.query(`
+      SELECT date, total_rrp, total_cost, variant_count, synced_at
+      FROM stock_value_history
+      WHERE date >= CURRENT_DATE - ($1::int)
+      ORDER BY date ASC
+    `, [days]);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/stock-value/sync  — manual trigger
+app.post('/api/stock-value/sync', requireAuth, async (req, res) => {
+  if (stockValueSync.getIsRunning()) {
+    return res.status(409).json({ error: 'Sync already in progress' });
+  }
+  try {
+    const result = await stockValueSync.runSync(pool);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── EDM Builder ───────────────────────────────────────────────────
 
 // POST /api/edm/generate
@@ -3586,6 +3618,7 @@ initDb()
     weeklyPulse.startCron(pool, anthropicClient);
     opsSync.startCron(pool);
     restockSync.startCron(pool);
+    stockValueSync.startCron(pool);
 
     // Recalculate margin tiers nightly at 02:00
     cron.schedule('0 2 * * *', async () => {

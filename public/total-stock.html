@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Total Stock Value — The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    /* ── Page header ─────────────────────────────────────────────── */
+    .ts-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 22px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .ts-header h1 { font-size: 1.4rem; font-weight: 800; color: #1e293b; margin: 0; }
+    .ts-header-sub { font-size: 0.82rem; color: #64748b; margin-top: 2px; }
+
+    /* ── Summary cards ───────────────────────────────────────────── */
+    .ts-cards {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 22px;
+    }
+    @media (max-width: 800px) { .ts-cards { grid-template-columns: repeat(2, 1fr); } }
+    .ts-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px 20px;
+    }
+    .ts-card-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: #64748b;
+      margin-bottom: 6px;
+    }
+    .ts-card-value {
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: #1e293b;
+      white-space: nowrap;
+    }
+    .ts-card-value.indigo { color: #6366f1; }
+    .ts-card-value.emerald { color: #059669; }
+    .ts-card-value.amber { color: #d97706; }
+    .ts-card-sub {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      margin-top: 4px;
+    }
+
+    /* ── Chart panel ─────────────────────────────────────────────── */
+    .ts-chart-panel {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin-bottom: 22px;
+    }
+    .ts-chart-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .ts-chart-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #1e293b;
+    }
+    .ts-range-btns { display: flex; gap: 6px; }
+    .ts-range-btn {
+      padding: 5px 13px;
+      border-radius: 20px;
+      border: 1.5px solid #e2e8f0;
+      background: #fff;
+      color: #64748b;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .ts-range-btn:hover { border-color: #6366f1; color: #6366f1; }
+    .ts-range-btn.active { background: #6366f1; color: #fff; border-color: #6366f1; }
+
+    .ts-chart-wrap { position: relative; height: 340px; }
+
+    /* ── Legend ──────────────────────────────────────────────────── */
+    .ts-legend {
+      display: flex;
+      gap: 20px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+    .ts-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #475569;
+    }
+    .ts-legend-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    /* ── Empty / loading ─────────────────────────────────────────── */
+    .ts-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 60px 20px;
+      color: #94a3b8;
+      text-align: center;
+    }
+    .ts-empty-icon { font-size: 2.5rem; }
+    .ts-empty-title { font-size: 1rem; font-weight: 700; color: #cbd5e1; }
+    .ts-empty-sub { font-size: 0.83rem; max-width: 360px; line-height: 1.5; }
+
+    /* ── Sync controls ───────────────────────────────────────────── */
+    .ts-sync-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .ts-sync-msg {
+      font-size: 0.8rem;
+      color: #64748b;
+    }
+    .ts-sync-msg.running { color: #6366f1; font-weight: 600; }
+    .ts-sync-msg.ok { color: #059669; font-weight: 600; }
+    .ts-sync-msg.err { color: #dc2626; font-weight: 600; }
+
+    /* ── Data table ──────────────────────────────────────────────── */
+    .ts-table-panel {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .ts-table-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .ts-table-head-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #1e293b;
+    }
+    table.ts-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    .ts-table th {
+      background: #f8fafc;
+      color: #64748b;
+      font-weight: 600;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 9px 20px;
+      text-align: left;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .ts-table th.num, .ts-table td.num { text-align: right; }
+    .ts-table td {
+      padding: 10px 20px;
+      border-bottom: 1px solid #f1f5f9;
+      color: #334155;
+      vertical-align: middle;
+    }
+    .ts-table tr:last-child td { border-bottom: none; }
+    .ts-table tr:hover td { background: #fafafe; }
+    .val-rrp  { color: #4f46e5; font-weight: 700; }
+    .val-cost { color: #059669; font-weight: 700; }
+    .val-margin { font-weight: 700; }
+    .margin-chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+    .margin-chip.high   { background: #dcfce7; color: #166534; }
+    .margin-chip.medium { background: #fef9c3; color: #854d0e; }
+    .margin-chip.low    { background: #fee2e2; color: #991b1b; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main class="container" style="padding: 28px 20px">
+
+    <!-- Header -->
+    <div class="ts-header">
+      <div>
+        <h1>Total Stock Value</h1>
+        <div class="ts-header-sub">Daily snapshot of inventory carried at RRP and cost — synced at 3 AM automatically</div>
+      </div>
+      <div class="ts-sync-row">
+        <span class="ts-sync-msg" id="sync-msg"></span>
+        <button class="btn" id="sync-btn" onclick="triggerSync()">Sync Today</button>
+      </div>
+    </div>
+
+    <!-- Summary cards -->
+    <div class="ts-cards">
+      <div class="ts-card">
+        <div class="ts-card-label">Total at RRP</div>
+        <div class="ts-card-value indigo" id="card-rrp">—</div>
+        <div class="ts-card-sub" id="card-rrp-date">latest snapshot</div>
+      </div>
+      <div class="ts-card">
+        <div class="ts-card-label">Total at Cost</div>
+        <div class="ts-card-value emerald" id="card-cost">—</div>
+        <div class="ts-card-sub">at supplier cost</div>
+      </div>
+      <div class="ts-card">
+        <div class="ts-card-label">Gross Margin on Stock</div>
+        <div class="ts-card-value amber" id="card-margin">—</div>
+        <div class="ts-card-sub" id="card-margin-sub">RRP minus cost</div>
+      </div>
+      <div class="ts-card">
+        <div class="ts-card-label">Variants in Stock</div>
+        <div class="ts-card-value" id="card-variants">—</div>
+        <div class="ts-card-sub">with positive inventory</div>
+      </div>
+    </div>
+
+    <!-- Chart panel -->
+    <div class="ts-chart-panel">
+      <div class="ts-chart-toolbar">
+        <div class="ts-chart-title">Stock Value Over Time</div>
+        <div class="ts-range-btns">
+          <button class="ts-range-btn" onclick="setRange(30,this)">30d</button>
+          <button class="ts-range-btn active" onclick="setRange(90,this)">90d</button>
+          <button class="ts-range-btn" onclick="setRange(180,this)">180d</button>
+          <button class="ts-range-btn" onclick="setRange(365,this)">1yr</button>
+          <button class="ts-range-btn" onclick="setRange(1095,this)">All</button>
+        </div>
+      </div>
+
+      <div class="ts-chart-wrap">
+        <canvas id="stock-chart"></canvas>
+      </div>
+
+      <div class="ts-legend">
+        <div class="ts-legend-item">
+          <div class="ts-legend-dot" style="background:#6366f1"></div>
+          Total at RRP
+        </div>
+        <div class="ts-legend-item">
+          <div class="ts-legend-dot" style="background:#059669"></div>
+          Total at Cost
+        </div>
+        <div class="ts-legend-item">
+          <div class="ts-legend-dot" style="background:#e0e7ff;border:1px solid #c7d2fe"></div>
+          Margin (gap between lines)
+        </div>
+      </div>
+    </div>
+
+    <!-- History table -->
+    <div class="ts-table-panel">
+      <div class="ts-table-head">
+        <div class="ts-table-head-title">Snapshot History</div>
+      </div>
+      <div id="table-wrap">
+        <div class="ts-empty">
+          <div class="ts-empty-icon">📦</div>
+          <div class="ts-empty-title">No snapshots yet</div>
+          <div class="ts-empty-sub">Click <strong>Sync Today</strong> to capture your first snapshot. After that, it runs automatically at 3 AM every day.</div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+  <script src="total-stock.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

@@ -22,6 +22,7 @@
         { label: 'BI Dashboard',          href: '/bi-dashboard.html', restrict: BI_ALLOWED },
         { label: 'Weekly Pulse',          href: '/weekly-pulse.html', restrict: BI_ALLOWED },
         { label: 'Sales Velocity',        href: '/velocity.html' },
+        { label: 'Total Stock Value',     href: '/total-stock.html' },
         { label: 'Restock Planner',       href: '/restock.html' },
         { label: 'Shopify Daily Report',  href: '/shopify-report.html' },
         { label: 'Google Ads',            href: '/google-ads.html' },

@@ -503,6 +503,18 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_production_budgets_year
       ON production_budgets(year, month);
+
+    CREATE TABLE IF NOT EXISTS stock_value_history (
+      id            SERIAL PRIMARY KEY,
+      date          DATE NOT NULL,
+      total_rrp     DECIMAL(14,2) NOT NULL DEFAULT 0,
+      total_cost    DECIMAL(14,2) NOT NULL DEFAULT 0,
+      variant_count INT NOT NULL DEFAULT 0,
+      synced_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(date)
+    );
+    CREATE INDEX IF NOT EXISTS idx_stock_value_date
+      ON stock_value_history(date DESC);
   `);
 }
 
