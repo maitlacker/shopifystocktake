@@ -41,6 +41,7 @@ async function runSync(pool) {
     // ── 1. Paginate all active products ─────────────────────────────
     console.log('[stock-value] Fetching all active products…');
     const variants = [];  // { inventory_item_id, price, qty }
+    let skippedUntracked = 0;
     let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products.json` +
               `?status=active&limit=250&fields=id,variants`;
 
@@ -58,13 +59,20 @@ async function runSync(pool) {
       for (const p of (data.products || [])) {
         for (const v of (p.variants || [])) {
           const qty = parseInt(v.inventory_quantity, 10) || 0;
-          if (qty > 0) {
-            variants.push({
-              inventory_item_id: v.inventory_item_id,
-              price: parseFloat(v.price) || 0,
-              qty,
-            });
+          if (qty <= 0) continue;
+
+          // Skip untracked variants — their inventory_quantity is not managed
+          // by Shopify and will not appear in Shopify's own inventory reports.
+          if (v.inventory_management !== 'shopify') {
+            skippedUntracked++;
+            continue;
           }
+
+          variants.push({
+            inventory_item_id: v.inventory_item_id,
+            price: parseFloat(v.price) || 0,
+            qty,
+          });
         }
       }
 
@@ -72,6 +80,10 @@ async function runSync(pool) {
       const link = r.headers.get('link') || '';
       const next = link.match(/<([^>]+)>;\s*rel="next"/);
       url = next ? next[1] : null;
+    }
+
+    if (skippedUntracked > 0) {
+      console.log(`[stock-value] Skipped ${skippedUntracked} untracked variants (inventory_management ≠ shopify)`);
     }
 
     console.log(`[stock-value] ${variants.length} variants with positive stock`);

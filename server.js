@@ -3310,6 +3310,74 @@ app.get('/api/stock-value/history', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/stock-value/audit  — diagnostic: shows what's being counted without writing to DB
+app.get('/api/stock-value/audit', requireAuth, async (req, res) => {
+  try {
+    const variants = [];
+    let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products.json` +
+              `?status=active&limit=250&fields=id,title,variants`;
+    while (url) {
+      const r = await fetch(url, { headers: shopifyHeaders() });
+      if (!r.ok) throw new Error(`Products API ${r.status}`);
+      const data = await r.json();
+      for (const p of (data.products || [])) {
+        for (const v of (p.variants || [])) {
+          const qty = parseInt(v.inventory_quantity, 10) || 0;
+          if (qty !== 0) {
+            variants.push({
+              product: p.title,
+              sku:     v.sku || '—',
+              mgmt:    v.inventory_management || 'none',
+              tracked: v.inventory_management === 'shopify',
+              price:   parseFloat(v.price) || 0,
+              qty,
+              rrpValue: (parseFloat(v.price) || 0) * qty,
+            });
+          }
+        }
+      }
+      const link = r.headers.get('link') || '';
+      const next = link.match(/<([^>]+)>;\s*rel="next"/);
+      url = next ? next[1] : null;
+    }
+
+    const tracked   = variants.filter(v => v.tracked);
+    const untracked = variants.filter(v => !v.tracked);
+
+    const totalRrpAll       = variants.reduce((s,v) => s + v.rrpValue, 0);
+    const totalRrpTracked   = tracked.reduce((s,v) => s + v.rrpValue, 0);
+    const totalRrpUntracked = untracked.reduce((s,v) => s + v.rrpValue, 0);
+
+    // Top 20 by RRP value (untracked first so they're obvious)
+    const top20 = [...variants]
+      .sort((a,b) => b.rrpValue - a.rrpValue)
+      .slice(0, 20)
+      .map(v => ({
+        product:   v.product,
+        sku:       v.sku,
+        mgmt:      v.mgmt,
+        price:     v.price,
+        qty:       v.qty,
+        rrpValue:  Math.round(v.rrpValue),
+      }));
+
+    res.json({
+      summary: {
+        totalVariantsWithStock: variants.length,
+        trackedCount:           tracked.length,
+        untrackedCount:         untracked.length,
+        totalRrpAll:            Math.round(totalRrpAll),
+        totalRrpTrackedOnly:    Math.round(totalRrpTracked),
+        totalRrpUntrackedOnly:  Math.round(totalRrpUntracked),
+        inflationFromUntracked: `${((totalRrpUntracked / totalRrpAll) * 100).toFixed(1)}%`,
+      },
+      top20ByValue: top20,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/stock-value/sync  — manual trigger
 app.post('/api/stock-value/sync', requireAuth, async (req, res) => {
   if (stockValueSync.getIsRunning()) {
