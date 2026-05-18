@@ -350,10 +350,9 @@ async function runAnalysis() {
       if (!restockEnabled || rating === 'F' || rating === null) continue;
       if (minDaysRemaining === null) continue;
 
-      // Sea alert
+      // Sea alert (Slack notifications paused — low-stock alerts only in that channel)
       if (!seaAlertSent && minDaysRemaining <= effectiveSeaLeadDays) {
         try {
-          await sendSlack(formatSlackAlert(analysed, 'sea', effectiveCoverWeeks));
           await pool.query(
             `INSERT INTO restock_alerts_log
                (product_id, product_title, alert_type, rating, days_remaining)
@@ -370,10 +369,9 @@ async function runAnalysis() {
         }
       }
 
-      // Air alert
+      // Air alert (Slack notifications paused — low-stock alerts only in that channel)
       if (!airAlertSent && minDaysRemaining <= effectiveAirLeadDays) {
         try {
-          await sendSlack(formatSlackAlert(analysed, 'air', effectiveCoverWeeks));
           await pool.query(
             `INSERT INTO restock_alerts_log
                (product_id, product_title, alert_type, rating, days_remaining)
