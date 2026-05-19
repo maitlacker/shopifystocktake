@@ -134,7 +134,9 @@ async function runSync(pool) {
       totalCost += (costMap[v.inventory_item_id] || 0) * v.qty;
     }
 
-    const today = new Date().toISOString().slice(0, 10);  // YYYY-MM-DD
+    // Use Sydney date (AEST/AEDT) so the snapshot is labelled with the correct
+    // Australian business day regardless of when the cron fires in UTC.
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' }); // YYYY-MM-DD
 
     // ── 4. Upsert today's snapshot ───────────────────────────────────
     await pool.query(`
@@ -173,8 +175,9 @@ async function runSync(pool) {
 function getIsRunning() { return isRunning; }
 
 function startCron(pool) {
-  // 03:00 AM daily — after margin tier recalc (02:00) and stock alerts settle
-  cron.schedule('0 3 * * *', async () => {
+  // 17:00 UTC daily = 03:00 AEST (UTC+10) / 04:00 AEDT (UTC+11)
+  // Running overnight Australian time means fresh data is ready each morning.
+  cron.schedule('0 17 * * *', async () => {
     console.log('[stock-value] Daily cron starting…');
     try {
       await runSync(pool);
@@ -182,7 +185,7 @@ function startCron(pool) {
       console.error('[stock-value] Daily cron error:', err.message);
     }
   });
-  console.log('[stock-value] Cron scheduled: daily at 03:00');
+  console.log('[stock-value] Cron scheduled: daily at 17:00 UTC (03:00 AEST)');
 }
 
 module.exports = { runSync, getIsRunning, startCron };
