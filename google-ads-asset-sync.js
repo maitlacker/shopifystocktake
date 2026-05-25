@@ -20,8 +20,16 @@ const CRON_SCHEDULE = process.env.GOOGLE_ADS_ASSET_CRON || '0 6 * * *';
 const MAX_BYTES     = 5 * 1024 * 1024; // 5 MB hard limit from Google
 const MIN_DIM       = 300;             // 300 × 300 px minimum (Google requirement)
 const TOP_N         = 10;              // number of products to select
-const MIN_STOCK     = 15;              // minimum total tracked stock to be eligible
+const MIN_STOCK     = 15;              // minimum total stock to be eligible
 const VELOCITY_DAYS = 45;             // sales lookback window in days
+
+// Products whose type OR title contains any of these words (case-insensitive) are excluded
+const EXCLUDED_KEYWORDS = [
+  'accessory', 'accessories',
+  'jewellery', 'jewelry',
+  'earring', 'earrings',
+  'necklace', 'bracelet', 'ring', 'rings',
+];
 
 let isRunning  = false;
 let lastStatus = {
@@ -72,7 +80,7 @@ async function fetchCollectionProducts(collectionId) {
   const products = [];
 
   let url = `https://${shop}/admin/api/${API_VERSION}/collections/${collectionId}/products.json` +
-            `?limit=250&fields=id,title,images,variants`;
+            `?limit=250&fields=id,title,product_type,images,variants`;
 
   while (url) {
     const r = await fetch(url, { headers: shopifyHeaders() });
@@ -139,14 +147,26 @@ async function fetchRecentSalesByProduct(days) {
 }
 
 /**
- * Calculate total tracked stock for a Shopify product object.
- * Excludes variants where inventory_management !== 'shopify' (untracked).
+ * Calculate total stock for a Shopify product — sum all positive variant quantities.
+ * No inventory_management filter here: for advertising selection we just want to know
+ * if there's real stock to sell, regardless of how Shopify tracks it.
  */
 function calcStock(product) {
   return (product.variants || []).reduce((sum, v) => {
-    if (v.inventory_management !== 'shopify') return sum;
     return sum + Math.max(0, parseInt(v.inventory_quantity, 10) || 0);
   }, 0);
+}
+
+/**
+ * Returns true if a product should be excluded from ad assets based on
+ * product_type or title containing accessory/jewellery/earring keywords.
+ */
+function isExcluded(product) {
+  const haystack = [
+    (product.product_type || ''),
+    (product.title        || ''),
+  ].join(' ').toLowerCase();
+  return EXCLUDED_KEYWORDS.some(kw => haystack.includes(kw));
 }
 
 /**
@@ -164,11 +184,15 @@ function selectTopProducts(products, salesMap) {
     return { ...p, _stock: stock, _sales: sales, _score: score };
   });
 
-  const eligible = scored.filter(p => p._stock >= MIN_STOCK);
+  const eligible = scored.filter(p => p._stock >= MIN_STOCK && !isExcluded(p));
   const top      = eligible.sort((a, b) => b._score - a._score).slice(0, TOP_N);
 
   // Log the selection so it's visible in Railway logs
-  console.log(`[ads-assets] ${products.length} products in collection, ${eligible.length} with ≥${MIN_STOCK} stock`);
+  const excluded = scored.filter(p => isExcluded(p));
+  if (excluded.length > 0) {
+    console.log(`[ads-assets] Excluded ${excluded.length} accessory/jewellery products: ${excluded.map(p => p.title).join(', ')}`);
+  }
+  console.log(`[ads-assets] ${products.length} products in collection, ${eligible.length} eligible (≥${MIN_STOCK} stock, not excluded)`);
   for (const p of top) {
     console.log(`[ads-assets]   → ${p.title} | stock: ${p._stock} | sales: ${p._sales} | score: ${p._score}`);
   }
