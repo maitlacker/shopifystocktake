@@ -515,6 +515,21 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_stock_value_date
       ON stock_value_history(date DESC);
+
+    CREATE TABLE IF NOT EXISTS google_ads_assets (
+      id                SERIAL PRIMARY KEY,
+      shopify_image_id  TEXT NOT NULL UNIQUE,
+      product_id        TEXT,
+      product_title     TEXT,
+      image_url         TEXT,
+      asset_name        TEXT,
+      resource_name     TEXT,
+      synced_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_google_ads_assets_product
+      ON google_ads_assets(product_id);
+    CREATE INDEX IF NOT EXISTS idx_google_ads_assets_synced
+      ON google_ads_assets(synced_at DESC);
   `);
 }
 

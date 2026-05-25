@@ -20,6 +20,7 @@ const weeklyPulse      = require('./weekly-pulse');
 const opsSync          = require('./ops-sync');
 const restockSync      = require('./restock-sync');
 const stockValueSync   = require('./stock-value-sync');
+const adsAssetSync     = require('./google-ads-asset-sync');
 
 const anthropicClient = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -2078,6 +2079,42 @@ app.get('/api/velocity/idea-factory/latest', requireAuth, async (req, res) => {
   }
 });
 
+// ── Google Ads Asset Sync ──────────────────────────────────────────
+
+app.get('/api/ads-assets/status', (req, res) => {
+  res.json(adsAssetSync.getStatus());
+});
+
+app.post('/api/ads-assets/sync', async (req, res) => {
+  // Fire-and-forget — client polls /status to see progress
+  adsAssetSync.runSync().catch((err) =>
+    console.error('[ads-assets] Manual sync error:', err.message)
+  );
+  res.json({ started: true });
+});
+
+app.get('/api/ads-assets/list', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        id,
+        shopify_image_id  AS "shopifyImageId",
+        product_id        AS "productId",
+        product_title     AS "productTitle",
+        image_url         AS "imageUrl",
+        asset_name        AS "assetName",
+        resource_name     AS "resourceName",
+        synced_at         AS "syncedAt"
+      FROM google_ads_assets
+      ORDER BY synced_at DESC
+      LIMIT 200
+    `);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Meta Ads OAuth & API ───────────────────────────────────────────
 
 app.get('/auth/meta/connect', requireAuth, (req, res) => {
@@ -3688,6 +3725,7 @@ initDb()
     opsSync.startCron(pool);
     restockSync.startCron(pool);
     stockValueSync.startCron(pool);
+    adsAssetSync.startCron();
 
     // Recalculate margin tiers nightly at 02:00
     cron.schedule('0 2 * * *', async () => {
