@@ -79,8 +79,10 @@ async function fetchCollectionProducts(collectionId) {
   const shop     = process.env.SHOPIFY_SHOP;
   const products = [];
 
+  // No 'fields' restriction — Shopify strips variant sub-fields (including
+  // inventory_quantity) when fields= is used on the collection products endpoint.
   let url = `https://${shop}/admin/api/${API_VERSION}/collections/${collectionId}/products.json` +
-            `?limit=250&fields=id,title,product_type,images,variants`;
+            `?limit=250`;
 
   while (url) {
     const r = await fetch(url, { headers: shopifyHeaders() });
@@ -418,6 +420,17 @@ async function runSync() {
     console.log('[ads-assets] Fetching collection products…');
     const products = await fetchCollectionProducts(collectionId);
     console.log(`[ads-assets] ${products.length} products in collection`);
+
+    // Diagnostic: log first product's stock so we can confirm variants are returning correctly
+    if (products.length > 0) {
+      const sample = products[0];
+      const sampleStock = calcStock(sample);
+      console.log(
+        `[ads-assets] Sample product: "${sample.title}" — ` +
+        `${sample.variants?.length || 0} variants, total stock: ${sampleStock} ` +
+        `(first variant inventory_quantity: ${sample.variants?.[0]?.inventory_quantity ?? 'undefined'})`
+      );
+    }
 
     if (products.length === 0) {
       lastStatus = {
