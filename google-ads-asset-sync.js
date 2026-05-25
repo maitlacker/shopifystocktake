@@ -72,17 +72,22 @@ async function findCollectionId(handle) {
 }
 
 /**
- * Fetch all products in a collection, including variants (for stock) and
- * images (which include width/height from Shopify API — no download needed).
+ * Fetch all products in a collection with reliable inventory data.
+ *
+ * Two-step approach:
+ *   1. /collections/{id}/products.json — get product IDs only (this endpoint
+ *      doesn't reliably return inventory_quantity on variants)
+ *   2. /products.json?ids=... — fetch full product objects in batches of 50;
+ *      this endpoint always returns correct inventory_quantity on variants
+ *      (same endpoint used by alerts.js)
  */
 async function fetchCollectionProducts(collectionId) {
-  const shop     = process.env.SHOPIFY_SHOP;
-  const products = [];
+  const shop = process.env.SHOPIFY_SHOP;
 
-  // No 'fields' restriction — Shopify strips variant sub-fields (including
-  // inventory_quantity) when fields= is used on the collection products endpoint.
+  // ── Step 1: collect product IDs from the collection ───────────────
+  const productIds = [];
   let url = `https://${shop}/admin/api/${API_VERSION}/collections/${collectionId}/products.json` +
-            `?limit=250`;
+            `?limit=250&fields=id`;
 
   while (url) {
     const r = await fetch(url, { headers: shopifyHeaders() });
@@ -93,11 +98,39 @@ async function fetchCollectionProducts(collectionId) {
     }
     if (!r.ok) throw new Error(`Shopify collection products API ${r.status}`);
     const data = await r.json();
-    products.push(...(data.products || []));
+    for (const p of (data.products || [])) productIds.push(p.id);
 
     const link = r.headers.get('link') || '';
     const next = link.match(/<([^>]+)>;\s*rel="next"/);
     url = next ? next[1] : null;
+  }
+
+  console.log(`[ads-assets] ${productIds.length} product IDs in collection`);
+  if (productIds.length === 0) return [];
+
+  // ── Step 2: fetch full product objects in batches of 50 ───────────
+  // /products.json?ids=... reliably returns inventory_quantity on variants
+  const products = [];
+  const BATCH = 50;
+
+  for (let i = 0; i < productIds.length; i += BATCH) {
+    const batch = productIds.slice(i, i + BATCH);
+    const r = await fetch(
+      `https://${shop}/admin/api/${API_VERSION}/products.json` +
+      `?ids=${batch.join(',')}&limit=${BATCH}`,
+      { headers: shopifyHeaders() }
+    );
+    if (r.status === 429) {
+      const wait = parseInt(r.headers.get('retry-after') || '2', 10) * 1000;
+      await sleep(wait);
+      i -= BATCH; // retry this batch
+      continue;
+    }
+    if (!r.ok) throw new Error(`Shopify products API (batch) ${r.status}`);
+    const data = await r.json();
+    products.push(...(data.products || []));
+
+    if (i + BATCH < productIds.length) await sleep(300);
   }
 
   return products;
