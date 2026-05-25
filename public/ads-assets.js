@@ -104,6 +104,23 @@ function renderStatus(s) {
   } else {
     errorEl.style.display = 'none';
   }
+
+  // Selected products panel
+  const panel      = document.getElementById('productsPanel');
+  const countEl    = document.getElementById('productCount');
+  const listEl     = document.getElementById('productList');
+  const titles     = s.selectedProductTitles || [];
+  const numSelected = s.productsSelected || 0;
+
+  if (titles.length > 0) {
+    countEl.textContent = numSelected;
+    listEl.innerHTML = titles.map((t) =>
+      `<span class="aa-product-chip">${escHtml(t)}</span>`
+    ).join('');
+    panel.style.display = 'block';
+  } else {
+    panel.style.display = 'none';
+  }
 }
 
 function setBadge(el, cls, text) {
@@ -146,9 +163,14 @@ function renderTable(rows) {
       : '';
     const placeholder = `<div class="aa-thumb-placeholder" ${row.imageUrl ? 'style="display:none"' : ''}>🖼️</div>`;
 
+    const rolePill = row.imageRole
+      ? `<span class="role-pill role-${escHtml(row.imageRole)}">${escHtml(row.imageRole)}</span>`
+      : '<span style="color:#94a3b8; font-size:0.78rem;">—</span>';
+
     return `<tr>
       <td style="width:60px;">${thumb}${placeholder}</td>
       <td style="font-weight:600;">${escHtml(row.productTitle || '—')}</td>
+      <td>${rolePill}</td>
       <td style="font-size:0.82rem; color:#475569;">${escHtml(row.assetName || '—')}</td>
       <td class="aa-resource">${row.resourceName ? escHtml(row.resourceName) : '<span style="color:#94a3b8;">—</span>'}</td>
       <td style="white-space:nowrap; color:#64748b; font-size:0.82rem;">${fmtDateTime(row.syncedAt)}</td>
@@ -161,6 +183,7 @@ function renderTable(rows) {
         <tr>
           <th>Image</th>
           <th>Product</th>
+          <th>Role</th>
           <th>Asset Name</th>
           <th>Resource Name</th>
           <th>Synced</th>

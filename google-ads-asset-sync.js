@@ -2,9 +2,12 @@
 
 /**
  * google-ads-asset-sync.js
- * Syncs product images from the Shopify 'new-arrivals' collection
- * into the Google Ads Asset Library as IMAGE assets.
- * Runs at 06:00 AM daily; can also be triggered manually.
+ * Selects the top 10 new-arrivals products by sales velocity + stock level,
+ * then uploads their best portrait and best landscape image to the
+ * Google Ads Asset Library (max 20 images: 10 products × 2 orientations).
+ *
+ * Scoring: (units_sold_45d × 3) + min(stock_on_hand, 100)
+ * Only products with ≥ MIN_STOCK total tracked stock are eligible.
  */
 
 const fetch    = require('node-fetch');
@@ -14,11 +17,22 @@ const { pool } = require('./db');
 const API_VERSION   = '2024-01';
 const ADS_VERSION   = process.env.GOOGLE_ADS_API_VERSION || 'v23';
 const CRON_SCHEDULE = process.env.GOOGLE_ADS_ASSET_CRON || '0 6 * * *';
-const MAX_BYTES     = 5 * 1024 * 1024; // 5 MB
-const MIN_DIM       = 300;             // 300 × 300 px minimum
+const MAX_BYTES     = 5 * 1024 * 1024; // 5 MB hard limit from Google
+const MIN_DIM       = 300;             // 300 × 300 px minimum (Google requirement)
+const TOP_N         = 10;              // number of products to select
+const MIN_STOCK     = 15;              // minimum total tracked stock to be eligible
+const VELOCITY_DAYS = 45;             // sales lookback window in days
 
 let isRunning  = false;
-let lastStatus = { lastRun: null, uploaded: 0, skipped: 0, failed: 0, error: null };
+let lastStatus = {
+  lastRun:                null,
+  uploaded:               0,
+  skipped:                0,
+  failed:                 0,
+  productsSelected:       0,
+  selectedProductTitles:  [],
+  error:                  null,
+};
 
 // ── Utilities ──────────────────────────────────────────────────────
 
@@ -49,57 +63,154 @@ async function findCollectionId(handle) {
   return null;
 }
 
-async function fetchCollectionImages(collectionId) {
-  const shop   = process.env.SHOPIFY_SHOP;
-  const images = []; // { imageId, productId, productTitle, imageUrl }
+/**
+ * Fetch all products in a collection, including variants (for stock) and
+ * images (which include width/height from Shopify API — no download needed).
+ */
+async function fetchCollectionProducts(collectionId) {
+  const shop     = process.env.SHOPIFY_SHOP;
+  const products = [];
 
   let url = `https://${shop}/admin/api/${API_VERSION}/collections/${collectionId}/products.json` +
-            `?limit=250&fields=id,title,images`;
+            `?limit=250&fields=id,title,images,variants`;
 
   while (url) {
     const r = await fetch(url, { headers: shopifyHeaders() });
     if (r.status === 429) {
       const wait = parseInt(r.headers.get('retry-after') || '2', 10) * 1000;
-      console.log(`[ads-assets] Rate limited — waiting ${wait}ms`);
       await sleep(wait);
       continue;
     }
-    if (!r.ok) throw new Error(`Shopify products API ${r.status}`);
+    if (!r.ok) throw new Error(`Shopify collection products API ${r.status}`);
     const data = await r.json();
-
-    for (const product of (data.products || [])) {
-      for (const img of (product.images || [])) {
-        if (!img.src) continue;
-        images.push({
-          imageId:      String(img.id),
-          productId:    String(product.id),
-          productTitle: product.title,
-          imageUrl:     img.src.split('?')[0], // strip query params (e.g. ?v=...)
-        });
-      }
-    }
+    products.push(...(data.products || []));
 
     const link = r.headers.get('link') || '';
     const next = link.match(/<([^>]+)>;\s*rel="next"/);
     url = next ? next[1] : null;
   }
 
-  return images;
+  return products;
 }
 
-// ── Image validation (no external libraries) ───────────────────────
-// Parses magic bytes to determine MIME type and dimensions.
+/**
+ * Fetch paid orders from the last `days` days and return a map of
+ * product_id → total units sold.
+ */
+async function fetchRecentSalesByProduct(days) {
+  const shop  = process.env.SHOPIFY_SHOP;
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+
+  const salesMap  = {}; // { [product_id]: units_sold }
+  let   orderCount = 0;
+
+  let url = `https://${shop}/admin/api/${API_VERSION}/orders.json` +
+            `?status=any&financial_status=paid` +
+            `&created_at_min=${encodeURIComponent(since.toISOString())}` +
+            `&limit=250&fields=id,line_items`;
+
+  while (url) {
+    const r = await fetch(url, { headers: shopifyHeaders() });
+    if (r.status === 429) {
+      const wait = parseInt(r.headers.get('retry-after') || '2', 10) * 1000;
+      await sleep(wait);
+      continue;
+    }
+    if (!r.ok) throw new Error(`Shopify orders API ${r.status}`);
+    const data = await r.json();
+
+    for (const order of (data.orders || [])) {
+      for (const item of (order.line_items || [])) {
+        const pid = String(item.product_id || '');
+        if (!pid || pid === 'null') continue;
+        salesMap[pid] = (salesMap[pid] || 0) + (parseInt(item.quantity, 10) || 0);
+      }
+    }
+    orderCount += (data.orders || []).length;
+
+    const link = r.headers.get('link') || '';
+    const next = link.match(/<([^>]+)>;\s*rel="next"/);
+    url = next ? next[1] : null;
+  }
+
+  console.log(`[ads-assets] Fetched ${orderCount} orders (last ${days} days) for velocity scoring`);
+  return salesMap;
+}
+
+/**
+ * Calculate total tracked stock for a Shopify product object.
+ * Excludes variants where inventory_management !== 'shopify' (untracked).
+ */
+function calcStock(product) {
+  return (product.variants || []).reduce((sum, v) => {
+    if (v.inventory_management !== 'shopify') return sum;
+    return sum + Math.max(0, parseInt(v.inventory_quantity, 10) || 0);
+  }, 0);
+}
+
+/**
+ * Score, filter, and rank products. Returns top N with _stock, _sales, _score attached.
+ *
+ * Formula: (units_sold_45d × 3) + min(stock, 100)
+ * This rewards products that are both selling well AND have plenty of stock.
+ * Products with fewer than MIN_STOCK units are excluded.
+ */
+function selectTopProducts(products, salesMap) {
+  const scored = products.map(p => {
+    const stock = calcStock(p);
+    const sales = salesMap[String(p.id)] || 0;
+    const score = (sales * 3) + Math.min(stock, 100);
+    return { ...p, _stock: stock, _sales: sales, _score: score };
+  });
+
+  const eligible = scored.filter(p => p._stock >= MIN_STOCK);
+  const top      = eligible.sort((a, b) => b._score - a._score).slice(0, TOP_N);
+
+  // Log the selection so it's visible in Railway logs
+  console.log(`[ads-assets] ${products.length} products in collection, ${eligible.length} with ≥${MIN_STOCK} stock`);
+  for (const p of top) {
+    console.log(`[ads-assets]   → ${p.title} | stock: ${p._stock} | sales: ${p._sales} | score: ${p._score}`);
+  }
+
+  return top;
+}
+
+/**
+ * From a product's images array (which includes width/height from Shopify API),
+ * select the best portrait and best landscape image.
+ *
+ * Portrait:  height >= width  (tallest aspect ratio, highest resolution wins)
+ * Landscape: width  >  height (widest aspect ratio, highest resolution wins)
+ *
+ * Returns { portrait: imageObj|null, landscape: imageObj|null }
+ */
+function selectBestImages(product) {
+  const byResDesc = (a, b) => (b.width * b.height) - (a.width * a.height);
+
+  // Only consider images with valid dimensions from the API
+  const withDims = (product.images || []).filter(
+    img => img.src && img.width > 0 && img.height > 0
+  );
+
+  const portraits  = withDims.filter(img => img.height >= img.width).sort(byResDesc);
+  const landscapes = withDims.filter(img => img.width  >  img.height).sort(byResDesc);
+
+  return {
+    portrait:  portraits[0]  || null,
+    landscape: landscapes[0] || null,
+  };
+}
+
+// ── Image download + validation (no external libraries) ───────────
+// Uses magic bytes to confirm format and parse dimensions.
 
 function parseImageInfo(buf) {
-  // PNG: 89 50 4E 47 0D 0A 1A 0A — IHDR chunk starts at byte 8 (width @ 16, height @ 20)
+  // PNG: 89 50 4E 47 — IHDR chunk at byte 8, width @ 16, height @ 20
   if (buf.length >= 24 &&
       buf[0] === 0x89 && buf[1] === 0x50 &&
       buf[2] === 0x4E && buf[3] === 0x47) {
-    return {
-      mime:   'image/png',
-      width:  buf.readUInt32BE(16),
-      height: buf.readUInt32BE(20),
-    };
+    return { mime: 'image/png', width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
   }
 
   // JPEG: FF D8 — scan for SOF0/SOF1/SOF2 marker (C0/C1/C2)
@@ -115,38 +226,30 @@ function parseImageInfo(buf) {
           width:  buf.readUInt16BE(offset + 7),
         };
       }
-      // SOI / EOI — stop
       if (marker === 0xD8 || marker === 0xD9) break;
       if (offset + 4 > buf.length) break;
       offset += 2 + buf.readUInt16BE(offset + 2);
     }
-    return { mime: 'image/jpeg', width: null, height: null }; // valid JPEG, couldn't parse dims
+    return { mime: 'image/jpeg', width: null, height: null };
   }
 
-  // GIF: 47 49 46 — logical screen descriptor has width @ 6 (LE), height @ 8 (LE)
+  // GIF: 47 49 46 — width @ 6 (LE), height @ 8 (LE)
   if (buf.length >= 10 &&
       buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) {
-    return {
-      mime:   'image/gif',
-      width:  buf.readUInt16LE(6),
-      height: buf.readUInt16LE(8),
-    };
+    return { mime: 'image/gif', width: buf.readUInt16LE(6), height: buf.readUInt16LE(8) };
   }
 
-  return null; // unsupported format
+  return null;
 }
 
 async function fetchAndValidateImage(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`Fetch failed (${r.status}): ${url}`);
+  const r = await fetch(url.split('?')[0]); // strip Shopify CDN query params
+  if (!r.ok) throw new Error(`Fetch failed (${r.status})`);
 
-  // node-fetch v2 exposes .buffer() directly — returns a Buffer
-  const buffer = await r.buffer();
+  const buffer = await r.buffer(); // node-fetch v2 native Buffer
 
   if (buffer.length > MAX_BYTES) {
-    throw new Error(
-      `Too large: ${(buffer.length / 1024 / 1024).toFixed(1)} MB (max 5 MB)`
-    );
+    throw new Error(`Too large: ${(buffer.length / 1024 / 1024).toFixed(1)} MB (max 5 MB)`);
   }
 
   const info = parseImageInfo(buffer);
@@ -240,16 +343,14 @@ async function uploadImageAsset(accessToken, assetName, buffer) {
 
   const rawText = await res.text();
   let data;
-  try {
-    data = JSON.parse(rawText);
-  } catch {
+  try { data = JSON.parse(rawText); }
+  catch {
     throw new Error(
       `Google Ads Asset API non-JSON (${res.status}): ${rawText.slice(0, 200)}`
     );
   }
 
   if (!res.ok) {
-    // Dig out a useful error message from the nested Google Ads error structure
     const msg = data.error?.message
       || data.error?.details?.[0]?.errors?.[0]?.message
       || JSON.stringify(data).slice(0, 300);
@@ -271,7 +372,7 @@ async function runSync() {
     throw new Error('SHOPIFY_SHOP or SHOPIFY_ACCESS_TOKEN not configured');
   }
   if (!await isConfigured()) {
-    throw new Error('Google Ads not configured — connect Google Ads via Syncing page first');
+    throw new Error('Google Ads not configured — connect Google Ads via the Syncing page first');
   }
 
   isRunning = true;
@@ -279,87 +380,169 @@ async function runSync() {
   let uploaded = 0, skipped = 0, failed = 0;
 
   try {
-    // 1. Find the 'new-arrivals' collection
+    // ── 1. Find the collection ─────────────────────────────────────
     console.log('[ads-assets] Finding new-arrivals collection…');
     const collectionId = await findCollectionId('new-arrivals');
     if (!collectionId) {
-      throw new Error("Shopify collection 'new-arrivals' not found — check the handle in Shopify");
+      throw new Error(
+        "Shopify collection 'new-arrivals' not found — check the handle in Shopify admin"
+      );
     }
     console.log(`[ads-assets] Collection ID: ${collectionId}`);
 
-    // 2. Fetch all product images in the collection
-    const images = await fetchCollectionImages(collectionId);
-    console.log(`[ads-assets] ${images.length} total images in collection`);
+    // ── 2. Fetch products (with variants for stock, images for orientation) ──
+    console.log('[ads-assets] Fetching collection products…');
+    const products = await fetchCollectionProducts(collectionId);
+    console.log(`[ads-assets] ${products.length} products in collection`);
 
-    if (images.length === 0) {
-      lastStatus = { lastRun: startedAt, uploaded, skipped, failed, error: null };
-      return { uploaded, skipped, failed };
+    if (products.length === 0) {
+      lastStatus = {
+        lastRun: startedAt, uploaded, skipped, failed,
+        productsSelected: 0, selectedProductTitles: [], error: null,
+      };
+      return { uploaded, skipped, failed, productsSelected: 0 };
     }
 
-    // 3. Find which image IDs are already in our DB
+    // ── 3. Fetch recent sales for velocity scoring ─────────────────
+    console.log(`[ads-assets] Fetching orders (last ${VELOCITY_DAYS} days)…`);
+    const salesMap = await fetchRecentSalesByProduct(VELOCITY_DAYS);
+
+    // ── 4. Score + rank → top 10 ───────────────────────────────────
+    const topProducts = selectTopProducts(products, salesMap);
+
+    if (topProducts.length === 0) {
+      throw new Error(
+        `No eligible products found — all products had fewer than ${MIN_STOCK} units of tracked stock`
+      );
+    }
+
+    // ── 5. Build target image list (max 20: best portrait + landscape per product) ──
+    const targetImages = []; // { imageId, productId, productTitle, imageUrl, role }
+
+    for (const p of topProducts) {
+      const { portrait, landscape } = selectBestImages(p);
+
+      if (portrait) {
+        targetImages.push({
+          imageId:      String(portrait.id),
+          productId:    String(p.id),
+          productTitle: p.title,
+          imageUrl:     portrait.src,
+          role:         'portrait',
+          apiWidth:     portrait.width,
+          apiHeight:    portrait.height,
+        });
+      } else {
+        console.log(`[ads-assets] No portrait image for: ${p.title}`);
+      }
+
+      if (landscape) {
+        targetImages.push({
+          imageId:      String(landscape.id),
+          productId:    String(p.id),
+          productTitle: p.title,
+          imageUrl:     landscape.src,
+          role:         'landscape',
+          apiWidth:     landscape.width,
+          apiHeight:    landscape.height,
+        });
+      } else {
+        console.log(`[ads-assets] No landscape image for: ${p.title}`);
+      }
+    }
+
+    console.log(
+      `[ads-assets] ${targetImages.length} target images across ${topProducts.length} products ` +
+      `(${targetImages.filter(i => i.role === 'portrait').length} portrait, ` +
+      `${targetImages.filter(i => i.role === 'landscape').length} landscape)`
+    );
+
+    // ── 6. Check which are already uploaded ────────────────────────
     const { rows: existing } = await pool.query(
       'SELECT shopify_image_id FROM google_ads_assets'
     );
     const uploadedSet = new Set(existing.map(r => r.shopify_image_id));
 
-    const toUpload = images.filter(img => !uploadedSet.has(img.imageId));
-    skipped = images.length - toUpload.length;
-    console.log(
-      `[ads-assets] ${toUpload.length} new to upload, ${skipped} already synced`
-    );
+    const toUpload = targetImages.filter(img => !uploadedSet.has(img.imageId));
+    skipped = targetImages.length - toUpload.length;
+    console.log(`[ads-assets] ${toUpload.length} new images to upload, ${skipped} already synced`);
 
     if (toUpload.length === 0) {
-      lastStatus = { lastRun: startedAt, uploaded, skipped, failed, error: null };
-      return { uploaded, skipped, failed };
+      lastStatus = {
+        lastRun: startedAt, uploaded, skipped, failed,
+        productsSelected: topProducts.length,
+        selectedProductTitles: topProducts.map(p => p.title),
+        error: null,
+      };
+      return { uploaded, skipped, failed, productsSelected: topProducts.length };
     }
 
-    // 4. Get access token once for the whole batch
+    // ── 7. Get access token once for the whole batch ───────────────
     const accessToken = await getAccessToken();
 
-    // 5. Download, validate, upload each new image
+    // ── 8. Download, validate, upload each new image ───────────────
     for (const img of toUpload) {
       try {
-        // Download image and validate dimensions + size + format
         const { buffer } = await fetchAndValidateImage(img.imageUrl);
 
-        // Build a clean asset name (max 255 chars)
-        const safeName  = img.productTitle.replace(/[^\w\s\-]/g, '').trim().slice(0, 180);
-        const assetName = `${safeName} [${img.imageId}]`;
+        // e.g. "Product Title – portrait [imageId]"
+        const safeName  = img.productTitle.replace(/[^\w\s\-]/g, '').trim().slice(0, 160);
+        const assetName = `${safeName} – ${img.role} [${img.imageId}]`;
 
-        // Upload to Google Ads Asset Library
         const resourceName = await uploadImageAsset(accessToken, assetName, buffer);
 
-        // Record in DB
         await pool.query(`
           INSERT INTO google_ads_assets
-            (shopify_image_id, product_id, product_title, image_url, asset_name, resource_name)
-          VALUES ($1, $2, $3, $4, $5, $6)
+            (shopify_image_id, product_id, product_title, image_url, asset_name, resource_name, image_role)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
           ON CONFLICT (shopify_image_id) DO UPDATE SET
             product_title  = EXCLUDED.product_title,
             image_url      = EXCLUDED.image_url,
             asset_name     = EXCLUDED.asset_name,
             resource_name  = EXCLUDED.resource_name,
+            image_role     = EXCLUDED.image_role,
             synced_at      = NOW()
-        `, [img.imageId, img.productId, img.productTitle, img.imageUrl, assetName, resourceName]);
+        `, [
+          img.imageId, img.productId, img.productTitle,
+          img.imageUrl, assetName, resourceName, img.role,
+        ]);
 
         uploaded++;
         console.log(`[ads-assets] ✓ ${assetName}`);
       } catch (err) {
         failed++;
-        console.warn(`[ads-assets] ✗ ${img.imageId} (${img.productTitle}): ${err.message}`);
+        console.warn(
+          `[ads-assets] ✗ ${img.role} for ${img.productTitle} ` +
+          `(image ${img.imageId}): ${err.message}`
+        );
       }
 
-      // Small throttle between uploads
-      await sleep(300);
+      await sleep(300); // throttle between uploads
     }
 
-    const result = { uploaded, skipped, failed };
-    lastStatus = { lastRun: startedAt, ...result, error: null };
-    console.log(`[ads-assets] Done — uploaded: ${uploaded}, skipped: ${skipped}, failed: ${failed}`);
+    const result = {
+      uploaded,
+      skipped,
+      failed,
+      productsSelected: topProducts.length,
+    };
+    lastStatus = {
+      lastRun: startedAt,
+      ...result,
+      selectedProductTitles: topProducts.map(p => p.title),
+      error: null,
+    };
+    console.log(
+      `[ads-assets] Done — uploaded: ${uploaded}, skipped: ${skipped}, failed: ${failed}, ` +
+      `products: ${topProducts.length}`
+    );
     return result;
 
   } catch (err) {
-    lastStatus = { lastRun: startedAt, uploaded, skipped, failed, error: err.message };
+    lastStatus = {
+      lastRun: startedAt, uploaded, skipped, failed,
+      productsSelected: 0, selectedProductTitles: [], error: err.message,
+    };
     console.error('[ads-assets] Sync error:', err.message);
     throw err;
   } finally {

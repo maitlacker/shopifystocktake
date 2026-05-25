@@ -2104,9 +2104,10 @@ app.get('/api/ads-assets/list', async (req, res) => {
         image_url         AS "imageUrl",
         asset_name        AS "assetName",
         resource_name     AS "resourceName",
+        image_role        AS "imageRole",
         synced_at         AS "syncedAt"
       FROM google_ads_assets
-      ORDER BY synced_at DESC
+      ORDER BY product_title ASC, image_role ASC, synced_at DESC
       LIMIT 200
     `);
     res.json(rows);

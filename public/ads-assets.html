@@ -148,6 +148,50 @@
       color: #cbd5e1;
     }
 
+    /* ── Role pill ── */
+    .role-pill {
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 2px 8px;
+      border-radius: 10px;
+      white-space: nowrap;
+    }
+    .role-portrait  { background: #ede9fe; color: #6d28d9; }
+    .role-landscape { background: #dbeafe; color: #1d4ed8; }
+
+    /* ── Selected products panel ── */
+    .aa-products-panel {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 14px 18px;
+      margin-bottom: 22px;
+    }
+    .aa-products-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 10px;
+    }
+    .aa-product-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+    .aa-product-chip {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #334155;
+    }
+
     .aa-resource {
       font-family: monospace;
       font-size: 0.75rem;
@@ -206,6 +250,12 @@
           <div class="aa-stat-lbl">Failed</div>
         </div>
       </div>
+    </div>
+
+    <!-- Selected products panel (shown after a sync has run) -->
+    <div class="aa-products-panel" id="productsPanel" style="display:none;">
+      <div class="aa-products-title">🏆 Top <span id="productCount">0</span> selected products (by sales velocity + stock)</div>
+      <div class="aa-product-list" id="productList"></div>
     </div>
 
     <!-- Assets table -->

@@ -524,8 +524,11 @@ async function initDb() {
       image_url         TEXT,
       asset_name        TEXT,
       resource_name     TEXT,
+      image_role        TEXT,
       synced_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    -- Migration guard: add image_role if table already exists without it
+    ALTER TABLE google_ads_assets ADD COLUMN IF NOT EXISTS image_role TEXT;
     CREATE INDEX IF NOT EXISTS idx_google_ads_assets_product
       ON google_ads_assets(product_id);
     CREATE INDEX IF NOT EXISTS idx_google_ads_assets_synced
