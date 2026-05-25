@@ -8,6 +8,40 @@ let pollTimer = null;
   await loadAssets();
 })();
 
+// ── Clear DB + resync ─────────────────────────────────────────────
+async function clearAndResync() {
+  if (!confirm(
+    'This will clear all DB records and re-upload the 20 target images on the next sync.\n\n' +
+    'Make sure you have already archived the old assets in the Google Ads Asset Library first.\n\n' +
+    'Continue?'
+  )) return;
+
+  const btn   = document.getElementById('clearBtn');
+  const sBtn  = document.getElementById('syncBtn');
+  btn.disabled  = true;
+  sBtn.disabled = true;
+  btn.textContent = 'Clearing…';
+
+  try {
+    const r = await fetch('/api/ads-assets/clear-db', { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+
+    btn.textContent = `Cleared ${d.cleared} records — starting sync…`;
+
+    // Reload the (now empty) table immediately
+    await loadAssets();
+
+    // Then kick off a fresh sync automatically
+    await triggerSync();
+  } catch (err) {
+    alert('Error: ' + err.message);
+    btn.disabled  = false;
+    sBtn.disabled = false;
+    btn.textContent = '🗑 Clear DB & Resync';
+  }
+}
+
 // ── Trigger manual sync ───────────────────────────────────────────
 async function triggerSync() {
   const btn = document.getElementById('syncBtn');
@@ -37,8 +71,10 @@ function startPolling() {
     if (status && !status.isRunning) {
       stopPolling();
       await loadAssets(); // reload table once sync completes
-      document.getElementById('syncBtn').disabled = false;
+      document.getElementById('syncBtn').disabled  = false;
       document.getElementById('syncBtn').textContent = 'Run Sync Now';
+      document.getElementById('clearBtn').disabled = false;
+      document.getElementById('clearBtn').textContent = '🗑 Clear DB & Resync';
     }
   }, 2000);
 }

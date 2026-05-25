@@ -2116,6 +2116,17 @@ app.get('/api/ads-assets/list', async (req, res) => {
   }
 });
 
+// Clear all DB records so the next sync re-uploads the correct 20 images.
+// Does NOT touch Google Ads — archive old assets there manually first.
+app.post('/api/ads-assets/clear-db', async (req, res) => {
+  try {
+    const { rowCount } = await pool.query('DELETE FROM google_ads_assets');
+    res.json({ ok: true, cleared: rowCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Meta Ads OAuth & API ───────────────────────────────────────────
 
 app.get('/auth/meta/connect', requireAuth, (req, res) => {

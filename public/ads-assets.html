@@ -222,9 +222,14 @@
           Syncs product images from the Shopify <strong>new-arrivals</strong> collection into the Google Ads Asset Library
         </p>
       </div>
-      <button id="syncBtn" class="btn btn-primary" onclick="triggerSync()" style="touch-action:manipulation;">
-        Run Sync Now
-      </button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+        <button id="syncBtn" class="btn btn-primary" onclick="triggerSync()" style="touch-action:manipulation;">
+          Run Sync Now
+        </button>
+        <button id="clearBtn" class="btn btn-secondary" onclick="clearAndResync()" style="touch-action:manipulation;">
+          🗑 Clear DB &amp; Resync
+        </button>
+      </div>
     </div>
 
     <!-- Status card -->
