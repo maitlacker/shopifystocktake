@@ -452,7 +452,19 @@ async function runSync() {
     // ── 2. Fetch products (with variants for stock, images for orientation) ──
     console.log('[ads-assets] Fetching collection products…');
     const products = await fetchCollectionProducts(collectionId);
-    console.log(`[ads-assets] ${products.length} products in collection`);
+    // Filter to active/published products only — draft and archived slip through otherwise
+    const allCount    = products.length;
+    const activeProducts = products.filter(p => (p.status || '').toLowerCase() === 'active');
+    if (allCount !== activeProducts.length) {
+      console.log(
+        `[ads-assets] Filtered out ${allCount - activeProducts.length} draft/archived products: ` +
+        products.filter(p => (p.status || '').toLowerCase() !== 'active').map(p => p.title).join(', ')
+      );
+    }
+    // Reassign so everything below uses only active products
+    products.splice(0, products.length, ...activeProducts);
+
+    console.log(`[ads-assets] ${products.length} active products in collection`);
 
     // Diagnostic: log first product's stock so we can confirm variants are returning correctly
     if (products.length > 0) {
