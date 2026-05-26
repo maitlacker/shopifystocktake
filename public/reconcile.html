@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sales Reconciliation – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    /* ── Controls bar ── */
+    .rec-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 24px;
+    }
+    .rec-month-input {
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 0.92rem;
+      color: #1e293b;
+      background: #fff;
+      cursor: pointer;
+    }
+    .rec-month-input:focus {
+      outline: none;
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+    }
+
+    /* ── Section headings ── */
+    .rec-section {
+      margin-bottom: 24px;
+    }
+    .rec-section-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: #64748b;
+      margin-bottom: 12px;
+    }
+
+    /* ── Stat grid ── */
+    .rec-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+      gap: 12px;
+    }
+    .rec-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px 18px;
+    }
+    .rec-card-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #94a3b8;
+      margin-bottom: 6px;
+    }
+    .rec-card-val {
+      font-size: 1.45rem;
+      font-weight: 800;
+      color: #1e293b;
+      line-height: 1.1;
+    }
+    .rec-card-val.green  { color: #059669; }
+    .rec-card-val.amber  { color: #d97706; }
+    .rec-card-val.red    { color: #dc2626; }
+    .rec-card-sub {
+      font-size: 0.75rem;
+      color: #94a3b8;
+      margin-top: 4px;
+    }
+
+    /* ── Split bar ── */
+    .rec-split-bar {
+      height: 10px;
+      border-radius: 10px;
+      background: #e2e8f0;
+      overflow: hidden;
+      margin: 6px 0;
+    }
+    .rec-split-fill {
+      height: 100%;
+      background: #6366f1;
+      border-radius: 10px;
+      transition: width 0.4s ease;
+    }
+
+    /* ── GST analysis card ── */
+    .rec-gst-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 20px 24px;
+    }
+    .rec-gst-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #f1f5f9;
+      font-size: 0.88rem;
+    }
+    .rec-gst-row:last-child { border-bottom: none; }
+    .rec-gst-label { color: #475569; }
+    .rec-gst-val   { font-weight: 700; color: #1e293b; }
+    .rec-gst-val.green { color: #059669; }
+    .rec-gst-val.red   { color: #dc2626; }
+    .rec-gst-val.amber { color: #d97706; }
+
+    /* ── Variance callout ── */
+    .rec-callout {
+      border-radius: 10px;
+      padding: 14px 18px;
+      margin-top: 14px;
+      font-size: 0.86rem;
+      line-height: 1.5;
+    }
+    .rec-callout.green { background: #f0fdf4; border: 1px solid #bbf7d0; color: #15803d; }
+    .rec-callout.amber { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+    .rec-callout.red   { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+
+    /* ── Xero comparison ── */
+    .rec-compare-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 20px 24px;
+    }
+    .rec-compare-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 9px 0;
+      border-bottom: 1px solid #f1f5f9;
+      font-size: 0.9rem;
+    }
+    .rec-compare-row:last-child { border-bottom: none; }
+    .rec-compare-label { color: #475569; font-weight: 500; }
+    .rec-compare-val   { font-weight: 700; color: #1e293b; }
+    .rec-compare-val.green { color: #059669; }
+    .rec-compare-val.red   { color: #dc2626; }
+    .rec-compare-divider {
+      border: none;
+      border-top: 2px solid #e2e8f0;
+      margin: 4px 0;
+    }
+
+    /* ── Zero-tax table ── */
+    .rec-table-wrap {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      overflow: hidden;
+      overflow-x: auto;
+    }
+    .rec-table-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      border-bottom: 1px solid #e2e8f0;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .rec-table-title {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: #1e293b;
+    }
+    .rec-badge {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 3px 10px;
+      border-radius: 20px;
+    }
+    .rec-badge.red   { background: #fee2e2; color: #b91c1c; }
+    .rec-badge.green { background: #dcfce7; color: #15803d; }
+    .rec-badge.amber { background: #fef9c3; color: #854d0e; }
+    table.rec-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.86rem;
+      min-width: 500px;
+    }
+    .rec-table thead tr { background: #f8fafc; }
+    .rec-table th {
+      padding: 10px 16px;
+      text-align: left;
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid #e2e8f0;
+      white-space: nowrap;
+    }
+    .rec-table td {
+      padding: 10px 16px;
+      border-bottom: 1px solid #f1f5f9;
+      color: #334155;
+      vertical-align: middle;
+    }
+    .rec-table tr:last-child td { border-bottom: none; }
+    .rec-table tr:hover td      { background: #fafafe; }
+
+    .rec-pill {
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 2px 7px;
+      border-radius: 8px;
+      white-space: nowrap;
+    }
+    .rec-pill.tax-inc { background: #ede9fe; color: #6d28d9; }
+    .rec-pill.tax-exc { background: #fee2e2; color: #b91c1c; }
+
+    /* ── Empty / loading states ── */
+    .rec-empty {
+      text-align: center;
+      padding: 50px 24px;
+      color: #94a3b8;
+    }
+    .rec-empty-icon  { font-size: 2.5rem; margin-bottom: 10px; }
+    .rec-empty-title { font-size: 1rem; font-weight: 700; color: #cbd5e1; margin-bottom: 6px; }
+    .rec-empty-sub   { font-size: 0.84rem; max-width: 360px; margin: 0 auto; line-height: 1.5; }
+
+    .rec-loading {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #64748b;
+      font-size: 0.9rem;
+      padding: 32px 0;
+    }
+    .rec-spinner {
+      width: 20px;
+      height: 20px;
+      border: 3px solid #e2e8f0;
+      border-top-color: #6366f1;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .rec-note {
+      font-size: 0.78rem;
+      color: #94a3b8;
+      margin-top: 6px;
+      font-style: italic;
+    }
+
+    /* ── Status overview chips ── */
+    .rec-status-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .rec-status-chip {
+      background: #f1f5f9;
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #475569;
+    }
+
+    /* ── Xero income lines ── */
+    .rec-income-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.84rem;
+      margin-top: 12px;
+    }
+    .rec-income-table td {
+      padding: 6px 0;
+      color: #475569;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .rec-income-table td:last-child {
+      text-align: right;
+      font-weight: 600;
+      color: #1e293b;
+    }
+    .rec-income-table tr:last-child td { border-bottom: none; }
+  </style>
+</head>
+<body>
+  <header></header>
+
+  <main class="container" style="padding-top: 24px; padding-bottom: 60px;">
+
+    <!-- Page header -->
+    <div style="margin-bottom: 20px;">
+      <h1 style="font-size:1.4rem; margin:0;">Sales Reconciliation</h1>
+      <p style="color:#64748b; font-size:0.88rem; margin:4px 0 0;">
+        Compare Shopify and Xero revenue for a given month — surface GST discrepancies and zero-tax orders
+      </p>
+    </div>
+
+    <!-- Controls -->
+    <div class="rec-controls">
+      <input type="month" id="monthPicker" class="rec-month-input" />
+      <button class="btn btn-primary" onclick="runAnalysis()" id="analyseBtn">
+        Analyse Month
+      </button>
+    </div>
+
+    <!-- Results area -->
+    <div id="resultsArea">
+      <div class="rec-empty">
+        <div class="rec-empty-icon">📊</div>
+        <div class="rec-empty-title">Select a month and click Analyse</div>
+        <div class="rec-empty-sub">
+          Fetches all Shopify orders for the period and compares revenue and GST against Xero.
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script src="reconcile.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

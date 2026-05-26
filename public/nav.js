@@ -27,6 +27,7 @@
         { label: 'Shopify Daily Report',  href: '/shopify-report.html' },
         { label: 'Google Ads',            href: '/google-ads.html' },
         { label: 'Ads Asset Sync',        href: '/ads-assets.html' },
+        { label: 'Sales Reconciliation', href: '/reconcile.html' },
         { label: 'Picking Performance',   href: '/picking-report.html' },
       ],
     },

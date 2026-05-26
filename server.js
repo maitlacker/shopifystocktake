@@ -3722,6 +3722,194 @@ Respond ONLY with a JSON object (no markdown fences, no explanation) with exactl
   }
 });
 
+// ── Sales Reconciliation ──────────────────────────────────────────
+
+// GET /api/reconcile/analyse?month=YYYY-MM
+// Fetches all Shopify orders for the month and compares with Xero P&L data.
+// Returns GST breakdown, domestic vs international split, and zero-tax domestic orders.
+app.get('/api/reconcile/analyse', requireAuth, async (req, res) => {
+  const { month } = req.query;
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ error: 'month must be YYYY-MM' });
+  }
+
+  try {
+    const [year, mon] = month.split('-').map(Number);
+    const lastDay = new Date(year, mon, 0).getDate();
+
+    // AEST (UTC+10) month boundaries — close enough for monthly reconciliation
+    const createdAtMin = `${month}-01T00:00:00+10:00`;
+    const createdAtMax = `${month}-${String(lastDay).padStart(2, '0')}T23:59:59+10:00`;
+
+    // ── 1. Paginate all Shopify orders for the month ──────────────
+    const allOrders = [];
+    let ordUrl =
+      `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json` +
+      `?status=any` +
+      `&created_at_min=${encodeURIComponent(createdAtMin)}` +
+      `&created_at_max=${encodeURIComponent(createdAtMax)}` +
+      `&limit=250` +
+      `&fields=id,name,created_at,financial_status,cancelled_at,` +
+      `total_price,subtotal_price,total_tax,taxes_included,` +
+      `total_shipping_price_set,shipping_address,billing_address,` +
+      `tax_lines,customer`;
+
+    while (ordUrl) {
+      const r = await fetch(ordUrl, { headers: shopifyHeaders() });
+      if (!r.ok) {
+        const body = await r.text();
+        throw new Error(`Shopify orders API ${r.status}: ${body.slice(0, 200)}`);
+      }
+      const data = await r.json();
+      allOrders.push(...(data.orders || []));
+      const link = r.headers.get('link') || '';
+      const next = link.match(/<([^>]+)>;\s*rel="next"/);
+      ordUrl = next ? next[1] : null;
+    }
+
+    // ── 2. Filter to revenue orders (paid / partially_refunded, not cancelled) ──
+    const revenueOrders = allOrders.filter(o =>
+      (o.financial_status === 'paid' || o.financial_status === 'partially_refunded') &&
+      !o.cancelled_at
+    );
+
+    // Status breakdown for info
+    const byStatus = {};
+    for (const o of allOrders) {
+      const k = o.cancelled_at ? 'cancelled' : (o.financial_status || 'unknown');
+      byStatus[k] = (byStatus[k] || 0) + 1;
+    }
+
+    // ── 3. Analyse ────────────────────────────────────────────────
+    function getCC(order) {
+      const addr = order.shipping_address || order.billing_address;
+      return addr && addr.country_code ? addr.country_code.toUpperCase() : 'AU';
+    }
+    function r2(n) { return Math.round((n || 0) * 100) / 100; }
+
+    let grossRevenue = 0, totalTaxCollected = 0, totalShipping = 0;
+    let domesticRevenue = 0, internationalRevenue = 0;
+    let domesticCount = 0, internationalCount = 0;
+    const zeroTaxDomestic = [];
+
+    for (const o of revenueOrders) {
+      const price  = parseFloat(o.total_price) || 0;
+      const tax    = parseFloat(o.total_tax)   || 0;
+      const ship   = parseFloat(
+        o.total_shipping_price_set &&
+        o.total_shipping_price_set.shop_money &&
+        o.total_shipping_price_set.shop_money.amount
+      ) || 0;
+      const cc       = getCC(o);
+      const domestic = cc === 'AU';
+
+      grossRevenue      += price;
+      totalTaxCollected += tax;
+      totalShipping     += ship;
+
+      if (domestic) {
+        domesticRevenue += price;
+        domesticCount++;
+        // Zero-tax domestic orders are the key diagnostic
+        if (tax < 0.01) {
+          const addr = o.shipping_address || o.billing_address || {};
+          const cust = o.customer || {};
+          zeroTaxDomestic.push({
+            name:         o.name,
+            createdAt:    o.created_at,
+            totalPrice:   r2(price),
+            customer:    `${cust.first_name || ''} ${cust.last_name || ''}`.trim() || '—',
+            taxesIncluded: !!o.taxes_included,
+            taxLines:     (o.tax_lines || []).length,
+          });
+        }
+      } else {
+        internationalRevenue += price;
+        internationalCount++;
+      }
+    }
+
+    const netRevenue        = grossRevenue - totalTaxCollected;
+    const expectedGST       = domesticRevenue / 11;     // 10% GST inclusive
+    const gstVariance       = totalTaxCollected - expectedGST;
+    const zeroTaxRevenue    = zeroTaxDomestic.reduce((s, o) => s + o.totalPrice, 0);
+    const impliedMissingGST = zeroTaxRevenue / 11;
+
+    // ── 4. Xero data for comparison ───────────────────────────────
+    let xeroRevenue = null, xeroAvailable = false;
+    let xeroIncomeLines = [];
+
+    try {
+      const { rows: xfRows } = await pool.query(`
+        SELECT revenue
+        FROM xero_financials
+        WHERE report_type = 'ProfitAndLoss'
+          AND to_char(period_start, 'YYYY-MM') = $1
+        LIMIT 1
+      `, [month]);
+      if (xfRows.length) {
+        xeroRevenue   = parseFloat(xfRows[0].revenue);
+        xeroAvailable = true;
+      }
+    } catch (e) {
+      console.warn('[reconcile] xero_financials query error:', e.message);
+    }
+
+    try {
+      const { rows: xlRows } = await pool.query(`
+        SELECT account_name, value, section
+        FROM xero_pl_lines
+        WHERE to_char(period_start, 'YYYY-MM') = $1
+          AND LOWER(section) LIKE '%income%'
+        ORDER BY value DESC
+      `, [month]);
+      xeroIncomeLines = xlRows.map(r => ({
+        account: r.account_name,
+        value:   parseFloat(r.value),
+        section: r.section,
+      }));
+    } catch (e) { /* ignore — xero_pl_lines may be empty */ }
+
+    // ── 5. Build response ─────────────────────────────────────────
+    res.json({
+      month,
+      ordersTotal:   allOrders.length,
+      revenueOrders: revenueOrders.length,
+      byStatus,
+      shopify: {
+        grossRevenue:           r2(grossRevenue),
+        totalTaxCollected:      r2(totalTaxCollected),
+        totalShipping:          r2(totalShipping),
+        netRevenue:             r2(netRevenue),
+        domesticOrders:         domesticCount,
+        internationalOrders:    internationalCount,
+        domesticRevenue:        r2(domesticRevenue),
+        internationalRevenue:   r2(internationalRevenue),
+        expectedGST:            r2(expectedGST),
+        gstVariance:            r2(gstVariance),
+        zeroTaxDomesticCount:   zeroTaxDomestic.length,
+        zeroTaxDomesticRevenue: r2(zeroTaxRevenue),
+        impliedMissingGST:      r2(impliedMissingGST),
+        zeroTaxOrders:          zeroTaxDomestic.sort((a, b) => b.totalPrice - a.totalPrice),
+      },
+      xero: {
+        revenue:     xeroRevenue !== null ? r2(xeroRevenue) : null,
+        available:   xeroAvailable,
+        incomeLines: xeroIncomeLines,
+      },
+      comparison: (xeroAvailable && xeroRevenue !== null) ? {
+        shopifyNetRevenue: r2(netRevenue),
+        xeroRevenue:       r2(xeroRevenue),
+        difference:        r2(netRevenue - xeroRevenue),
+      } : null,
+    });
+
+  } catch (err) {
+    console.error('[reconcile] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
