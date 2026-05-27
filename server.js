@@ -3910,6 +3910,77 @@ app.get('/api/reconcile/analyse', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/reconcile/taxability-scan
+// Fetches all active products and identifies any variants with taxable:false.
+// These are the root cause of zero-tax domestic orders.
+app.get('/api/reconcile/taxability-scan', requireAuth, async (req, res) => {
+  try {
+    const allProducts = [];
+    let scanUrl =
+      `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products.json` +
+      `?status=active&limit=250&fields=id,title,product_type,variants`;
+
+    while (scanUrl) {
+      const r = await fetch(scanUrl, { headers: shopifyHeaders() });
+      if (!r.ok) {
+        const body = await r.text();
+        throw new Error(`Shopify products API ${r.status}: ${body.slice(0, 200)}`);
+      }
+      const data = await r.json();
+      allProducts.push(...(data.products || []));
+      const link = r.headers.get('link') || '';
+      const next = link.match(/<([^>]+)>;\s*rel="next"/);
+      scanUrl = next ? next[1] : null;
+    }
+
+    let totalVariants = 0;
+    let nonTaxableVariantCount = 0;
+    const nonTaxableProducts = [];
+
+    for (const p of allProducts) {
+      const variants = p.variants || [];
+      totalVariants += variants.length;
+
+      const badVariants = variants.filter(v => v.taxable === false);
+      nonTaxableVariantCount += badVariants.length;
+
+      if (badVariants.length > 0) {
+        nonTaxableProducts.push({
+          id:           String(p.id),
+          title:        p.title,
+          productType:  p.product_type || '',
+          totalVariants: variants.length,
+          affectedCount: badVariants.length,
+          allAffected:   badVariants.length === variants.length,
+          variants:      badVariants.map(v => ({
+            id:     String(v.id),
+            sku:    v.sku || '—',
+            price:  v.price,
+            option1: v.option1 || null,
+            option2: v.option2 || null,
+            option3: v.option3 || null,
+          })),
+        });
+      }
+    }
+
+    // Sort: most affected variants first, then alphabetically
+    nonTaxableProducts.sort((a, b) => b.affectedCount - a.affectedCount || a.title.localeCompare(b.title));
+
+    res.json({
+      scannedProducts:        allProducts.length,
+      scannedVariants:        totalVariants,
+      nonTaxableProductCount: nonTaxableProducts.length,
+      nonTaxableVariantCount,
+      products: nonTaxableProducts,
+    });
+
+  } catch (err) {
+    console.error('[reconcile/taxability-scan] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 

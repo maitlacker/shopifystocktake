@@ -293,6 +293,104 @@
       color: #1e293b;
     }
     .rec-income-table tr:last-child td { border-bottom: none; }
+
+    /* ── Taxability scan panel ── */
+    .rec-scan-panel {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 20px 24px;
+      margin-bottom: 28px;
+    }
+    .rec-scan-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .rec-scan-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1e293b;
+    }
+    .rec-scan-sub {
+      font-size: 0.82rem;
+      color: #64748b;
+      margin-top: 2px;
+    }
+    .rec-scan-stats {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .rec-scan-stat { text-align: center; }
+    .rec-scan-stat-val {
+      font-size: 1.6rem;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .rec-scan-stat-val.ok  { color: #059669; }
+    .rec-scan-stat-val.bad { color: #dc2626; }
+    .rec-scan-stat-lbl {
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #94a3b8;
+      margin-top: 3px;
+    }
+
+    /* ── Product rows in taxability table ── */
+    .rec-prod-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: start;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .rec-prod-row:last-child { border-bottom: none; }
+    .rec-prod-title {
+      font-weight: 600;
+      color: #1e293b;
+      font-size: 0.9rem;
+    }
+    .rec-prod-type {
+      font-size: 0.75rem;
+      color: #94a3b8;
+      margin-top: 2px;
+    }
+    .rec-prod-variants {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 6px;
+    }
+    .rec-sku-chip {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #991b1b;
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 0.74rem;
+      font-weight: 600;
+      font-family: monospace;
+    }
+    .rec-prod-count {
+      font-size: 0.78rem;
+      font-weight: 700;
+      white-space: nowrap;
+      color: #dc2626;
+    }
+    .rec-prod-count.all { color: #7c3aed; }
+    .rec-divider {
+      border: none;
+      border-top: 2px solid #e2e8f0;
+      margin: 20px 0;
+    }
   </style>
 </head>
 <body>
@@ -306,6 +404,35 @@
       <p style="color:#64748b; font-size:0.88rem; margin:4px 0 0;">
         Compare Shopify and Xero revenue for a given month — surface GST discrepancies and zero-tax orders
       </p>
+    </div>
+
+    <!-- ── Product Taxability Scanner ────────────────────────────── -->
+    <div class="rec-scan-panel">
+      <div class="rec-scan-header">
+        <div>
+          <div class="rec-scan-title">🔬 Product Taxability Scanner</div>
+          <div class="rec-scan-sub">
+            Scans all active Shopify products for variants with <strong>Tax = Off</strong> —
+            the root cause of zero-tax domestic orders
+          </div>
+        </div>
+        <button class="btn btn-secondary" onclick="runTaxScan()" id="scanBtn" style="white-space:nowrap;">
+          Scan Products
+        </button>
+      </div>
+      <div id="scanArea">
+        <div style="font-size:0.84rem; color:#94a3b8; font-style:italic;">
+          Click <strong>Scan Products</strong> to check every active product's tax setting.
+        </div>
+      </div>
+    </div>
+
+    <hr class="rec-divider" />
+
+    <!-- ── Monthly Analysis ────────────────────────────────────── -->
+    <div style="margin-bottom:16px;">
+      <div style="font-size:1rem; font-weight:700; color:#1e293b; margin-bottom:4px;">📅 Monthly Revenue Analysis</div>
+      <div style="color:#64748b; font-size:0.84rem;">Compare Shopify and Xero revenue for a specific month</div>
     </div>
 
     <!-- Controls -->

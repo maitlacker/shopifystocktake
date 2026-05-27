@@ -10,6 +10,109 @@
   document.getElementById('monthPicker').value = `${yyyy}-${mm}`;
 })();
 
+// ── Product taxability scan ───────────────────────────────────────
+async function runTaxScan() {
+  const btn = document.getElementById('scanBtn');
+  btn.disabled = true;
+  btn.textContent = 'Scanning…';
+
+  document.getElementById('scanArea').innerHTML = `
+    <div class="rec-loading">
+      <div class="rec-spinner"></div>
+      <span>Scanning all active products for tax settings… this may take 10–20 seconds.</span>
+    </div>`;
+
+  try {
+    const r = await fetch('/api/reconcile/taxability-scan');
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    renderTaxScan(d);
+  } catch (err) {
+    document.getElementById('scanArea').innerHTML = `
+      <div class="rec-callout red"><strong>Error:</strong> ${escHtml(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Re-scan Products';
+  }
+}
+
+function renderTaxScan(d) {
+  const hasIssues = d.nonTaxableProductCount > 0;
+
+  const statsHtml = `
+    <div class="rec-scan-stats">
+      <div class="rec-scan-stat">
+        <div class="rec-scan-stat-val" style="color:#1e293b;">${d.scannedProducts}</div>
+        <div class="rec-scan-stat-lbl">Products scanned</div>
+      </div>
+      <div class="rec-scan-stat">
+        <div class="rec-scan-stat-val" style="color:#1e293b;">${d.scannedVariants}</div>
+        <div class="rec-scan-stat-lbl">Variants checked</div>
+      </div>
+      <div class="rec-scan-stat">
+        <div class="rec-scan-stat-val ${hasIssues ? 'bad' : 'ok'}">${d.nonTaxableProductCount}</div>
+        <div class="rec-scan-stat-lbl">Products with tax off</div>
+      </div>
+      <div class="rec-scan-stat">
+        <div class="rec-scan-stat-val ${hasIssues ? 'bad' : 'ok'}">${d.nonTaxableVariantCount}</div>
+        <div class="rec-scan-stat-lbl">Variants with tax off</div>
+      </div>
+    </div>`;
+
+  if (!hasIssues) {
+    document.getElementById('scanArea').innerHTML = statsHtml + `
+      <div class="rec-callout green">
+        ✅ <strong>All clear.</strong> Every active product variant has tax enabled — no taxability issues found.
+      </div>`;
+    return;
+  }
+
+  const productRowsHtml = d.products.map(p => {
+    const countLabel = p.allAffected
+      ? `All ${p.affectedCount} variants`
+      : `${p.affectedCount} of ${p.totalVariants} variants`;
+    const countClass = p.allAffected ? 'rec-prod-count all' : 'rec-prod-count';
+
+    // Build variant chips — show option labels if available, fall back to SKU
+    const variantChips = p.variants.map(v => {
+      const opts = [v.option1, v.option2, v.option3].filter(Boolean).join(' / ');
+      const label = opts || v.sku;
+      const price = v.price ? ` · $${v.price}` : '';
+      return `<span class="rec-sku-chip" title="SKU: ${escHtml(v.sku)}">${escHtml(label)}${escHtml(price)}</span>`;
+    }).join('');
+
+    const shopifyUrl = `https://${window.location.hostname.includes('localhost') ? 'admin.shopify.com/store' : 'admin.shopify.com/store'}/products/${p.id}`;
+
+    return `<div class="rec-prod-row">
+      <div>
+        <div class="rec-prod-title">
+          <a href="https://admin.shopify.com/store/theselfstyler/products/${escHtml(p.id)}"
+             target="_blank" rel="noopener"
+             style="color:inherit; text-decoration:none;"
+             onmouseover="this.style.textDecoration='underline'"
+             onmouseout="this.style.textDecoration='none'">
+            ${escHtml(p.title)}
+          </a>
+        </div>
+        ${p.productType ? `<div class="rec-prod-type">${escHtml(p.productType)}</div>` : ''}
+        <div class="rec-prod-variants">${variantChips}</div>
+      </div>
+      <div class="${countClass}">${escHtml(countLabel)}</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('scanArea').innerHTML = statsHtml + `
+    <div class="rec-callout red" style="margin-bottom:14px;">
+      ⚠️ <strong>${d.nonTaxableProductCount} product${d.nonTaxableProductCount !== 1 ? 's' : ''} found with tax disabled</strong>
+      on ${d.nonTaxableVariantCount} variant${d.nonTaxableVariantCount !== 1 ? 's' : ''}.
+      These products will never charge GST — even on domestic Australian orders.
+      Fix them in Shopify Admin → Product → scroll down to <strong>Shipping</strong> section → check <strong>"Charge tax on this product"</strong>.
+    </div>
+    <div style="max-height:480px; overflow-y:auto; border:1px solid #f1f5f9; border-radius:10px; padding:0 16px;">
+      ${productRowsHtml}
+    </div>`;
+}
+
 // ── Run analysis ──────────────────────────────────────────────────
 async function runAnalysis() {
   const month = document.getElementById('monthPicker').value;
