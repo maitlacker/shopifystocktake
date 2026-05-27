@@ -918,6 +918,8 @@ app.get('/api/picking/orders', async (req, res) => {
         orderNumbersSeen.add(order.order_number);
 
         for (const item of (order.line_items || [])) {
+          // x-redo is a shipping insurance add-on — not a physical item to pick
+          if ((item.sku || '').toLowerCase() === 'x-redo') continue;
           items.push({
             orderNumber:  order.order_number,
             variantId:    item.variant_id,
