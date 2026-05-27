@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GST Gap Report – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    /* ── Config panel ── */
+    .gg-config {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 20px 24px;
+      margin-bottom: 22px;
+    }
+    .gg-config-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .gg-field label {
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #64748b;
+      margin-bottom: 5px;
+    }
+    .gg-field input[type="date"],
+    .gg-field input[type="text"] {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      color: #1e293b;
+      background: #fff;
+      box-sizing: border-box;
+    }
+    .gg-field input:focus {
+      outline: none;
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+    }
+    .gg-field-note {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      margin-top: 4px;
+    }
+    .gg-checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.86rem;
+      color: #475569;
+      margin-bottom: 16px;
+    }
+    .gg-checkbox-row input[type="checkbox"] {
+      width: 16px; height: 16px;
+      accent-color: #6366f1;
+      cursor: pointer;
+    }
+
+    /* ── Progress ── */
+    .gg-progress-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 24px;
+      margin-bottom: 22px;
+      text-align: center;
+    }
+    .gg-progress-label {
+      font-size: 0.88rem;
+      color: #475569;
+      margin-bottom: 12px;
+    }
+    .gg-progress-bar-wrap {
+      background: #f1f5f9;
+      border-radius: 99px;
+      height: 10px;
+      overflow: hidden;
+      max-width: 480px;
+      margin: 0 auto 12px;
+    }
+    .gg-progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #6366f1, #8b5cf6);
+      border-radius: 99px;
+      transition: width 0.4s ease;
+    }
+    .gg-progress-sub {
+      font-size: 0.78rem;
+      color: #94a3b8;
+    }
+    .gg-spinner {
+      display: inline-block;
+      width: 18px; height: 18px;
+      border: 3px solid #e2e8f0;
+      border-top-color: #6366f1;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Summary cards ── */
+    .gg-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 22px;
+    }
+    .gg-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px 18px;
+    }
+    .gg-card-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #94a3b8;
+      margin-bottom: 5px;
+    }
+    .gg-card-val {
+      font-size: 1.45rem;
+      font-weight: 800;
+      color: #1e293b;
+      line-height: 1.1;
+    }
+    .gg-card-val.red  { color: #dc2626; }
+    .gg-card-val.purple { color: #7c3aed; }
+
+    /* ── Section title ── */
+    .gg-section-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: #64748b;
+      margin: 0 0 10px;
+    }
+
+    /* ── ATO callout ── */
+    .gg-ato-callout {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 22px;
+      font-size: 0.88rem;
+      color: #991b1b;
+      line-height: 1.6;
+    }
+    .gg-ato-amount {
+      font-size: 1.6rem;
+      font-weight: 800;
+      display: block;
+      margin: 4px 0 2px;
+      color: #b91c1c;
+    }
+
+    /* ── Products table ── */
+    .gg-table-wrap {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      overflow: hidden;
+      overflow-x: auto;
+      margin-bottom: 22px;
+    }
+    .gg-table-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      border-bottom: 1px solid #e2e8f0;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .gg-table-title {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: #1e293b;
+    }
+    .gg-badge {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 3px 10px;
+      border-radius: 20px;
+    }
+    .gg-badge.red    { background: #fee2e2; color: #b91c1c; }
+    .gg-badge.purple { background: #ede9fe; color: #6d28d9; }
+    .gg-badge.green  { background: #dcfce7; color: #15803d; }
+
+    table.gg-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.86rem;
+      min-width: 520px;
+    }
+    .gg-table thead tr { background: #f8fafc; }
+    .gg-table th {
+      padding: 10px 16px;
+      text-align: left;
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid #e2e8f0;
+      white-space: nowrap;
+    }
+    .gg-table th.num { text-align: right; }
+    .gg-table td {
+      padding: 10px 16px;
+      border-bottom: 1px solid #f1f5f9;
+      color: #334155;
+      vertical-align: middle;
+    }
+    .gg-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .gg-table tr:last-child td { border-bottom: none; }
+    .gg-table tr:hover td { background: #fafafe; }
+
+    /* Product row with expand toggle */
+    .gg-prod-title {
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .gg-caret {
+      font-size: 0.7rem;
+      color: #94a3b8;
+      transition: transform 0.2s;
+      flex-shrink: 0;
+    }
+    .gg-caret.open { transform: rotate(90deg); }
+    .gg-variant-row td {
+      background: #fafafe;
+      padding-top: 6px;
+      padding-bottom: 6px;
+      font-size: 0.82rem;
+      color: #64748b;
+    }
+    .gg-variant-row td:first-child { padding-left: 38px; }
+    .gg-variant-row.hidden { display: none; }
+    .gg-missing-gst { color: #dc2626; font-weight: 700; }
+
+    /* ── Month table ── */
+    .gg-month-bar-cell { width: 140px; }
+    .gg-month-bar {
+      height: 8px;
+      background: #fee2e2;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .gg-month-bar-fill {
+      height: 100%;
+      background: #dc2626;
+      border-radius: 4px;
+    }
+
+    /* ── Empty / error states ── */
+    .gg-empty {
+      text-align: center;
+      padding: 50px 24px;
+      color: #94a3b8;
+    }
+    .gg-empty-icon  { font-size: 2.5rem; margin-bottom: 10px; }
+    .gg-empty-title { font-size: 1rem; font-weight: 700; color: #cbd5e1; margin-bottom: 6px; }
+    .gg-empty-sub   { font-size: 0.84rem; max-width: 360px; margin: 0 auto; line-height: 1.5; }
+    .gg-error {
+      background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px;
+      padding: 14px 18px; font-size: 0.86rem; color: #991b1b; margin-bottom: 18px;
+    }
+  </style>
+</head>
+<body>
+  <header></header>
+
+  <main class="container" style="padding-top:24px; padding-bottom:60px;">
+
+    <!-- Page header -->
+    <div style="margin-bottom:20px;">
+      <h1 style="font-size:1.4rem; margin:0;">GST Gap Report</h1>
+      <p style="color:#64748b; font-size:0.88rem; margin:4px 0 0;">
+        Finds domestic AU orders with non-taxable line items — surface missing GST across any date range
+      </p>
+    </div>
+
+    <!-- Config -->
+    <div class="gg-config">
+      <div class="gg-config-grid">
+        <div class="gg-field">
+          <label>From date</label>
+          <input type="date" id="fromDate" />
+        </div>
+        <div class="gg-field">
+          <label>To date</label>
+          <input type="date" id="toDate" />
+        </div>
+        <div class="gg-field">
+          <label>Product keywords <span style="font-weight:400; text-transform:none;">(optional)</span></label>
+          <input type="text" id="keywords" placeholder="e.g. Flynn, Noah" />
+          <div class="gg-field-note">Comma-separated. Leave blank to find ALL zero-tax products.</div>
+        </div>
+      </div>
+      <div class="gg-checkbox-row">
+        <input type="checkbox" id="excludeGiftCards" checked />
+        <label for="excludeGiftCards">Exclude gift card / gift voucher line items (they legitimately carry no GST)</label>
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-primary" id="runBtn" onclick="runReport()">Run Report</button>
+        <button class="btn btn-secondary" onclick="setTaxYear()">Set to Current Tax Year</button>
+      </div>
+    </div>
+
+    <!-- Progress (hidden until running) -->
+    <div class="gg-progress-card" id="progressCard" style="display:none;">
+      <div class="gg-progress-label" id="progressLabel">
+        <span class="gg-spinner"></span>Starting…
+      </div>
+      <div class="gg-progress-bar-wrap">
+        <div class="gg-progress-bar-fill" id="progressBar" style="width:0%"></div>
+      </div>
+      <div class="gg-progress-sub" id="progressSub">Fetching orders…</div>
+    </div>
+
+    <!-- Error -->
+    <div class="gg-error" id="errorMsg" style="display:none;"></div>
+
+    <!-- Results (hidden until complete) -->
+    <div id="resultsArea" style="display:none;">
+
+      <!-- ATO callout -->
+      <div class="gg-ato-callout" id="atoCallout"></div>
+
+      <!-- Summary cards -->
+      <div class="gg-summary">
+        <div class="gg-card">
+          <div class="gg-card-label">Affected Orders</div>
+          <div class="gg-card-val" id="rOrders">—</div>
+        </div>
+        <div class="gg-card">
+          <div class="gg-card-label">Units Sold</div>
+          <div class="gg-card-val" id="rUnits">—</div>
+        </div>
+        <div class="gg-card">
+          <div class="gg-card-label">Revenue (no GST)</div>
+          <div class="gg-card-val" id="rRevenue">—</div>
+        </div>
+        <div class="gg-card">
+          <div class="gg-card-label">Total Missing GST</div>
+          <div class="gg-card-val red" id="rMissingGST">—</div>
+        </div>
+      </div>
+
+      <!-- By product -->
+      <p class="gg-section-title">By Product</p>
+      <div class="gg-table-wrap" id="productTableWrap">
+        <div class="gg-table-head">
+          <div class="gg-table-title">Non-Taxable Products</div>
+          <span class="gg-badge red" id="productBadge"></span>
+        </div>
+        <div id="productTableArea"></div>
+      </div>
+
+      <!-- By month -->
+      <p class="gg-section-title">By Month</p>
+      <div class="gg-table-wrap">
+        <div id="monthTableArea"></div>
+      </div>
+
+    </div>
+
+    <!-- Initial empty state -->
+    <div class="gg-empty" id="emptyState">
+      <div class="gg-empty-icon">🧾</div>
+      <div class="gg-empty-title">Configure and run the report</div>
+      <div class="gg-empty-sub">
+        Select a date range, optionally filter by product keywords, then click <strong>Run Report</strong>.
+        Processing is done month by month — a full tax year takes 1–3 minutes.
+      </div>
+    </div>
+
+  </main>
+
+  <script src="gst-gap.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

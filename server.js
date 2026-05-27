@@ -3993,6 +3993,208 @@ app.get('/api/reconcile/taxability-scan', requireAuth, async (req, res) => {
   }
 });
 
+// ── GST Gap Report ────────────────────────────────────────────────
+// Scans a date range month-by-month for domestic AU orders containing
+// non-taxable line items (taxable:false), excluding gift cards.
+// Uses a background-job pattern with polling so the client isn't blocked.
+
+let gstGapState = {
+  isRunning:       false,
+  currentMonth:    null,
+  processedMonths: 0,
+  totalMonths:     0,
+  result:          null,
+  error:           null,
+  startedAt:       null,
+};
+
+// POST /api/gst-gap/run  { from, to, keywords, excludeGiftCards }
+app.post('/api/gst-gap/run', requireAuth, async (req, res) => {
+  if (gstGapState.isRunning) {
+    return res.status(409).json({ error: 'A job is already running — please wait.' });
+  }
+  const { from, to, keywords = '', excludeGiftCards = true } = req.body;
+  if (!from || !/^\d{4}-\d{2}-\d{2}$/.test(from) ||
+      !to   || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    return res.status(400).json({ error: 'from and to must be YYYY-MM-DD' });
+  }
+
+  gstGapState = {
+    isRunning: true, currentMonth: null,
+    processedMonths: 0, totalMonths: 0,
+    result: null, error: null,
+    startedAt: new Date().toISOString(),
+  };
+
+  res.json({ started: true });
+
+  runGstGapAnalysis(from, to, String(keywords), !!excludeGiftCards)
+    .then(result => {
+      gstGapState.isRunning    = false;
+      gstGapState.result       = result;
+      gstGapState.currentMonth = null;
+    })
+    .catch(err => {
+      console.error('[gst-gap] Error:', err.message);
+      gstGapState.isRunning = false;
+      gstGapState.error     = err.message;
+    });
+});
+
+// GET /api/gst-gap/status
+app.get('/api/gst-gap/status', requireAuth, (req, res) => res.json(gstGapState));
+
+async function runGstGapAnalysis(from, to, keywordsStr, excludeGiftCards) {
+  const keywords = keywordsStr
+    .split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+
+  // Build list of YYYY-MM months spanning from → to
+  const months = [];
+  let [cy, cm] = from.split('-').map(Number);
+  const [ty, tm] = to.split('-').map(Number);
+  while (cy < ty || (cy === ty && cm <= tm)) {
+    months.push(`${cy}-${String(cm).padStart(2, '0')}`);
+    if (++cm > 12) { cm = 1; cy++; }
+  }
+  gstGapState.totalMonths = months.length;
+
+  let totalRevenue = 0, totalMissingGST = 0, totalUnits = 0, totalOrders = 0;
+  const byProduct = {};
+  const byMonth   = [];
+
+  function r2(n) { return Math.round((n || 0) * 100) / 100; }
+  const sleep = ms => new Promise(res => setTimeout(res, ms));
+
+  for (const month of months) {
+    gstGapState.currentMonth = month;
+
+    const [year, mon] = month.split('-').map(Number);
+    const lastDay = new Date(year, mon, 0).getDate();
+    const minDate = `${month}-01T00:00:00+10:00`;
+    const maxDate = `${month}-${String(lastDay).padStart(2,'0')}T23:59:59+10:00`;
+
+    // Fetch all orders for this month (status=any, filter in code)
+    const allOrders = [];
+    let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json`
+      + `?status=any`
+      + `&created_at_min=${encodeURIComponent(minDate)}`
+      + `&created_at_max=${encodeURIComponent(maxDate)}`
+      + `&limit=250`;
+
+    while (url) {
+      const r = await fetch(url, { headers: shopifyHeaders() });
+      if (r.status === 429) {
+        await sleep(parseInt(r.headers.get('retry-after') || '2', 10) * 1000);
+        continue;
+      }
+      if (r.status === 503 || r.status === 502) { await sleep(3000); continue; }
+      if (!r.ok) throw new Error(`Shopify orders ${r.status} (${month})`);
+      const data = await r.json();
+      allOrders.push(...(data.orders || []));
+      const link = r.headers.get('link') || '';
+      const next = link.match(/<([^>]+)>;\s*rel="next"/);
+      url = next ? next[1] : null;
+    }
+
+    // Revenue orders only: paid or partially_refunded, not cancelled
+    const revenueOrders = allOrders.filter(o =>
+      (o.financial_status === 'paid' || o.financial_status === 'partially_refunded') &&
+      !o.cancelled_at
+    );
+
+    const monthData = { month, orders: 0, units: 0, revenue: 0, missingGST: 0 };
+
+    for (const o of revenueOrders) {
+      // Domestic AU only
+      const addr = o.shipping_address || o.billing_address;
+      if (addr && (addr.country_code || '').toUpperCase() !== 'AU') continue;
+
+      let orderAffected = false;
+
+      for (const li of (o.line_items || [])) {
+        if (li.taxable !== false) continue;   // only non-taxable items
+
+        // Exclude gift cards
+        if (excludeGiftCards) {
+          if (li.gift_card === true) continue;
+          const titleLow = (li.title || '').toLowerCase();
+          if (titleLow.includes('gift card') || titleLow.includes('gift voucher') ||
+              titleLow.includes('gift certificate')) continue;
+        }
+
+        // Keyword filter — if keywords provided, at least one must match the title
+        if (keywords.length > 0) {
+          const titleLow = (li.title || '').toLowerCase();
+          if (!keywords.some(k => titleLow.includes(k))) continue;
+        }
+
+        const qty        = li.quantity || 1;
+        const lineTotal  = parseFloat(li.price) * qty;
+        const missingGST = lineTotal / 11;
+
+        totalRevenue    += lineTotal;
+        totalMissingGST += missingGST;
+        totalUnits      += qty;
+        monthData.revenue    += lineTotal;
+        monthData.missingGST += missingGST;
+        monthData.units      += qty;
+        orderAffected         = true;
+
+        const pid = String(li.product_id || li.title);
+        if (!byProduct[pid]) {
+          byProduct[pid] = { title: li.title, revenue: 0, missingGST: 0, units: 0, variants: {} };
+        }
+        byProduct[pid].revenue    += lineTotal;
+        byProduct[pid].missingGST += missingGST;
+        byProduct[pid].units      += qty;
+
+        const vk = li.variant_title || 'Default';
+        if (!byProduct[pid].variants[vk]) {
+          byProduct[pid].variants[vk] = { sku: li.sku || '—', units: 0, revenue: 0, missingGST: 0 };
+        }
+        byProduct[pid].variants[vk].units      += qty;
+        byProduct[pid].variants[vk].revenue    += lineTotal;
+        byProduct[pid].variants[vk].missingGST += missingGST;
+      }
+
+      if (orderAffected) { totalOrders++; monthData.orders++; }
+    }
+
+    byMonth.push({
+      month:      monthData.month,
+      orders:     monthData.orders,
+      units:      monthData.units,
+      revenue:    r2(monthData.revenue),
+      missingGST: r2(monthData.missingGST),
+    });
+    gstGapState.processedMonths++;
+  }
+
+  const products = Object.values(byProduct)
+    .sort((a, b) => b.missingGST - a.missingGST)
+    .map(p => ({
+      title:      p.title,
+      units:      p.units,
+      revenue:    r2(p.revenue),
+      missingGST: r2(p.missingGST),
+      variants:   Object.entries(p.variants)
+        .sort((a, b) => b[1].missingGST - a[1].missingGST)
+        .map(([name, v]) => ({
+          name, sku: v.sku, units: v.units,
+          revenue: r2(v.revenue), missingGST: r2(v.missingGST),
+        })),
+    }));
+
+  return {
+    from, to, keywords: keywordsStr, excludeGiftCards,
+    totalOrders, totalUnits,
+    totalRevenue:    r2(totalRevenue),
+    totalMissingGST: r2(totalMissingGST),
+    products,
+    byMonth,
+  };
+}
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
