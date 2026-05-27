@@ -3791,6 +3791,7 @@ app.get('/api/reconcile/analyse', requireAuth, async (req, res) => {
     let domesticRevenue = 0, internationalRevenue = 0;
     let domesticCount = 0, internationalCount = 0;
     const zeroTaxDomestic = [];
+    const internationalOrders = [];
 
     for (const o of revenueOrders) {
       const price  = parseFloat(o.total_price) || 0;
@@ -3826,6 +3827,16 @@ app.get('/api/reconcile/analyse', requireAuth, async (req, res) => {
       } else {
         internationalRevenue += price;
         internationalCount++;
+        const addr2 = o.shipping_address || o.billing_address || {};
+        const cust2 = o.customer || {};
+        internationalOrders.push({
+          name:       o.name,
+          createdAt:  o.created_at,
+          totalPrice: r2(price),
+          customer:  `${cust2.first_name || ''} ${cust2.last_name || ''}`.trim() || '—',
+          country:    addr2.country || addr2.country_code || '—',
+          countryCode: cc,
+        });
       }
     }
 
@@ -3891,6 +3902,7 @@ app.get('/api/reconcile/analyse', requireAuth, async (req, res) => {
         zeroTaxDomesticRevenue: r2(zeroTaxRevenue),
         impliedMissingGST:      r2(impliedMissingGST),
         zeroTaxOrders:          zeroTaxDomestic.sort((a, b) => b.totalPrice - a.totalPrice),
+        internationalOrdersList: internationalOrders.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)),
       },
       xero: {
         revenue:     xeroRevenue !== null ? r2(xeroRevenue) : null,

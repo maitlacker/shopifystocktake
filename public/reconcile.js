@@ -257,6 +257,32 @@ function renderResults(d) {
         }
       </div>
     </div>
+
+    <!-- ── International orders ───────────────────────────────────── -->
+    <div class="rec-section">
+      <div class="rec-table-wrap">
+        <div class="rec-table-head">
+          <div class="rec-table-title">
+            🌍 International Orders
+            <span style="font-size:0.78rem; font-weight:400; color:#64748b; margin-left:6px;">
+              — GST-free orders shipped outside Australia
+            </span>
+          </div>
+          <span class="rec-badge ${s.internationalOrders > 0 ? 'amber' : 'green'}">
+            ${s.internationalOrders > 0
+              ? `${s.internationalOrders} orders · ${fmtCurrency(s.internationalRevenue)}`
+              : 'None this month'}
+          </span>
+        </div>
+        ${!s.internationalOrdersList || s.internationalOrdersList.length === 0
+          ? `<div class="rec-empty" style="padding:40px 24px;">
+               <div class="rec-empty-icon">🌏</div>
+               <div class="rec-empty-title">No international orders this month</div>
+             </div>`
+          : renderInternationalTable(s.internationalOrdersList)
+        }
+      </div>
+    </div>
   `;
 }
 
@@ -379,6 +405,46 @@ function renderZeroTaxTable(orders) {
     </thead>
     <tbody>${rowsHtml}</tbody>
   </table>`;
+}
+
+// ── International orders table ────────────────────────────────────
+function renderInternationalTable(orders) {
+  const rowsHtml = orders.map(o => `
+    <tr>
+      <td style="font-weight:600; white-space:nowrap;">${escHtml(o.name)}</td>
+      <td style="white-space:nowrap; color:#64748b; font-size:0.82rem;">${fmtDateTime(o.createdAt)}</td>
+      <td>${escHtml(o.customer)}</td>
+      <td>
+        <span style="display:inline-flex; align-items:center; gap:5px;">
+          <span style="font-size:1rem;">${flagEmoji(o.countryCode)}</span>
+          <span>${escHtml(o.country)}</span>
+        </span>
+      </td>
+      <td style="font-weight:700; color:#1e293b; text-align:right;">${fmtCurrency(o.totalPrice)}</td>
+    </tr>`).join('');
+
+  return `<table class="rec-table">
+    <thead>
+      <tr>
+        <th>Order</th>
+        <th>Date</th>
+        <th>Customer</th>
+        <th>Country</th>
+        <th style="text-align:right;">Order Total</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>`;
+}
+
+function flagEmoji(countryCode) {
+  if (!countryCode || countryCode.length !== 2) return '🌍';
+  // Convert country code to regional indicator symbols
+  const offset = 0x1F1E6 - 65; // 'A'.charCodeAt(0) = 65
+  const chars = countryCode.toUpperCase().split('').map(c =>
+    String.fromCodePoint(c.charCodeAt(0) + offset)
+  );
+  return chars.join('');
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
