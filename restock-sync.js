@@ -191,28 +191,45 @@ async function runAnalysis() {
     const salesRecent = {};
     const salesOlder  = {};
     const returnsByVariant = {};  // variantId → units physically returned
+    let totalRefundsSeen = 0;
+    let totalReturnLinesSeen = 0;
     for (const order of orders) {
       if (order.cancelled_at) continue;
       const isRecent = new Date(order.created_at) >= recentCutoff;
+
+      // Build a fast line_item_id → variant_id lookup for this order
+      const liVariantMap = {};
       for (const item of (order.line_items || [])) {
         if (!item.variant_id) continue;
         const k = String(item.variant_id);
+        liVariantMap[String(item.id)] = k;
         if (isRecent) salesRecent[k] = (salesRecent[k] || 0) + item.quantity;
         else          salesOlder[k]  = (salesOlder[k]  || 0) + item.quantity;
       }
       // Tally physical returns (restock_type==='return' means item was sent back)
       for (const refund of (order.refunds || [])) {
+        totalRefundsSeen++;
         for (const rli of (refund.refund_line_items || [])) {
+          totalReturnLinesSeen++;
           if (rli.restock_type !== 'return') continue;
+          // Prefer nested line_item.variant_id, fall back to cross-referencing
+          // order.line_items via line_item_id (handles fields-param stripping)
           const vid = String(
             (rli.line_item && rli.line_item.variant_id) ||
-            rli.variant_id || ''
+            rli.variant_id ||
+            liVariantMap[String(rli.line_item_id)] ||
+            ''
           );
           if (!vid || vid === 'null') continue;
           returnsByVariant[vid] = (returnsByVariant[vid] || 0) + (rli.quantity || 0);
         }
       }
     }
+    const totalReturnsFound = Object.values(returnsByVariant).reduce((s, n) => s + n, 0);
+    console.log(`[restock] Returns debug — refunds seen: ${totalRefundsSeen}, ` +
+      `refund_line_items seen: ${totalReturnLinesSeen}, ` +
+      `return-type units tallied: ${totalReturnsFound}, ` +
+      `variants with returns: ${Object.keys(returnsByVariant).length}`);
 
     // 7. Analyse each product
     const analysedProducts = [];
