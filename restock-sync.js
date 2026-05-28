@@ -46,7 +46,7 @@ async function fetchOrdersSince(sinceDate) {
   const orders = [];
   let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json` +
     `?status=any&created_at_min=${sinceDate.toISOString()}` +
-    `&limit=250&fields=id,cancelled_at,created_at,line_items`;
+    `&limit=250&fields=id,cancelled_at,created_at,line_items,refunds`;
   while (url) {
     const r = await fetch(url, { headers: shopifyHeaders() });
     if (!r.ok) throw new Error(`Shopify orders: ${r.status}`);
@@ -190,6 +190,7 @@ async function runAnalysis() {
 
     const salesRecent = {};
     const salesOlder  = {};
+    const returnsByVariant = {};  // variantId → units physically returned
     for (const order of orders) {
       if (order.cancelled_at) continue;
       const isRecent = new Date(order.created_at) >= recentCutoff;
@@ -198,6 +199,18 @@ async function runAnalysis() {
         const k = String(item.variant_id);
         if (isRecent) salesRecent[k] = (salesRecent[k] || 0) + item.quantity;
         else          salesOlder[k]  = (salesOlder[k]  || 0) + item.quantity;
+      }
+      // Tally physical returns (restock_type==='return' means item was sent back)
+      for (const refund of (order.refunds || [])) {
+        for (const rli of (refund.refund_line_items || [])) {
+          if (rli.restock_type !== 'return') continue;
+          const vid = String(
+            (rli.line_item && rli.line_item.variant_id) ||
+            rli.variant_id || ''
+          );
+          if (!vid || vid === 'null') continue;
+          returnsByVariant[vid] = (returnsByVariant[vid] || 0) + (rli.quantity || 0);
+        }
       }
     }
 
@@ -264,6 +277,12 @@ async function runAnalysis() {
         const suggestedSeaQty = Math.max(0, Math.ceil(coverTarget - projAtSea));
         const suggestedAirQty = Math.max(0, Math.ceil(coverTarget - projAtAir));
 
+        const returnedUnits = returnsByVariant[k] || 0;
+        const totalSoldV    = soldRecent + soldOlder;
+        const returnRate    = totalSoldV > 0
+          ? Math.round((returnedUnits / totalSoldV) * 100)
+          : 0;
+
         return {
           id:                    v.id,
           title:                 varTitle || 'Default',
@@ -272,6 +291,8 @@ async function runAnalysis() {
           effectiveStock,
           soldRecent,
           soldOlder,
+          returnedUnits,
+          returnRate,
           isOos,
           recentDailyVel:        Math.round(recentVel  * 1000) / 1000,
           olderDailyVel:         Math.round(olderVel   * 1000) / 1000,
@@ -321,6 +342,11 @@ async function runAnalysis() {
       const seaAlertSent = alertSentSet.has(`${product.id}:sea`);
       const airAlertSent = alertSentSet.has(`${product.id}:air`);
 
+      const totalReturnedUnits = variants.reduce((s, v) => s + v.returnedUnits, 0);
+      const returnRate = totalSold > 0
+        ? Math.round((totalReturnedUnits / totalSold) * 100)
+        : 0;
+
       const analysed = {
         productId:            product.id,
         title:                product.title,
@@ -331,6 +357,8 @@ async function runAnalysis() {
         recentDailyVel:       Math.round(styleRecentVel * 100) / 100,
         olderDailyVel:        Math.round(styleOlderVel  * 100) / 100,
         totalSold,
+        totalReturnedUnits,
+        returnRate,
         minDaysRemaining,
         criticalVariant,
         totalInventory:       variants.reduce((s, v) => s + v.inventory, 0),

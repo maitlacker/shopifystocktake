@@ -288,11 +288,25 @@
     #rs-total-display { font-size: 0.85rem; color: #64748b; text-align: right;
       margin-bottom: 6px; }
 
+    /* Return rate chip */
+    .rs-return {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 10px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .rs-return.high   { background: #fee2e2; color: #b91c1c; }
+    .rs-return.medium { background: #ffedd5; color: #c2410c; }
+    .rs-return.low    { background: #fef9c3; color: #a16207; }
+    .rs-return.none   { color: #94a3b8; font-weight: 400; }
+
     @media (max-width: 900px) {
       .rs-stats { grid-template-columns: repeat(2, 1fr); }
       .rs-settings-grid { grid-template-columns: repeat(2, 1fr); }
-      .rs-table th:nth-child(n+6),
-      .rs-row td:nth-child(n+6) { display: none; }
+      .rs-table th:nth-child(n+7),
+      .rs-row td:nth-child(n+7) { display: none; }
     }
     @media (max-width: 600px) {
       .rs-stats { grid-template-columns: 1fr 1fr; }
@@ -408,9 +422,10 @@
       <table class="rs-table" id="rs-product-table">
         <thead>
           <tr>
-            <th style="width:36%">Style</th>
+            <th style="width:34%">Style</th>
             <th>Rating</th>
             <th>Velocity</th>
+            <th>Returns</th>
             <th>Days Left</th>
             <th>Incoming</th>
             <th>Sea Alert</th>
@@ -419,7 +434,7 @@
           </tr>
         </thead>
         <tbody id="rs-product-body">
-          <tr><td colspan="8" class="rs-empty">No analysis yet — click "Run Analysis" to get started</td></tr>
+          <tr><td colspan="9" class="rs-empty">No analysis yet — click "Run Analysis" to get started</td></tr>
         </tbody>
       </table>
     </div>

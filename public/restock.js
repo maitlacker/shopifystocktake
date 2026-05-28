@@ -200,7 +200,7 @@ function renderProductTable() {
   const tbody = document.getElementById('rs-product-body');
 
   if (!filteredProducts.length) {
-    tbody.innerHTML = `<tr><td colspan="8" class="rs-empty">No products match this filter</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="rs-empty">No products match this filter</td></tr>`;
     return;
   }
 
@@ -248,6 +248,14 @@ function alertBadge(sent, label) {
     : `<span class="rs-alert-badge unsent">${label}</span>`;
 }
 
+function returnRateCell(rate, returnedUnits) {
+  if (returnedUnits === undefined || returnedUnits === 0) {
+    return `<span class="rs-return none">—</span>`;
+  }
+  const cls = rate >= 20 ? 'high' : rate >= 10 ? 'medium' : 'low';
+  return `<span class="rs-return ${cls}" title="${returnedUnits} unit${returnedUnits !== 1 ? 's' : ''} returned">${rate}%</span>`;
+}
+
 function thumb(src) {
   if (!src) return `<span class="rs-thumb-placeholder"></span>`;
   const small = src.replace(/(\.[a-z]+)(\?.*)?$/i, `_40x40_crop_center$1$2`);
@@ -281,6 +289,7 @@ function productRow(p, expanded) {
       <span class="rs-vel">${p.avgDailyVel.toFixed(2)}</span>
       <span class="rs-trend">${trendArrow(p.trendRatio)}</span>
     </td>
+    <td>${returnRateCell(p.returnRate || 0, p.totalReturnedUnits || 0)}</td>
     <td>${daysStr}${p.criticalVariant ? `<div style="font-size:0.7rem;color:#94a3b8">${escHtml(p.criticalVariant)}</div>` : ''}</td>
     <td>${incomingStr}</td>
     <td>${seaBadge}</td>
@@ -310,11 +319,17 @@ function expandRow(p, expanded) {
                title="OOS — using older-period velocity (${v.demandDailyVel.toFixed(3)}) for suggestions">OOS*</span>`
       : v.recentDailyVel.toFixed(3);
 
+    const retStr = (v.returnedUnits > 0)
+      ? `<span style="font-size:0.78rem;font-weight:700;color:${v.returnRate >= 20 ? '#b91c1c' : v.returnRate >= 10 ? '#c2410c' : '#a16207'}"
+              title="${v.returnedUnits} unit${v.returnedUnits !== 1 ? 's' : ''} returned">${v.returnRate}%</span>`
+      : `<span style="color:#cbd5e1;font-size:0.78rem">—</span>`;
+
     return `<tr${v.isOos ? ' style="opacity:0.8"' : ''}>
       <td>${escHtml(v.title)}</td>
       <td>${v.inventory}</td>
       <td>${v.incomingQty > 0 ? '+' + v.incomingQty : '—'}</td>
       <td>${velDisplay}</td>
+      <td>${retStr}</td>
       <td>${dStr}</td>
       <td>${seaStr}</td>
       <td>${airStr}</td>
@@ -335,7 +350,7 @@ function expandRow(p, expanded) {
     <table class="rs-size-table">
       <thead><tr>
         <th>Size</th><th>Stock</th><th>Incoming</th>
-        <th>Vel/day</th><th>Runway</th>
+        <th>Vel/day</th><th>Returns</th><th>Runway</th>
         <th>🚢 Suggest</th><th>✈️ Suggest</th>
       </tr></thead>
       <tbody>${varRows}</tbody>
@@ -385,7 +400,7 @@ function expandRow(p, expanded) {
     onclick="openModal(${p.productId},event)">+ Log Restock Order</button>`;
 
   return `<tr class="rs-expand${expanded ? ' open' : ''}" id="expand-${p.productId}">
-    <td colspan="8">
+    <td colspan="9">
       <div class="rs-expand-inner">
         ${incomingHtml}
         ${sizeTable}
