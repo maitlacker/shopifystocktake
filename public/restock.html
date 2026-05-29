@@ -70,8 +70,13 @@
       display: flex;
       gap: 6px;
       margin-bottom: 14px;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;          /* Firefox */
     }
+    .rs-filters::-webkit-scrollbar { display: none; } /* Chrome/Safari */
     .rs-filter-btn {
       padding: 7px 16px;
       border-radius: 20px;
@@ -92,6 +97,10 @@
     .rs-filter-btn[data-filter="highReturn"].active {
       background: #b91c1c;
       border-color: #b91c1c;
+    }
+    .rs-filter-btn[data-filter="highReturn"].active .rs-badge {
+      background: rgba(0,0,0,0.25);
+      color: #fff;
     }
     .rs-filter-btn .rs-badge {
       display: inline-block;
@@ -421,7 +430,7 @@
       </button>
       <button class="rs-filter-btn" data-filter="highReturn" onclick="setFilter('highReturn',this)"
         style="border-color:#fca5a5; color:#b91c1c;">
-        ↩ Return Rates <span class="rs-badge" id="fb-ret">0</span>
+        ↩ High Returns <span class="rs-badge" id="fb-ret">0</span>
       </button>
     </div>
 
