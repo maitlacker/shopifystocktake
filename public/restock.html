@@ -89,6 +89,10 @@
       color: #fff;
       border-color: #1a1a2e;
     }
+    .rs-filter-btn[data-filter="highReturn"].active {
+      background: #b91c1c;
+      border-color: #b91c1c;
+    }
     .rs-filter-btn .rs-badge {
       display: inline-block;
       background: rgba(255,255,255,0.25);
@@ -414,6 +418,10 @@
       </button>
       <button class="rs-filter-btn" data-filter="null" onclick="setFilter('null',this)">
         No Data <span class="rs-badge" id="fb-nd">0</span>
+      </button>
+      <button class="rs-filter-btn" data-filter="highReturn" onclick="setFilter('highReturn',this)"
+        style="border-color:#fca5a5; color:#b91c1c;">
+        ↩ Return Rates <span class="rs-badge" id="fb-ret">0</span>
       </button>
     </div>
 

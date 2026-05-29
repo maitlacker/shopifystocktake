@@ -155,6 +155,7 @@ function renderAnalysis(data) {
     const k = p.rating === null ? 'null' : (p.rating || 'null');
     counts[k] = (counts[k] || 0) + 1;
   }
+  const highReturnCount = allProducts.filter(p => (p.returnRate || 0) >= 10).length;
   document.getElementById('fb-all').textContent = allProducts.length;
   document.getElementById('fb-aap').textContent = counts['AA+'];
   document.getElementById('fb-a').textContent   = counts['A'];
@@ -162,6 +163,7 @@ function renderAnalysis(data) {
   document.getElementById('fb-c').textContent   = counts['C'];
   document.getElementById('fb-f').textContent   = counts['F'];
   document.getElementById('fb-nd').textContent  = counts['null'];
+  document.getElementById('fb-ret').textContent = highReturnCount;
 
   // Stat cards
   const airAlert  = allProducts.filter(p => p.rating && p.rating !== 'F' && p.minDaysRemaining !== null
@@ -183,7 +185,9 @@ function applyFilterAndRender() {
     ? allProducts
     : activeFilter === 'null'
       ? allProducts.filter(p => p.rating === null)
-      : allProducts.filter(p => p.rating === activeFilter);
+      : activeFilter === 'highReturn'
+        ? allProducts.filter(p => (p.returnRate || 0) >= 10)
+        : allProducts.filter(p => p.rating === activeFilter);
   renderProductTable();
 }
 
