@@ -94,11 +94,16 @@
       color: #fff;
       border-color: #1a1a2e;
     }
-    .rs-filter-btn[data-filter="highReturn"].active {
+    .rs-filter-btn--returns {
+      border-color: #fca5a5;
+      color: #b91c1c;
+    }
+    .rs-filter-btn--returns.active {
       background: #b91c1c;
       border-color: #b91c1c;
+      color: #fff;
     }
-    .rs-filter-btn[data-filter="highReturn"].active .rs-badge {
+    .rs-filter-btn--returns.active .rs-badge {
       background: rgba(0,0,0,0.25);
       color: #fff;
     }
@@ -428,8 +433,7 @@
       <button class="rs-filter-btn" data-filter="null" onclick="setFilter('null',this)">
         No Data <span class="rs-badge" id="fb-nd">0</span>
       </button>
-      <button class="rs-filter-btn" data-filter="highReturn" onclick="setFilter('highReturn',this)"
-        style="border-color:#fca5a5; color:#b91c1c;">
+      <button class="rs-filter-btn rs-filter-btn--returns" data-filter="highReturn" onclick="setFilter('highReturn',this)">
         ↩ High Returns <span class="rs-badge" id="fb-ret">0</span>
       </button>
     </div>
