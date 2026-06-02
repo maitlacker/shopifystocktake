@@ -6,69 +6,125 @@
   <title>Monthly Budgets — The Self Styler WMS</title>
   <link rel="stylesheet" href="style.css" />
   <style>
+    /* ── Page header ── */
     .bud-header { display:flex; align-items:center; justify-content:space-between;
                   margin-bottom:24px; flex-wrap:wrap; gap:12px; }
     .bud-header h1 { font-size:1.4rem; font-weight:700; color:#1e293b; margin:0; }
 
-    .bud-year-nav { display:flex; align-items:center; gap:10px; }
-    .bud-year-btn { background:#fff; border:1.5px solid #e2e8f0; color:#475569;
-                    padding:7px 14px; border-radius:8px; font-weight:700; cursor:pointer;
-                    font-size:0.9rem; }
-    .bud-year-btn:hover { border-color:#6366f1; color:#6366f1; }
-    .bud-year-label { font-size:1.1rem; font-weight:800; color:#1e293b; min-width:50px;
-                      text-align:center; }
+    /* ── Month navigation ── */
+    .bud-month-nav { display:flex; align-items:center; justify-content:center;
+                     gap:14px; margin-bottom:24px; }
+    .bud-nav-btn { background:#fff; border:1.5px solid #e2e8f0; color:#475569;
+                   padding:8px 18px; border-radius:8px; font-weight:700; cursor:pointer;
+                   font-size:1rem; transition:all 0.15s; }
+    .bud-nav-btn:hover { border-color:#6366f1; color:#6366f1; }
+    .bud-month-label { font-size:1.5rem; font-weight:800; color:#1e293b;
+                       min-width:200px; text-align:center; }
 
-    /* Summary cards */
+    /* ── Summary cards ── */
     .bud-cards { display:grid; grid-template-columns:repeat(4,1fr); gap:14px;
-                 margin-bottom:24px; }
+                 margin-bottom:20px; }
     .bud-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px;
                 padding:16px 20px; }
     .bud-card-label { font-size:0.72rem; font-weight:700; text-transform:uppercase;
                       letter-spacing:0.07em; color:#64748b; margin-bottom:6px; }
     .bud-card-value { font-size:1.3rem; font-weight:800; color:#1e293b; }
-    .bud-card-value.green  { color:#16a34a; }
-    .bud-card-value.red    { color:#dc2626; }
-    .bud-card-value.blue   { color:#6366f1; }
+    .bud-card-value.green { color:#16a34a; }
+    .bud-card-value.red   { color:#dc2626; }
+    .bud-card-value.blue  { color:#6366f1; }
+    .bud-card-value.grey  { color:#94a3b8; }
 
-    /* Table */
-    .bud-table-wrap { background:#fff; border-radius:12px; border:1px solid #e2e8f0; overflow:hidden; }
-    .bud-table { width:100%; border-collapse:collapse; font-size:0.88rem; }
-    .bud-table th { background:#f8fafc; color:#64748b; font-weight:600; font-size:0.76rem;
-                    text-transform:uppercase; letter-spacing:0.05em; padding:10px 16px;
-                    border-bottom:1px solid #e2e8f0; text-align:left; }
-    .bud-table td { padding:11px 16px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
-    .bud-table tr:last-child td { border-bottom:none; }
-    .bud-table tr.current-month td { background:#fafaf7; }
-    .bud-table tfoot td { background:#f8fafc; font-weight:700; border-top:2px solid #e2e8f0; }
+    /* ── Progress bar ── */
+    .bud-progress-wrap { background:#fff; border:1px solid #e2e8f0; border-radius:12px;
+                         padding:16px 20px; margin-bottom:20px; }
+    .bud-progress-label { display:flex; justify-content:space-between;
+                          font-size:0.82rem; font-weight:600; color:#64748b; margin-bottom:8px; }
+    .bud-bar-track { background:#f1f5f9; border-radius:99px; height:12px; overflow:hidden; }
+    .bud-bar-fill { height:100%; border-radius:99px; transition:width 0.4s ease;
+                    background:linear-gradient(90deg,#6366f1,#8b5cf6); }
+    .bud-bar-fill.over { background:linear-gradient(90deg,#ef4444,#f97316); }
 
-    /* Budget input */
-    .bud-input-wrap { display:flex; align-items:center; gap:6px; }
-    .bud-input-wrap span { color:#64748b; font-size:0.85rem; }
-    .bud-input { width:130px; padding:6px 10px; border:1.5px solid #e2e8f0; border-radius:7px;
-                 font-size:0.88rem; font-weight:600; color:#1e293b; text-align:right; }
-    .bud-input:focus { outline:none; border-color:#6366f1; }
-    .bud-input.saving { border-color:#a5b4fc; background:#f0f0ff; }
+    /* ── Set budget panel ── */
+    .bud-set-panel { background:#fff; border:1px solid #e2e8f0; border-radius:12px;
+                     padding:18px 20px; margin-bottom:20px; }
+    .bud-set-title { font-size:0.78rem; font-weight:700; text-transform:uppercase;
+                     letter-spacing:0.07em; color:#64748b; margin-bottom:12px; }
+    .bud-set-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .bud-set-field { display:flex; align-items:center; gap:6px; }
+    .bud-set-field label { font-size:0.82rem; font-weight:600; color:#475569; white-space:nowrap; }
+    .bud-set-input { padding:8px 12px; border:1.5px solid #e2e8f0; border-radius:8px;
+                     font-size:0.9rem; font-weight:600; color:#1e293b; outline:none;
+                     box-sizing:border-box; }
+    .bud-set-input:focus { border-color:#6366f1; }
+    #set-budget-input { width:140px; text-align:right; }
+    #set-notes-input  { width:220px; }
+    .bud-save-btn { padding:8px 20px; background:#6366f1; color:#fff; border:none;
+                    border-radius:8px; font-weight:700; font-size:0.88rem; cursor:pointer; }
+    .bud-save-btn:hover { background:#4f46e5; }
+    .bud-save-btn:disabled { opacity:0.5; cursor:default; }
 
-    /* Bar */
-    .bud-bar-wrap { position:relative; background:#f1f5f9; border-radius:4px;
-                    height:8px; width:120px; overflow:hidden; }
-    .bud-bar { height:100%; border-radius:4px; transition:width 0.4s ease;
-               background:#6366f1; }
-    .bud-bar.over { background:#ef4444; }
+    /* ── PO table ── */
+    .bud-pos-section { margin-bottom:24px; }
+    .bud-section-title { font-size:0.78rem; font-weight:700; text-transform:uppercase;
+                         letter-spacing:0.07em; color:#64748b; margin:0 0 10px; }
+    .bud-pos-wrap { background:#fff; border:1px solid #e2e8f0; border-radius:12px;
+                    overflow:hidden; overflow-x:auto; }
+    .bud-po-table { width:100%; border-collapse:collapse; font-size:0.85rem; min-width:580px; }
+    .bud-po-table th { background:#f8fafc; color:#64748b; font-weight:600; font-size:0.75rem;
+                       text-transform:uppercase; letter-spacing:0.05em; padding:9px 14px;
+                       border-bottom:1px solid #e2e8f0; text-align:left; white-space:nowrap; }
+    .bud-po-table td { padding:10px 14px; border-bottom:1px solid #f1f5f9; color:#334155; }
+    .bud-po-table tr:last-child td { border-bottom:none; }
+    .bud-po-table tr:hover td { background:#f8fafc; cursor:pointer; }
+    .bud-po-num  { font-weight:700; color:#6366f1; }
+    .bud-po-status { display:inline-block; padding:2px 9px; border-radius:20px;
+                     font-size:0.7rem; font-weight:700; text-transform:uppercase; }
+    .bud-po-status.draft     { background:#f1f5f9; color:#64748b; }
+    .bud-po-status.confirmed { background:#dbeafe; color:#1d4ed8; }
+    .bud-po-status.received  { background:#dcfce7; color:#166534; }
+    .bud-po-status.cancelled { background:#fee2e2; color:#991b1b; }
+    .bud-empty { text-align:center; color:#94a3b8; padding:32px; font-size:0.88rem; }
 
-    /* Variance */
+    /* ── Annual overview (collapsible) ── */
+    .bud-annual-panel { background:#fff; border:1px solid #e2e8f0; border-radius:12px;
+                        overflow:hidden; margin-bottom:24px; }
+    .bud-annual-head { display:flex; align-items:center; justify-content:space-between;
+                       padding:14px 20px; cursor:pointer; user-select:none; }
+    .bud-annual-head:hover { background:#f8fafc; }
+    .bud-annual-head-title { font-size:0.9rem; font-weight:700; color:#1e293b; }
+    .bud-annual-caret { font-size:0.75rem; color:#94a3b8; transition:transform 0.2s; }
+    .bud-annual-panel.open .bud-annual-caret { transform:rotate(180deg); }
+    .bud-annual-body { display:none; border-top:1px solid #e2e8f0; padding:0; overflow-x:auto; }
+    .bud-annual-panel.open .bud-annual-body { display:block; }
+
+    .bud-annual-table { width:100%; border-collapse:collapse; font-size:0.85rem; min-width:600px; }
+    .bud-annual-table th { background:#f8fafc; color:#64748b; font-weight:600; font-size:0.74rem;
+                           text-transform:uppercase; letter-spacing:0.05em; padding:9px 14px;
+                           border-bottom:1px solid #e2e8f0; text-align:left; }
+    .bud-annual-table th.num { text-align:right; }
+    .bud-annual-table td { padding:9px 14px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+    .bud-annual-table tr:last-child td { border-bottom:none; }
+    .bud-annual-table tr.ann-current td { background:#fafaf7; }
+    .bud-annual-table tfoot td { background:#f8fafc; font-weight:700; border-top:2px solid #e2e8f0; }
+
+    .ann-input-wrap { display:flex; align-items:center; gap:5px; justify-content:flex-end; }
+    .ann-input-wrap span { color:#94a3b8; font-size:0.78rem; }
+    .ann-bud-input { width:110px; padding:5px 9px; border:1.5px solid #e2e8f0; border-radius:6px;
+                     font-size:0.85rem; font-weight:600; color:#1e293b; text-align:right; outline:none; }
+    .ann-bud-input:focus { border-color:#6366f1; }
+    .ann-bud-input.saving { border-color:#a5b4fc; background:#f0f0ff; }
+    .ann-notes-input { width:160px; padding:5px 8px; border:1.5px solid #e2e8f0; border-radius:6px;
+                       font-size:0.78rem; color:#475569; outline:none; }
+    .ann-notes-input:focus { border-color:#6366f1; }
+
     .var-under { color:#16a34a; font-weight:700; }
     .var-over  { color:#dc2626; font-weight:700; }
     .var-none  { color:#94a3b8; }
 
-    .month-label { font-weight:600; color:#1e293b; }
-    .month-label.current { color:#6366f1; }
-    .actual-value { font-weight:700; color:#334155; }
-    .actual-value.zero { color:#cbd5e1; font-weight:400; }
-
-    .bud-notes-input { width:180px; padding:5px 9px; border:1.5px solid #e2e8f0;
-                       border-radius:7px; font-size:0.8rem; color:#475569; }
-    .bud-notes-input:focus { outline:none; border-color:#6366f1; }
+    @media (max-width:700px) {
+      .bud-cards { grid-template-columns:repeat(2,1fr); }
+      .bud-month-label { font-size:1.2rem; min-width:160px; }
+    }
   </style>
 </head>
 <body>
@@ -77,49 +133,107 @@
 
     <div class="bud-header">
       <h1>Monthly Production Budgets</h1>
-      <div class="bud-year-nav">
-        <button class="bud-year-btn" onclick="changeYear(-1)">&#8592;</button>
-        <span class="bud-year-label" id="bud-year">—</span>
-        <button class="bud-year-btn" onclick="changeYear(+1)">&#8594;</button>
-      </div>
     </div>
 
+    <!-- Month navigation -->
+    <div class="bud-month-nav">
+      <button class="bud-nav-btn" onclick="changeMonth(-1)">&#8592;</button>
+      <span class="bud-month-label" id="bud-month-label">—</span>
+      <button class="bud-nav-btn" onclick="changeMonth(+1)">&#8594;</button>
+    </div>
+
+    <!-- Summary cards -->
     <div class="bud-cards">
       <div class="bud-card">
-        <div class="bud-card-label">Annual Budget</div>
-        <div class="bud-card-value blue" id="card-total-budget">—</div>
+        <div class="bud-card-label">Budget</div>
+        <div class="bud-card-value blue" id="card-budget">—</div>
       </div>
       <div class="bud-card">
         <div class="bud-card-label">Actual (Orders)</div>
-        <div class="bud-card-value" id="card-total-actual">—</div>
+        <div class="bud-card-value" id="card-actual">—</div>
       </div>
       <div class="bud-card">
-        <div class="bud-card-label">Remaining Budget</div>
+        <div class="bud-card-label">Remaining</div>
         <div class="bud-card-value" id="card-remaining">—</div>
       </div>
       <div class="bud-card">
-        <div class="bud-card-label">Year Progress</div>
+        <div class="bud-card-label">Usage</div>
         <div class="bud-card-value" id="card-pct">—</div>
       </div>
     </div>
 
-    <div class="bud-table-wrap">
-      <table class="bud-table">
-        <thead>
-          <tr>
-            <th>Month</th>
-            <th>Budget (AUD)</th>
-            <th>Actual (AUD)</th>
-            <th>Usage</th>
-            <th>Variance</th>
-            <th>Notes</th>
-          </tr>
-        </thead>
-        <tbody id="bud-tbody">
-          <tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:40px">Loading…</td></tr>
-        </tbody>
-        <tfoot id="bud-tfoot"></tfoot>
-      </table>
+    <!-- Progress bar -->
+    <div class="bud-progress-wrap">
+      <div class="bud-progress-label">
+        <span id="prog-label">Budget usage</span>
+        <span id="prog-pct">—</span>
+      </div>
+      <div class="bud-bar-track">
+        <div class="bud-bar-fill" id="bud-bar-fill" style="width:0%"></div>
+      </div>
+    </div>
+
+    <!-- Set budget for this month -->
+    <div class="bud-set-panel">
+      <div class="bud-set-title">Set Budget — <span id="set-month-label">—</span></div>
+      <div class="bud-set-row">
+        <div class="bud-set-field">
+          <label>AUD</label>
+          <input type="number" class="bud-set-input" id="set-budget-input"
+                 min="0" step="500" placeholder="0" />
+        </div>
+        <div class="bud-set-field">
+          <label>Notes</label>
+          <input type="text" class="bud-set-input" id="set-notes-input" placeholder="Optional notes…" />
+        </div>
+        <button class="bud-save-btn" id="set-save-btn" onclick="saveCurrentMonth()">Save</button>
+        <span id="set-save-status" style="font-size:0.8rem;color:#16a34a;display:none">✓ Saved</span>
+      </div>
+    </div>
+
+    <!-- Production orders this month -->
+    <div class="bud-pos-section">
+      <p class="bud-section-title">Production Orders This Month</p>
+      <div class="bud-pos-wrap">
+        <table class="bud-po-table">
+          <thead>
+            <tr>
+              <th>PO #</th>
+              <th>Supplier</th>
+              <th>Products</th>
+              <th>Freight</th>
+              <th style="text-align:right">AUD Total</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="bud-po-tbody">
+            <tr><td colspan="6" class="bud-empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Annual overview (collapsible) -->
+    <div class="bud-annual-panel" id="bud-annual-panel">
+      <div class="bud-annual-head" onclick="toggleAnnual()">
+        <span class="bud-annual-head-title">📅 Annual Overview — <span id="annual-year-label">—</span></span>
+        <span class="bud-annual-caret">▼</span>
+      </div>
+      <div class="bud-annual-body">
+        <table class="bud-annual-table">
+          <thead>
+            <tr>
+              <th>Month</th>
+              <th class="num">Budget (AUD)</th>
+              <th class="num">Actual (AUD)</th>
+              <th class="num">Variance</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody id="bud-annual-tbody"></tbody>
+          <tfoot id="bud-annual-tfoot"></tfoot>
+        </table>
+      </div>
     </div>
 
   </main>

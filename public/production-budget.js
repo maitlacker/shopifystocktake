@@ -4,141 +4,253 @@ const MONTH_NAMES = ['January','February','March','April','May','June',
                      'July','August','September','October','November','December'];
 const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-let currentYear = new Date().getFullYear();
-let budgetData  = [];
-let saveTimers  = {};
+let currentYear  = new Date().getFullYear();
+let currentMonth = new Date().getMonth() + 1; // 1-based
+let yearData     = []; // 12-row array for currentYear
+let allOrders    = []; // all production orders (for PO list)
+let saveTimers   = {};
 
+// ── Boot ──────────────────────────────────────────────────────────────
 (async function init() {
-  document.getElementById('bud-year').textContent = currentYear;
-  await load();
+  updateLabels();
+  await Promise.all([loadBudgets(), loadOrders()]);
+  renderMonth();
 })();
 
-async function changeYear(delta) {
-  currentYear += delta;
-  document.getElementById('bud-year').textContent = currentYear;
-  await load();
-}
-
-async function load() {
-  document.getElementById('bud-tbody').innerHTML =
-    `<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:40px">Loading…</td></tr>`;
+// ── Data loading ──────────────────────────────────────────────────────
+async function loadBudgets() {
   try {
     const r = await fetch(`/api/production-budgets?year=${currentYear}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    budgetData = await r.json();
-    render();
+    yearData = await r.json();
   } catch (err) {
-    document.getElementById('bud-tbody').innerHTML =
-      `<tr><td colspan="6" style="text-align:center;color:#ef4444;padding:40px">Error: ${escHtml(err.message)}</td></tr>`;
+    yearData = Array.from({length:12}, (_,i) => ({
+      year: currentYear, month: i+1, budget_aud: 0, actual_aud: 0, notes: null
+    }));
+    console.error('Budget load error:', err.message);
   }
 }
 
-function render() {
-  const now   = new Date();
+async function loadOrders() {
+  try {
+    const r = await fetch('/api/production-orders');
+    if (!r.ok) return;
+    allOrders = await r.json();
+  } catch (_) {}
+}
+
+// ── Navigation ────────────────────────────────────────────────────────
+async function changeMonth(delta) {
+  currentMonth += delta;
+  if (currentMonth > 12) { currentMonth = 1; currentYear++; await loadBudgets(); }
+  else if (currentMonth < 1) { currentMonth = 12; currentYear--; await loadBudgets(); }
+  updateLabels();
+  renderMonth();
+}
+
+function updateLabels() {
+  document.getElementById('bud-month-label').textContent =
+    `${MONTH_NAMES[currentMonth-1]} ${currentYear}`;
+  document.getElementById('set-month-label').textContent =
+    `${MONTH_NAMES[currentMonth-1]} ${currentYear}`;
+  document.getElementById('annual-year-label').textContent = currentYear;
+}
+
+// ── Month view render ─────────────────────────────────────────────────
+function renderMonth() {
+  updateLabels();
+  const row    = yearData[currentMonth - 1] || {};
+  const budget = parseFloat(row.budget_aud) || 0;
+  const actual = parseFloat(row.actual_aud) || 0;
+  const remaining = Math.max(0, budget - actual);
+  const pct    = budget > 0 ? Math.min(Math.round((actual / budget) * 100), 999) : 0;
+  const over   = actual > budget && budget > 0;
+
+  // Cards
+  document.getElementById('card-budget').textContent    = budget > 0 ? `AUD ${fmt(budget)}` : '—';
+  document.getElementById('card-budget').className      = 'bud-card-value blue';
+
+  document.getElementById('card-actual').textContent    = actual > 0  ? `AUD ${fmt(actual)}`    : '—';
+  document.getElementById('card-actual').className      = `bud-card-value${over ? ' red' : ''}`;
+
+  document.getElementById('card-remaining').textContent = budget > 0  ? `AUD ${fmt(remaining)}` : '—';
+  document.getElementById('card-remaining').className   = `bud-card-value${over ? ' red' : remaining > 0 ? ' green' : ''}`;
+
+  document.getElementById('card-pct').textContent  = budget > 0 ? `${pct}%` : '—';
+  document.getElementById('card-pct').className    = `bud-card-value${pct > 100 ? ' red' : pct > 0 ? ' blue' : ' grey'}`;
+
+  // Progress bar
+  document.getElementById('prog-label').textContent = over
+    ? '⚠️ Over budget'
+    : budget > 0 ? 'Budget usage' : 'No budget set for this month';
+  document.getElementById('prog-pct').textContent   = budget > 0 ? `${pct}% used` : '';
+  const fill = document.getElementById('bud-bar-fill');
+  fill.style.width    = budget > 0 ? `${Math.min(pct, 100)}%` : '0%';
+  fill.className      = `bud-bar-fill${over ? ' over' : ''}`;
+
+  // Budget input
+  document.getElementById('set-budget-input').value = budget || '';
+  document.getElementById('set-notes-input').value  = row.notes || '';
+  document.getElementById('set-save-status').style.display = 'none';
+
+  // PO list
+  renderMonthOrders();
+
+  // Annual table (if open)
+  if (document.getElementById('bud-annual-panel').classList.contains('open')) {
+    renderAnnual();
+  }
+}
+
+// ── PO list for this month ─────────────────────────────────────────────
+function renderMonthOrders() {
+  const ymPrefix = `${currentYear}-${String(currentMonth).padStart(2,'0')}`;
+  const orders = allOrders.filter(o =>
+    o.delivery_date && String(o.delivery_date).slice(0, 7) === ymPrefix
+  );
+
+  const tbody = document.getElementById('bud-po-tbody');
+  if (!orders.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="bud-empty">No production orders with a delivery date in this month</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = orders.map(o => {
+    const audTotal = getAudTotal(o);
+    const products = (o.line_summaries || []).map(l => escHtml(l.name || '—')).join(', ') || '—';
+    const freight  = o.freight_mode === 'sea'
+      ? `<span style="color:#0369a1;font-weight:700">🚢 Sea</span>`
+      : `<span style="color:#7c3aed;font-weight:700">✈️ Air</span>`;
+    return `<tr onclick="window.location.href='/production-order.html?id=${o.id}'">
+      <td><span class="bud-po-num">${escHtml(o.po_number)}</span></td>
+      <td>${escHtml(o.supplier_name || '—')}</td>
+      <td style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${products}</td>
+      <td>${freight}</td>
+      <td style="text-align:right;font-weight:700">AUD ${fmt(audTotal)}</td>
+      <td><span class="bud-po-status ${o.status}">${o.status}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function getAudTotal(o) {
+  return parseFloat(o.subtotal_aud || 0) * (o.include_gst ? 1.1 : 1.0);
+}
+
+// ── Save current month's budget ───────────────────────────────────────
+async function saveCurrentMonth() {
+  const btn       = document.getElementById('set-save-btn');
+  const statusEl  = document.getElementById('set-save-status');
+  const budgetAud = parseFloat(document.getElementById('set-budget-input').value) || 0;
+  const notes     = document.getElementById('set-notes-input').value.trim() || null;
+
+  btn.disabled = true;
+  statusEl.style.display = 'none';
+
+  try {
+    const res = await fetch(`/api/production-budgets/${currentYear}/${currentMonth}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ budgetAud, notes }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // Update local yearData
+    if (yearData[currentMonth-1]) {
+      yearData[currentMonth-1].budget_aud = budgetAud;
+      yearData[currentMonth-1].notes = notes;
+    }
+    statusEl.style.display = '';
+    setTimeout(() => { statusEl.style.display = 'none'; }, 2500);
+    renderMonth();
+  } catch (err) {
+    alert('Save failed: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── Annual overview ────────────────────────────────────────────────────
+function toggleAnnual() {
+  const panel = document.getElementById('bud-annual-panel');
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open')) renderAnnual();
+}
+
+function renderAnnual() {
+  const now       = new Date();
   const thisYear  = now.getFullYear();
   const thisMonth = now.getMonth() + 1;
 
   let totalBudget = 0;
   let totalActual = 0;
 
-  const tbody = document.getElementById('bud-tbody');
-  tbody.innerHTML = budgetData.map((row, idx) => {
-    const m         = idx + 1;
-    const budget    = row.budget_aud || 0;
-    const actual    = row.actual_aud || 0;
-    const variance  = budget - actual;
-    const pct       = budget > 0 ? Math.min(Math.round((actual / budget) * 100), 999) : null;
+  const rows = yearData.map((row, idx) => {
+    const m        = idx + 1;
+    const budget   = parseFloat(row.budget_aud) || 0;
+    const actual   = parseFloat(row.actual_aud) || 0;
+    const variance = budget - actual;
     const isCurrent = currentYear === thisYear && m === thisMonth;
-
     totalBudget += budget;
     totalActual += actual;
-
-    const barHtml = budget > 0
-      ? `<div class="bud-bar-wrap">
-           <div class="bud-bar${actual > budget ? ' over' : ''}"
-                style="width:${Math.min((actual/budget)*100, 100)}%"></div>
-         </div>
-         <span style="font-size:0.75rem;color:#64748b;margin-left:6px">${pct}%</span>`
-      : `<span style="color:#cbd5e1;font-size:0.8rem">—</span>`;
 
     let varHtml;
     if (budget === 0) {
       varHtml = `<span class="var-none">—</span>`;
     } else if (variance >= 0) {
-      varHtml = `<span class="var-under">+AUD ${fmt(variance)}</span><div style="font-size:0.7rem;color:#94a3b8">under budget</div>`;
+      varHtml = `<span class="var-under">+AUD ${fmt(variance)}</span>`;
     } else {
-      varHtml = `<span class="var-over">-AUD ${fmt(Math.abs(variance))}</span><div style="font-size:0.7rem;color:#94a3b8">over budget</div>`;
+      varHtml = `<span class="var-over">-AUD ${fmt(Math.abs(variance))}</span>`;
     }
 
-    return `<tr class="${isCurrent ? 'current-month' : ''}">
-      <td>
-        <span class="month-label${isCurrent?' current':''}">
-          ${isCurrent ? '▶ ' : ''}${MONTH_NAMES[m-1]}
-        </span>
+    return `<tr class="${isCurrent ? 'ann-current' : ''}">
+      <td style="font-weight:600;color:${isCurrent ? '#6366f1':'#1e293b'}">
+        ${isCurrent ? '▶ ' : ''}${MONTH_SHORT[m-1]}
       </td>
       <td>
-        <div class="bud-input-wrap">
+        <div class="ann-input-wrap">
           <span>AUD</span>
-          <input type="number" class="bud-input" id="bud-input-${m}"
-                 value="${budget || ''}" min="0" step="100" placeholder="0"
-                 oninput="scheduleSave(${m})" />
+          <input type="number" class="ann-bud-input" id="ann-input-${m}"
+                 value="${budget || ''}" min="0" step="500" placeholder="0"
+                 oninput="scheduleAnnualSave(${m})" />
         </div>
       </td>
-      <td>
-        <span class="actual-value${actual === 0 ? ' zero' : ''}">
-          ${actual > 0 ? 'AUD ' + fmt(actual) : '—'}
-        </span>
+      <td style="text-align:right;font-weight:700;color:${actual > 0 ? '#334155' : '#cbd5e1'}">
+        ${actual > 0 ? 'AUD ' + fmt(actual) : '—'}
       </td>
+      <td style="text-align:right">${varHtml}</td>
       <td>
-        <div style="display:flex;align-items:center;gap:6px">${barHtml}</div>
-      </td>
-      <td>${varHtml}</td>
-      <td>
-        <input type="text" class="bud-notes-input" id="bud-notes-${m}"
+        <input type="text" class="ann-notes-input" id="ann-notes-${m}"
                value="${escHtml(row.notes || '')}" placeholder="Notes…"
-               onblur="scheduleSave(${m})" />
+               onblur="scheduleAnnualSave(${m})" />
       </td>
     </tr>`;
   }).join('');
 
-  // Footer totals
-  const totalVariance = totalBudget - totalActual;
-  const totalPct = totalBudget > 0 ? Math.round((totalActual/totalBudget)*100) : null;
-  document.getElementById('bud-tfoot').innerHTML = `
+  document.getElementById('bud-annual-tbody').innerHTML = rows;
+
+  const totalVar = totalBudget - totalActual;
+  document.getElementById('bud-annual-tfoot').innerHTML = `
     <tr>
       <td>Total</td>
-      <td>AUD ${fmt(totalBudget)}</td>
-      <td>AUD ${fmt(totalActual)}</td>
-      <td>${totalPct !== null ? totalPct + '%' : '—'}</td>
-      <td class="${totalVariance >= 0 ? 'var-under' : 'var-over'}">
-        ${totalBudget > 0 ? (totalVariance >= 0 ? '+' : '-') + 'AUD ' + fmt(Math.abs(totalVariance)) : '—'}
+      <td style="text-align:right">AUD ${fmt(totalBudget)}</td>
+      <td style="text-align:right">AUD ${fmt(totalActual)}</td>
+      <td style="text-align:right" class="${totalVar >= 0 ? 'var-under' : 'var-over'}">
+        ${totalBudget > 0 ? (totalVar >= 0 ? '+' : '-') + 'AUD ' + fmt(Math.abs(totalVar)) : '—'}
       </td>
       <td></td>
     </tr>`;
-
-  // Summary cards
-  const remaining = Math.max(0, totalBudget - totalActual);
-  const pctUsed   = totalBudget > 0 ? Math.round((totalActual/totalBudget)*100) : 0;
-  document.getElementById('card-total-budget').textContent = `AUD ${fmt(totalBudget)}`;
-  document.getElementById('card-total-actual').textContent = `AUD ${fmt(totalActual)}`;
-  document.getElementById('card-total-actual').className   = `bud-card-value${totalActual > totalBudget ? ' red' : ''}`;
-  document.getElementById('card-remaining').textContent    = `AUD ${fmt(remaining)}`;
-  document.getElementById('card-remaining').className      = `bud-card-value${totalActual > totalBudget ? ' red' : ' green'}`;
-  document.getElementById('card-pct').textContent          = totalBudget > 0 ? `${pctUsed}% used` : '—';
-  document.getElementById('card-pct').className            = `bud-card-value${pctUsed > 100 ? ' red' : pctUsed > 80 ? '' : ' blue'}`;
 }
 
-// Debounced auto-save when user edits a budget field
-function scheduleSave(month) {
+// Debounced save from the annual table inputs
+function scheduleAnnualSave(month) {
   clearTimeout(saveTimers[month]);
-  const input = document.getElementById(`bud-input-${month}`);
+  const input = document.getElementById(`ann-input-${month}`);
   if (input) input.classList.add('saving');
-  saveTimers[month] = setTimeout(() => saveBudget(month), 800);
+  saveTimers[month] = setTimeout(() => saveAnnualMonth(month), 900);
 }
 
-async function saveBudget(month) {
-  const input    = document.getElementById(`bud-input-${month}`);
-  const notesEl  = document.getElementById(`bud-notes-${month}`);
+async function saveAnnualMonth(month) {
+  const input     = document.getElementById(`ann-input-${month}`);
+  const notesEl   = document.getElementById(`ann-notes-${month}`);
   const budgetAud = parseFloat(input?.value) || 0;
   const notes     = notesEl?.value.trim() || null;
 
@@ -149,50 +261,20 @@ async function saveBudget(month) {
       body: JSON.stringify({ budgetAud, notes }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    // Update local data
-    if (budgetData[month-1]) budgetData[month-1].budget_aud = budgetAud;
-    // Refresh totals and cards without full re-render (to preserve focus)
-    refreshTotalsOnly();
+    if (yearData[month-1]) {
+      yearData[month-1].budget_aud = budgetAud;
+      yearData[month-1].notes = notes;
+    }
+    // Refresh cards if this is the currently viewed month
+    if (month === currentMonth) renderMonth();
   } catch (err) {
-    console.error('Budget save failed:', err.message);
+    console.error('Annual save failed:', err.message);
   } finally {
     if (input) input.classList.remove('saving');
   }
 }
 
-function refreshTotalsOnly() {
-  // Recompute totals from current input values + actual data, update cards + footer
-  let totalBudget = 0;
-  let totalActual = 0;
-  budgetData.forEach((row, idx) => {
-    const m = idx + 1;
-    const inputEl = document.getElementById(`bud-input-${m}`);
-    const budget = inputEl ? (parseFloat(inputEl.value) || 0) : (row.budget_aud || 0);
-    totalBudget += budget;
-    totalActual += row.actual_aud || 0;
-  });
-  const remaining = Math.max(0, totalBudget - totalActual);
-  const pctUsed   = totalBudget > 0 ? Math.round((totalActual/totalBudget)*100) : 0;
-  const totalVar  = totalBudget - totalActual;
-
-  document.getElementById('card-total-budget').textContent = `AUD ${fmt(totalBudget)}`;
-  document.getElementById('card-total-actual').textContent = `AUD ${fmt(totalActual)}`;
-  document.getElementById('card-remaining').textContent    = `AUD ${fmt(remaining)}`;
-  document.getElementById('card-pct').textContent          = totalBudget > 0 ? `${pctUsed}% used` : '—';
-
-  const tfoot = document.getElementById('bud-tfoot');
-  if (tfoot.querySelector('td')) {
-    const cells = tfoot.querySelectorAll('td');
-    if (cells[1]) cells[1].textContent = `AUD ${fmt(totalBudget)}`;
-    if (cells[3]) cells[3].textContent = totalBudget > 0 ? pctUsed + '%' : '—';
-    if (cells[4]) {
-      cells[4].textContent = totalBudget > 0
-        ? (totalVar >= 0 ? '+' : '-') + 'AUD ' + fmt(Math.abs(totalVar)) : '—';
-      cells[4].className = totalVar >= 0 ? 'var-under' : 'var-over';
-    }
-  }
-}
-
+// ── Helpers ───────────────────────────────────────────────────────────
 function fmt(n) {
   return Number(n||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
