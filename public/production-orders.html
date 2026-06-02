@@ -85,7 +85,14 @@
 
     <div class="po-list-header">
       <h1>Production Orders</h1>
-      <button class="btn" onclick="window.location.href='/production-order.html'">+ New PO</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input type="search" id="po-search" placeholder="Search PO #, supplier or product…"
+          oninput="render()"
+          style="padding:7px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:0.85rem;
+                 color:#1e293b;outline:none;width:260px;box-sizing:border-box;"
+          onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='#e2e8f0'" />
+        <button class="btn" onclick="window.location.href='/production-order.html'">+ New PO</button>
+      </div>
     </div>
 
     <div class="po-toolbar">

@@ -67,9 +67,20 @@ function render() {
     ? allOrders
     : allOrders.filter(o => o.status === currentFilter);
 
+  const q = (document.getElementById('po-search')?.value || '').toLowerCase().trim();
+  if (q) {
+    orders = orders.filter(o =>
+      (o.po_number      || '').toLowerCase().includes(q) ||
+      (o.supplier_name  || '').toLowerCase().includes(q) ||
+      (o.line_summaries || []).some(l => (l.name || '').toLowerCase().includes(q))
+    );
+  }
+
   const tbody = document.getElementById('po-tbody');
   if (!orders.length) {
-    tbody.innerHTML = `<tr><td colspan="9" class="empty-cell">No orders found — <a href="/production-order.html" style="color:#6366f1">create one</a>.</td></tr>`;
+    tbody.innerHTML = q
+      ? `<tr><td colspan="9" class="empty-cell">No orders match "${escHtml(q)}".</td></tr>`
+      : `<tr><td colspan="9" class="empty-cell">No orders found — <a href="/production-order.html" style="color:#6366f1">create one</a>.</td></tr>`;
     return;
   }
 
