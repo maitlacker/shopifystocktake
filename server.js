@@ -1225,9 +1225,10 @@ app.get('/api/production-budgets', async (req, res) => {
       SELECT
         EXTRACT(MONTH FROM delivery_date)::int AS month,
         ROUND(SUM(
-          COALESCE((SELECT SUM(l.total_qty * l.unit_price) FROM production_order_lines l WHERE l.order_id=po.id),0)
-          * po.exchange_rate + po.shipping_cost
-        ) * CASE WHEN po.include_gst THEN 1.1 ELSE 1.0 END, 2) AS actual_aud
+          (COALESCE((SELECT SUM(l.total_qty * l.unit_price) FROM production_order_lines l WHERE l.order_id=po.id),0)
+          * po.exchange_rate + po.shipping_cost)
+          * CASE WHEN po.include_gst THEN 1.1 ELSE 1.0 END
+        ), 2) AS actual_aud
       FROM production_orders po
       WHERE EXTRACT(YEAR FROM delivery_date) = $1
         AND status NOT IN ('cancelled')
