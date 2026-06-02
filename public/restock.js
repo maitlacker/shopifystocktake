@@ -8,6 +8,7 @@ let globalSettings = {};
 let productConfigs = {};  // productId → config row
 let refreshPoller  = null;
 let modalVariants  = []; // variants for the currently open modal
+let allOrders      = []; // master PO list for search filtering
 
 // ── Boot ───────────────────────────────────────────────────────────
 (async function init() {
@@ -456,8 +457,22 @@ async function loadOrders() {
   try {
     const r = await fetch('/api/restock/orders');
     if (!r.ok) return;
-    renderOrders(await r.json());
+    allOrders = await r.json();
+    filterOrders();
   } catch (_) {}
+}
+
+function filterOrders() {
+  const q = (document.getElementById('po-search')?.value || '').toLowerCase().trim();
+  const visible = q
+    ? allOrders.filter(o =>
+        (o.product_title || '').toLowerCase().includes(q) ||
+        (o.status        || '').toLowerCase().includes(q) ||
+        (o.freight_mode  || '').toLowerCase().includes(q) ||
+        (o.notes         || '').toLowerCase().includes(q)
+      )
+    : allOrders;
+  renderOrders(visible);
 }
 
 function renderOrders(orders) {

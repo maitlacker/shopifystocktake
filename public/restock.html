@@ -462,7 +462,14 @@
 
     <!-- Purchase Orders section -->
     <div class="rs-orders-section">
-      <h3>Purchase Orders</h3>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid #e2e8f0;">
+        <h3 style="margin:0;padding:0;border:none;">Purchase Orders</h3>
+        <input type="search" id="po-search" placeholder="Search style, status, mode…"
+          oninput="filterOrders()"
+          style="padding:7px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:0.85rem;
+                 color:#1a1a2e;outline:none;width:240px;box-sizing:border-box;"
+          onfocus="this.style.borderColor='#4f46e5'" onblur="this.style.borderColor='#e2e8f0'" />
+      </div>
       <div style="overflow-x:auto">
         <table class="rs-orders-table" id="rs-orders-table">
           <thead>
