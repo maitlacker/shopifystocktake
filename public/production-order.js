@@ -9,6 +9,7 @@ let currentPO  = null;
 
 const NUMERIC_SIZES = ['6','8','10','12','14','16','18'];
 const ALPHA_SIZES   = ['XS','S','M','L','XL','XXL'];
+const PANTS_SIZES   = ['6','7','8','9','10','11','12','14','16','18'];
 
 // ── Boot ──────────────────────────────────────────────────────────
 (async function init() {
@@ -213,6 +214,7 @@ function renderLine(l) {
         <select id="l-sizeset-${l._lid}" onchange="onSizeSetChange(${l._lid})">
           <option value="numeric" ${l.sizeSet==='numeric'?'selected':''}>Numeric (6–18)</option>
           <option value="alpha"   ${l.sizeSet==='alpha'  ?'selected':''}>Alpha (XS–XXL)</option>
+          <option value="pants"   ${l.sizeSet==='pants'  ?'selected':''}>Pants/Jeans (6–18)</option>
         </select>
       </div>
       <div class="po-field" style="margin:0">
@@ -237,7 +239,7 @@ function renderLine(l) {
 }
 
 function buildSizeGrid(l) {
-  const sizes = l.sizeSet === 'alpha' ? ALPHA_SIZES : NUMERIC_SIZES;
+  const sizes = l.sizeSet === 'alpha' ? ALPHA_SIZES : l.sizeSet === 'pants' ? PANTS_SIZES : NUMERIC_SIZES;
   const cells = sizes.map(sz => `
     <div class="po-size-cell">
       <label>${sz}</label>
@@ -308,7 +310,7 @@ function onSizeSetChange(lid) {
 function onQtyChange(lid) {
   const line = lines.find(l => l._lid === lid);
   if (!line) return;
-  const sizes = line.sizeSet === 'alpha' ? ALPHA_SIZES : NUMERIC_SIZES;
+  const sizes = line.sizeSet === 'alpha' ? ALPHA_SIZES : line.sizeSet === 'pants' ? PANTS_SIZES : NUMERIC_SIZES;
   const qtys = {};
   let total = 0;
   sizes.forEach(sz => {

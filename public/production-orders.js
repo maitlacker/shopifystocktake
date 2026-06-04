@@ -8,6 +8,7 @@ let groupByMonth  = false;
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const NUMERIC_SIZES = ['6','8','10','12','14','16','18'];
 const ALPHA_SIZES   = ['XS','S','M','L','XL','XXL'];
+const PANTS_SIZES   = ['6','7','8','9','10','11','12','14','16','18'];
 
 (async function init() {
   await Promise.all([loadOrders(), loadBudgets()]);
@@ -161,7 +162,7 @@ function orderRow(o) {
   // Size / QTY breakdown column
   const qtyHtml = lines.length
     ? lines.map(l => {
-        const sizes = l.size_set === 'alpha' ? ALPHA_SIZES : NUMERIC_SIZES;
+        const sizes = l.size_set === 'alpha' ? ALPHA_SIZES : l.size_set === 'pants' ? PANTS_SIZES : NUMERIC_SIZES;
         const qtys  = l.quantities || {};
         const pills = sizes
           .filter(sz => qtys[sz] > 0)
