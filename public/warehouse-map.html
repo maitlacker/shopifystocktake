@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Warehouse Map — The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    html, body { height: 100%; margin: 0; overflow: hidden; }
+    body { display: flex; flex-direction: column; }
+    header { flex-shrink: 0; }
+
+    .wm-outer {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    /* ── Sidebar ── */
+    .wm-sidebar {
+      width: 220px;
+      min-width: 220px;
+      background: #fff;
+      border-right: 1px solid #e2e8f0;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .wm-section {
+      padding: 12px 14px;
+      border-bottom: 1px solid #f1f5f9;
+    }
+
+    .wm-section-title {
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: #94a3b8;
+      margin: 0 0 8px;
+    }
+
+    .wm-mode-btn {
+      display: block;
+      width: 100%;
+      padding: 8px 10px;
+      margin-bottom: 4px;
+      background: #f8fafc;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 7px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #475569;
+      cursor: pointer;
+      text-align: left;
+      transition: border-color 0.12s, color 0.12s;
+    }
+    .wm-mode-btn:hover  { border-color: #6366f1; color: #6366f1; }
+    .wm-mode-btn.active { background: #6366f1; border-color: #6366f1; color: #fff; }
+
+    .wm-btn-row { display: flex; gap: 6px; }
+    .wm-icon-btn {
+      flex: 1;
+      padding: 7px 4px;
+      background: #f8fafc;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 6px;
+      font-size: 0.88rem;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: center;
+      color: #475569;
+    }
+    .wm-icon-btn:hover { border-color: #6366f1; color: #6366f1; }
+
+    .wm-stat {
+      font-size: 0.82rem;
+      color: #334155;
+      font-weight: 600;
+      margin: 0;
+    }
+    .wm-hint {
+      font-size: 0.78rem;
+      color: #94a3b8;
+      margin: 0;
+      line-height: 1.5;
+    }
+
+    .wm-tip {
+      margin: 0 14px 8px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      line-height: 1.55;
+    }
+    .wm-tip.place { background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8; }
+    .wm-tip.walls { background: #fff7ed; border: 1px solid #fed7aa; color: #92400e; }
+
+    .wm-field { margin-bottom: 10px; }
+    .wm-field label {
+      display: block;
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #64748b;
+      margin-bottom: 4px;
+    }
+    .wm-field input, .wm-field select {
+      width: 100%;
+      padding: 6px 9px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      color: #1e293b;
+      box-sizing: border-box;
+      background: #fff;
+    }
+    .wm-field input:focus, .wm-field select:focus {
+      outline: none;
+      border-color: #6366f1;
+    }
+
+    .wm-legend { display: flex; flex-direction: column; gap: 5px; }
+    .wm-legend-item { display: flex; align-items: center; gap: 7px;
+                      font-size: 0.75rem; color: #475569; font-weight: 500; }
+    .wm-legend-swatch { width: 13px; height: 13px; border-radius: 3px; flex-shrink: 0; }
+
+    .btn-danger-sm {
+      background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5;
+      padding: 7px 10px; border-radius: 7px; font-weight: 600;
+      cursor: pointer; font-size: 0.82rem; width: 100%; margin-top: 6px;
+    }
+    .btn-danger-sm:hover { background: #fecaca; }
+
+    /* ── Canvas wrap ── */
+    .wm-canvas-wrap {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+      background: #f1f5f9;
+    }
+    #wm-canvas {
+      display: block;
+    }
+
+    .wm-sel-section { flex: 1; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <div class="wm-outer">
+
+    <!-- ── Sidebar ── -->
+    <div class="wm-sidebar">
+
+      <div class="wm-section">
+        <p class="wm-section-title">Mode</p>
+        <button id="wm-mode-select"    class="wm-mode-btn active" onclick="setMode('select')">↖ Select &amp; Move</button>
+        <button id="wm-mode-place"     class="wm-mode-btn"        onclick="setMode('place')">＋ Place Shelf</button>
+        <button id="wm-mode-editWalls" class="wm-mode-btn"        onclick="setMode('editWalls')">⬡ Edit Walls</button>
+      </div>
+
+      <div id="wm-tip-place" class="wm-tip place" style="display:none">
+        <b>Click</b> on map to place shelf<br>
+        <b>R</b> or <b>right-click</b> to rotate<br>
+        <b>Esc</b> to cancel
+      </div>
+      <div id="wm-tip-walls" class="wm-tip walls" style="display:none">
+        Drag the <b>red dots</b> to adjust wall corners.<br>
+        Orange dots = interior walls.
+      </div>
+
+      <div class="wm-section">
+        <p class="wm-section-title">View</p>
+        <div class="wm-btn-row">
+          <button class="wm-icon-btn" onclick="zoomIn()">＋</button>
+          <button class="wm-icon-btn" onclick="zoomOut()">－</button>
+          <button class="wm-icon-btn" onclick="autoFit()">⊡ Fit</button>
+        </div>
+        <p class="wm-hint" style="margin-top:6px">Scroll = zoom · Middle-drag = pan</p>
+      </div>
+
+      <div class="wm-section">
+        <p class="wm-section-title">Layout</p>
+        <p class="wm-stat" id="wm-shelf-count">0 shelves placed</p>
+        <p class="wm-hint" style="margin-top:4px">Each shelf: 1500 × 545 mm</p>
+      </div>
+
+      <div class="wm-section">
+        <p class="wm-section-title">Aisle Colours</p>
+        <div class="wm-legend" id="wm-aisle-legend"></div>
+      </div>
+
+      <div class="wm-section wm-sel-section">
+        <p class="wm-section-title">Selected Shelf</p>
+        <div id="wm-sel-info">
+          <p class="wm-hint">Click a shelf to edit it</p>
+        </div>
+      </div>
+
+      <div class="wm-section">
+        <button id="wm-save-btn" class="btn" style="width:100%" onclick="saveLayout()">
+          💾 Save Layout
+        </button>
+        <button class="btn btn-secondary" style="width:100%;margin-top:6px"
+                onclick="clearShelves()">Clear All Shelves</button>
+        <button class="btn btn-secondary" style="width:100%;margin-top:6px"
+                onclick="resetToDefaults()">Reset Walls to Default</button>
+      </div>
+
+    </div>
+
+    <!-- ── Canvas ── -->
+    <div class="wm-canvas-wrap">
+      <canvas id="wm-canvas"></canvas>
+    </div>
+
+  </div>
+  <script src="warehouse-map.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

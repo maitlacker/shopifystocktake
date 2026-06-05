@@ -533,6 +533,12 @@ async function initDb() {
       ON google_ads_assets(product_id);
     CREATE INDEX IF NOT EXISTS idx_google_ads_assets_synced
       ON google_ads_assets(synced_at DESC);
+
+    CREATE TABLE IF NOT EXISTS warehouse_layout (
+      id          INTEGER PRIMARY KEY DEFAULT 1,
+      layout_json JSONB   NOT NULL DEFAULT '{}',
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 }
 

@@ -1262,6 +1262,25 @@ app.put('/api/production-budgets/:year/:month', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Warehouse Layout ──────────────────────────────────────────────────────
+app.get('/api/warehouse/layout', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT layout_json FROM warehouse_layout WHERE id = 1');
+    res.json(rows.length ? rows[0].layout_json : {});
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/warehouse/layout', requireAuth, async (req, res) => {
+  try {
+    await pool.query(`
+      INSERT INTO warehouse_layout (id, layout_json, updated_at)
+      VALUES (1, $1, NOW())
+      ON CONFLICT (id) DO UPDATE SET layout_json = $1, updated_at = NOW()
+    `, [JSON.stringify(req.body)]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/production-orders/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   try {

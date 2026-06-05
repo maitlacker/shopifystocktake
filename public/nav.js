@@ -52,6 +52,7 @@
         { label: 'Production Orders', href: '/production-orders.html' },
         { label: 'Monthly Budgets',   href: '/production-budget.html' },
         { label: 'Suppliers',         href: '/suppliers.html' },
+        { label: 'Warehouse Map',     href: '/warehouse-map.html' },
       ],
     },
     {
