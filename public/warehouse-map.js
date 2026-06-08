@@ -169,7 +169,6 @@ function draw() {
   drawGrid();
   drawRoom();
   drawInteriorWalls();
-  drawZoneLabels();
   drawShelves();
 
   if (mode === 'editWalls')          drawWallHandles();
