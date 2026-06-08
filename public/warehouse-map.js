@@ -223,17 +223,29 @@ function drawShelf(s, selected) {
   ctx.fillRect(cx, cy, sw, sh);
   ctx.strokeRect(cx, cy, sw, sh);
 
-  // Show aisle label (custom label OR auto "A1"/"A2" if aisle assigned)
-  const txt = s.label || (s.aisle != null ? `A${s.aisle+1}` : '');
-  if (txt && zoom >= 28) {
+  // Show shelf label: custom label OR auto "A2-4" (aisle+bay) OR just "A2"
+  const autoTxt = s.aisle != null
+    ? `A${s.aisle+1}${s.bay != null ? '-' + s.bay : ''}`
+    : '';
+  const txt = s.label || autoTxt;
+  if (txt && zoom >= 22) {
     ctx.save();
     ctx.fillStyle    = '#fff';
-    ctx.font         = `700 ${Math.max(7, zoom*0.24)}px sans-serif`;
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'middle';
     ctx.shadowColor  = 'rgba(0,0,0,0.35)';
     ctx.shadowBlur   = 2;
-    ctx.fillText(txt.slice(0,8), cx+sw/2, cy+sh/2);
+    // If we have both aisle and bay, split onto two lines
+    if (!s.label && s.aisle != null && s.bay != null && zoom >= 32) {
+      const fs = Math.max(7, zoom * 0.22);
+      ctx.font = `700 ${fs}px sans-serif`;
+      ctx.fillText(`A${s.aisle+1}`, cx+sw/2, cy+sh/2 - fs*0.6);
+      ctx.font = `600 ${Math.max(6, zoom*0.19)}px sans-serif`;
+      ctx.fillText(`B${s.bay}`, cx+sw/2, cy+sh/2 + fs*0.55);
+    } else {
+      ctx.font = `700 ${Math.max(7, zoom*0.24)}px sans-serif`;
+      ctx.fillText(txt.slice(0,8), cx+sw/2, cy+sh/2);
+    }
     ctx.restore();
   }
 
@@ -629,12 +641,26 @@ function deleteSelection() {
 }
 
 function assignAisleToSelection(val) {
-  const aisleVal=val===''?null:+val;
+  const aisleVal=(val===''||val==='clear')?null:+val;
   for (const id of selIds) {
     const s=layout.shelves.find(s=>s.id===id);
     if (s) s.aisle=aisleVal;
   }
   draw();
+}
+
+function autoNumberBays() {
+  const selected=layout.shelves.filter(s=>selIds.has(s.id));
+  if (selected.length===0) return;
+  const startInput=document.getElementById('wm-bay-start');
+  const startFrom=startInput ? Math.max(1,+startInput.value||1) : 1;
+  // Determine dominant axis: sort by Y (along aisle) or X (across aisles)
+  const xs=selected.map(s=>s.x), ys=selected.map(s=>s.y);
+  const xSpread=Math.max(...xs)-Math.min(...xs);
+  const ySpread=Math.max(...ys)-Math.min(...ys);
+  selected.sort((a,b)=> ySpread>=xSpread ? a.y-b.y : a.x-b.x);
+  selected.forEach((s,i)=>{ s.bay=startFrom+i; });
+  draw(); updateSidebar();
 }
 
 // ── Wall operations ───────────────────────────────────────────────────────
@@ -698,13 +724,29 @@ function updateSidebar() {
         <select onchange="assignAisleToSelection(this.value)">
           <option value="">— Choose Aisle —</option>
           ${aisleOpts}
-          <option value="">Clear / Unassigned</option>
+          <option value="clear">Clear / Unassigned</option>
         </select>
+      </div>
+      <div class="wm-field">
+        <label>Auto-number Bays</label>
+        <p class="wm-hint" style="margin-bottom:5px">Sorts by position, assigns 1, 2, 3…</p>
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+          <span style="font-size:0.8rem;color:#64748b;white-space:nowrap">Start from</span>
+          <input type="number" id="wm-bay-start" min="1" max="99" value="1"
+                 style="width:54px;padding:5px 7px;border:1.5px solid #e2e8f0;
+                        border-radius:6px;font-size:0.85rem" />
+        </div>
+        <button onclick="autoNumberBays()"
+                style="width:100%;padding:7px 10px;background:#eff6ff;color:#1d4ed8;
+                       border:1.5px solid #bfdbfe;border-radius:7px;font-weight:600;
+                       cursor:pointer;font-size:0.82rem">
+          ↕ Number by Position
+        </button>
       </div>
       <button onclick="deleteSelection()"
               style="width:100%;padding:7px;background:#fee2e2;color:#b91c1c;
                      border:1px solid #fca5a5;border-radius:7px;font-weight:600;
-                     cursor:pointer;font-size:0.82rem;margin-top:6px">
+                     cursor:pointer;font-size:0.82rem;margin-top:4px">
         🗑 Delete ${selIds.size} shelves
       </button>`;
     return;
@@ -719,18 +761,31 @@ function updateSidebar() {
     ...AISLE_COLORS.map((_,i)=>`<option value="${i}" ${s.aisle===i?'selected':''}>Aisle ${i+1}</option>`),
   ].join('');
 
+  const locPreview = s.aisle != null
+    ? `A${s.aisle+1}${s.bay != null ? '-B'+s.bay : ' (no bay yet)'}`
+    : '(no aisle assigned)';
   info.innerHTML=`
-    <div class="wm-field">
-      <label>Location Code</label>
-      <input type="text" value="${esc(s.label)}"
-             oninput="patchShelf('${s.id}','label',this.value)"
-             placeholder="e.g. 1-4-L" />
-    </div>
+    <p class="wm-hint" style="margin-bottom:8px;font-size:0.76rem">
+      Location: <b style="color:#334155">${esc(locPreview)}</b>
+    </p>
     <div class="wm-field">
       <label>Aisle</label>
-      <select onchange="patchShelf('${s.id}','aisle',this.value===''?null:+this.value)">
+      <select onchange="patchShelf('${s.id}','aisle',this.value===''?null:+this.value);updateSidebar()">
         ${aisleOpts}
       </select>
+    </div>
+    <div class="wm-field">
+      <label>Bay #</label>
+      <input type="number" min="1" max="99"
+             value="${s.bay != null ? s.bay : ''}"
+             oninput="patchShelf('${s.id}','bay',this.value===''?null:+this.value);updateSidebar()"
+             placeholder="e.g. 4" />
+    </div>
+    <div class="wm-field">
+      <label>Custom Label <span style="font-weight:400;text-transform:none;font-size:0.68rem;color:#94a3b8">(overrides auto)</span></label>
+      <input type="text" value="${esc(s.label)}"
+             oninput="patchShelf('${s.id}','label',this.value)"
+             placeholder="leave blank for auto" />
     </div>
     <div class="wm-field">
       <button class="btn btn-secondary" style="width:100%;font-size:0.82rem"
