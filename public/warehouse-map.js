@@ -55,6 +55,31 @@ let mouseW    = {x:0, y:0};  // current mouse in world (metres)
 
 let canvas, ctx;
 
+// ── Undo History ──────────────────────────────────────────────────────────
+const MAX_HISTORY = 50;
+let history = [];
+
+function pushHistory() {
+  history.push(JSON.stringify(layout));
+  if (history.length > MAX_HISTORY) history.shift();
+  const btn = document.getElementById('wm-undo-btn');
+  if (btn) btn.disabled = false;
+}
+
+function undo() {
+  if (history.length === 0) return;
+  layout = JSON.parse(history.pop());
+  selIds = new Set(); selWallIdx = null;
+  updateSidebar(); updateUI(); draw();
+  const btn = document.getElementById('wm-undo-btn');
+  if (btn) {
+    btn.disabled = history.length === 0;
+    const orig = btn.textContent;
+    btn.textContent = '↩ Undone!';
+    setTimeout(() => { btn.textContent = orig; }, 800);
+  }
+}
+
 function buildDefaultLayout() {
   return {
     walls:         DEFAULT_WALLS.map(v=>({...v})),
@@ -400,6 +425,7 @@ function onDown(e) {
     if (!wallStart) {
       wallStart = {x:snapV(w.x), y:snapV(w.y)};
     } else {
+      pushHistory();
       layout.interiorWalls.push([
         {x:wallStart.x, y:wallStart.y},
         {x:snapV(w.x),  y:snapV(w.y)},
@@ -419,6 +445,7 @@ function onDown(e) {
     for (let i=0; i<layout.walls.length; i++) {
       const p=w2c(layout.walls[i].x,layout.walls[i].y);
       if (Math.hypot(cx-p.x,cy-p.y)<12) {
+        pushHistory();
         drag={type:'wallVtx',idx:i,sx:e.clientX,sy:e.clientY,
               ox:layout.walls[i].x,oy:layout.walls[i].y};
         selWallIdx=null; updateWallSidebar(); return;
@@ -429,6 +456,7 @@ function onDown(e) {
       for (let vi=0; vi<layout.interiorWalls[wi].length; vi++) {
         const p=w2c(layout.interiorWalls[wi][vi].x,layout.interiorWalls[wi][vi].y);
         if (Math.hypot(cx-p.x,cy-p.y)<12) {
+          pushHistory();
           drag={type:'iWallVtx',wi,vi,sx:e.clientX,sy:e.clientY,
                 ox:layout.interiorWalls[wi][vi].x,oy:layout.interiorWalls[wi][vi].y};
           selWallIdx=wi; updateWallSidebar(); return;
@@ -440,6 +468,7 @@ function onDown(e) {
     if (segHit) {
       if (segHit.type==='outerSeg') {
         // Insert new vertex at the click position
+        pushHistory();
         layout.walls.splice(segHit.idx+1, 0, {x:snapV(w.x), y:snapV(w.y)});
         selWallIdx=null;
       } else {
@@ -467,6 +496,7 @@ function onDown(e) {
   if (hit) {
     if (!selIds.has(hit)) selIds = new Set([hit]);
     // Start drag for all selected shelves
+    pushHistory();
     drag = {
       type:'shelf', sx:e.clientX, sy:e.clientY,
       origPositions: [...selIds].map(id => {
@@ -491,7 +521,7 @@ function onDblClick(e) {
   for (let i=0; i<layout.walls.length; i++) {
     const p=w2c(layout.walls[i].x,layout.walls[i].y);
     if (Math.hypot(cx-p.x,cy-p.y)<12) {
-      if (layout.walls.length>3) layout.walls.splice(i,1);
+      if (layout.walls.length>3) { pushHistory(); layout.walls.splice(i,1); }
       draw(); return;
     }
   }
@@ -500,6 +530,7 @@ function onDblClick(e) {
     for (let vi=0; vi<layout.interiorWalls[wi].length; vi++) {
       const p=w2c(layout.interiorWalls[wi][vi].x,layout.interiorWalls[wi][vi].y);
       if (Math.hypot(cx-p.x,cy-p.y)<12) {
+        pushHistory();
         if (layout.interiorWalls[wi].length<=2) {
           layout.interiorWalls.splice(wi,1);
           if (selWallIdx===wi) selWallIdx=null;
@@ -582,6 +613,10 @@ function onWheel(e) {
 function onKey(e) {
   if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
 
+  if ((e.key==='z'||e.key==='Z') && (e.ctrlKey||e.metaKey)) {
+    e.preventDefault(); undo(); return;
+  }
+
   if (e.key==='Escape') {
     if (mode==='addWall') { wallStart=null; setMode('editWalls'); }
     else { setMode('select'); }
@@ -615,6 +650,7 @@ function hitShelf(wx,wy) {
 
 // ── Shelf operations ──────────────────────────────────────────────────────
 function placeShelf(wx,wy) {
+  pushHistory();
   const vert=ghostRot===90;
   const sx=snapV(wx)-(vert?SHELF_D:SHELF_W)/2;
   const sy=snapV(wy)-(vert?SHELF_W:SHELF_D)/2;
@@ -625,6 +661,7 @@ function placeShelf(wx,wy) {
 }
 
 function rotateSelected() {
+  pushHistory();
   for (const id of selIds) {
     const s=layout.shelves.find(s=>s.id===id);
     if (s) s.rot=s.rot===0?90:0;
@@ -635,12 +672,14 @@ function rotateSelected() {
 function deleteSelection() {
   if (selIds.size===0) return;
   if (selIds.size>1 && !confirm(`Delete ${selIds.size} shelves?`)) return;
+  pushHistory();
   layout.shelves=layout.shelves.filter(s=>!selIds.has(s.id));
   selIds=new Set();
   updateSidebar(); updateUI(); draw();
 }
 
 function assignAisleToSelection(val) {
+  pushHistory();
   const aisleVal=(val===''||val==='clear')?null:+val;
   for (const id of selIds) {
     const s=layout.shelves.find(s=>s.id===id);
@@ -650,6 +689,7 @@ function assignAisleToSelection(val) {
 }
 
 function autoNumberBays() {
+  pushHistory();
   const selected=layout.shelves.filter(s=>selIds.has(s.id));
   if (selected.length===0) return;
   const startInput=document.getElementById('wm-bay-start');
@@ -671,6 +711,7 @@ function startAddWall() {
 
 function deleteSelectedWall() {
   if (selWallIdx===null) return;
+  pushHistory();
   layout.interiorWalls.splice(selWallIdx,1);
   selWallIdx=null;
   updateWallSidebar(); draw();
@@ -679,12 +720,14 @@ function deleteSelectedWall() {
 function clearShelves() {
   if (!layout.shelves.length) return;
   if (!confirm('Remove all placed shelves?')) return;
+  pushHistory();
   layout.shelves=[]; selIds=new Set();
   updateSidebar(); updateUI(); draw();
 }
 
 function resetToDefaults() {
   if (!confirm('Reset walls to original RoomScan layout? Shelves will also be cleared.')) return;
+  pushHistory();
   layout=buildDefaultLayout(); selIds=new Set(); selWallIdx=null;
   updateSidebar(); updateUI(); autoFit();
 }
