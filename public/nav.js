@@ -53,6 +53,7 @@
         { label: 'Monthly Budgets',   href: '/production-budget.html' },
         { label: 'Suppliers',         href: '/suppliers.html' },
         { label: 'Warehouse Map',     href: '/warehouse-map.html' },
+        { label: 'Stock Locations',   href: '/locations.html' },
       ],
     },
     {

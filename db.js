@@ -539,6 +539,17 @@ async function initDb() {
       layout_json JSONB   NOT NULL DEFAULT '{}',
       updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS stock_locations (
+      id           SERIAL PRIMARY KEY,
+      product_id   VARCHAR NOT NULL,
+      variant_id   VARCHAR NOT NULL DEFAULT '',
+      aisle        INTEGER,
+      bay          INTEGER,
+      excess_loc   TEXT,
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(product_id, variant_id)
+    );
   `);
 }
 

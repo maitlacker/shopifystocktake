@@ -1262,6 +1262,63 @@ app.put('/api/production-budgets/:year/:month', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Stock Locations ───────────────────────────────────────────────────────
+app.get('/api/locations/products', requireAuth, async (req, res) => {
+  try {
+    if (!productsCache.length) {
+      productsCache = await fetchAllProducts();
+      lastFetched = new Date();
+    }
+    res.json(productsCache.map(p => ({
+      id: p.id,
+      title: p.title,
+      image: (p.images && p.images.length) ? p.images[0].src : null,
+      variants: p.variants.map(v => ({ id: v.id, title: v.title, sku: v.sku || '' }))
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/locations', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM stock_locations ORDER BY updated_at DESC');
+    const result = {};
+    for (const row of rows) {
+      if (!result[row.product_id]) result[row.product_id] = { aisle: null, bay: null, excess_loc: '', variants: {} };
+      if (row.variant_id === '') {
+        result[row.product_id].aisle = row.aisle;
+        result[row.product_id].bay = row.bay;
+        result[row.product_id].excess_loc = row.excess_loc || '';
+      } else {
+        result[row.product_id].variants[row.variant_id] = { aisle: row.aisle, bay: row.bay };
+      }
+    }
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/locations', requireAuth, async (req, res) => {
+  try {
+    const { product_id, variant_id = '', aisle, bay, excess_loc } = req.body;
+    if (!product_id) return res.status(400).json({ error: 'product_id required' });
+    await pool.query(`
+      INSERT INTO stock_locations (product_id, variant_id, aisle, bay, excess_loc, updated_at)
+      VALUES ($1, $2, $3, $4, $5, NOW())
+      ON CONFLICT (product_id, variant_id) DO UPDATE
+        SET aisle = $3, bay = $4, excess_loc = $5, updated_at = NOW()
+    `, [product_id, variant_id, aisle || null, bay || null, excess_loc || null]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/locations/variant', requireAuth, async (req, res) => {
+  try {
+    const { product_id, variant_id } = req.body;
+    await pool.query('DELETE FROM stock_locations WHERE product_id=$1 AND variant_id=$2 AND variant_id<>\'\'',
+      [product_id, variant_id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Warehouse Layout ──────────────────────────────────────────────────────
 app.get('/api/warehouse/layout', requireAuth, async (req, res) => {
   try {
