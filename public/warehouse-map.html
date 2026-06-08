@@ -169,8 +169,27 @@
         <b>Esc</b> to cancel
       </div>
       <div id="wm-tip-walls" class="wm-tip walls" style="display:none">
-        Drag the <b>red dots</b> to adjust wall corners.<br>
-        Orange dots = interior walls.
+        <b>Red dots</b> = outer corners (drag to move).<br>
+        <b>Orange dots</b> = interior wall pts.<br>
+        <b>Click segment</b> to insert a vertex.<br>
+        <b>Dbl-click vertex</b> to delete it.
+      </div>
+
+      <!-- shown only in editWalls / addWall modes -->
+      <div id="wm-wall-tools" class="wm-section" style="display:none">
+        <p class="wm-section-title">Wall Tools</p>
+        <button class="wm-mode-btn" onclick="startAddWall()" style="margin-bottom:6px">
+          ✏️ Draw New Wall
+        </button>
+        <!-- shown when an interior wall segment is selected -->
+        <div id="wm-wall-sel" style="display:none">
+          <p class="wm-hint" style="margin-bottom:6px">Interior wall selected</p>
+          <button class="btn-danger-sm" onclick="deleteSelectedWall()">🗑 Delete Wall</button>
+        </div>
+        <p class="wm-hint" style="margin-top:8px">
+          Click a wall segment to select it.<br>
+          <b>Del</b> key deletes selected wall.
+        </p>
       </div>
 
       <div class="wm-section">
