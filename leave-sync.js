@@ -116,15 +116,13 @@ async function createLeaveInXero(pool, requestId) {
 
   const leaveTypeId = await getAnnualLeaveTypeId();
 
-  const payload = {
-    LeaveApplications: [{
-      EmployeeID:  req.xero_employee_id,
-      LeaveTypeID: leaveTypeId,
-      StartDate:   toXeroDate(req.start_date.toISOString().slice(0, 10)),
-      EndDate:     toXeroDate(req.end_date.toISOString().slice(0, 10)),
-      Description: req.notes || 'Annual Leave',
-    }],
-  };
+  const payload = [{
+    EmployeeID:  req.xero_employee_id,
+    LeaveTypeID: leaveTypeId,
+    StartDate:   toXeroDate(req.start_date.toISOString().slice(0, 10)),
+    EndDate:     toXeroDate(req.end_date.toISOString().slice(0, 10)),
+    Description: req.notes || 'Annual Leave',
+  }];
 
   const result = await payrollPost('/LeaveApplications', payload);
   const created = (result.LeaveApplications || [])[0];
