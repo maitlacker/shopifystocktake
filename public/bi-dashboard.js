@@ -115,18 +115,37 @@ function render(d) {
   if (!xero || xero.length === 0) {
     xeroTbody.innerHTML = `
       <tr>
-        <td colspan="8" style="text-align:center; padding:28px; color:#94a3b8;">
+        <td colspan="11" style="text-align:center; padding:28px; color:#94a3b8;">
           No P&L data for this period.
           <a href="/syncing.html" style="color:#4f46e5;">Sync from Xero</a> first.
         </td>
       </tr>`;
     xeroNote.style.display = 'none';
   } else {
+    // Sum EBITDA across all months in period for the KPI card
+    const totalEbitda   = xero.reduce((s, r) => s + (r.ebitda  || 0), 0);
+    const totalRevenue  = xero.reduce((s, r) => s + (r.revenue || 0), 0);
+    const totalDa       = xero.reduce((s, r) => s + (r.da      || 0), 0);
+    const ebitdaPct     = totalRevenue > 0 ? (totalEbitda / totalRevenue) * 100 : null;
+    const ebitdaEl      = document.getElementById('kpiEbitda');
+    const ebitdaSubEl   = document.getElementById('kpiEbitdaSub');
+    if (ebitdaEl)    ebitdaEl.textContent    = fmtCurrency(totalEbitda);
+    if (ebitdaSubEl) ebitdaSubEl.textContent = ebitdaPct != null
+      ? `${ebitdaPct.toFixed(1)}% margin${totalDa > 0 ? ' · D&A $' + fmtNum(Math.round(totalDa)) : ''}`
+      : (totalDa > 0 ? `D&A $${fmtNum(Math.round(totalDa))} added back` : 'No D&A found in line items');
+
     xeroTbody.innerHTML = xero.map((r) => {
-      const gpPct = r.revenue > 0 ? (r.grossProfit / r.revenue) * 100 : null;
-      const npPct = r.revenue > 0 ? (r.netProfit  / r.revenue) * 100 : null;
-      const gpCls = r.grossProfit > 0 ? 'good' : (r.grossProfit < 0 ? 'bad' : '');
-      const npCls = r.netProfit  > 0 ? 'good' : (r.netProfit  < 0 ? 'bad' : '');
+      const gpPct     = r.revenue > 0 ? (r.grossProfit / r.revenue) * 100 : null;
+      const npPct     = r.revenue > 0 ? (r.netProfit   / r.revenue) * 100 : null;
+      const ebitdaPct = r.revenue > 0 ? (r.ebitda      / r.revenue) * 100 : null;
+      const gpCls     = r.grossProfit > 0 ? 'good' : (r.grossProfit < 0 ? 'bad' : '');
+      const npCls     = r.netProfit   > 0 ? 'good' : (r.netProfit   < 0 ? 'bad' : '');
+      const ebCls     = r.ebitda      > 0 ? 'good' : (r.ebitda      < 0 ? 'bad' : '');
+      const daTitle   = [
+        r.da       > 0 ? `D&A $${Math.round(r.da).toLocaleString()}`       : '',
+        r.interest > 0 ? `Interest $${Math.round(r.interest).toLocaleString()}` : '',
+        r.taxExp   > 0 ? `Tax $${Math.round(r.taxExp).toLocaleString()}`   : '',
+      ].filter(Boolean).join(' + ') || 'No addbacks found';
       return `<tr>
         <td>${fmtMonth(r.month)}</td>
         <td>${fmtCurrency(r.revenue)}</td>
@@ -136,9 +155,12 @@ function render(d) {
         <td>${fmtCurrency(r.expenses)}</td>
         <td class="${npCls}">${fmtCurrency(r.netProfit)}</td>
         <td class="${npCls}">${npPct != null ? npPct.toFixed(1) + '%' : '–'}</td>
+        <td title="${daTitle}" style="color:#64748b;font-size:0.82em">${(r.da + r.interest + r.taxExp) > 0 ? fmtCurrency(r.da + r.interest + r.taxExp) : '<span class="dim">–</span>'}</td>
+        <td class="${ebCls}">${fmtCurrency(r.ebitda)}</td>
+        <td class="${ebCls}">${ebitdaPct != null ? ebitdaPct.toFixed(1) + '%' : '–'}</td>
       </tr>`;
     }).join('');
-    xeroNote.textContent   = 'Xero P&L is monthly — showing months that overlap with your selected period.';
+    xeroNote.textContent   = 'Xero P&L is monthly. D&A column = Depreciation + Amortisation + Interest addbacks identified from Xero line items.';
     xeroNote.style.display = 'block';
   }
 }

@@ -3357,6 +3357,37 @@ app.get('/api/bi/summary', async (req, res) => {
       ORDER BY period_start DESC
     `, [start, end]);
 
+    // ── EBITDA addbacks from P&L line items ───────────────────────
+    const { rows: addbackRows } = await pool.query(`
+      SELECT
+        to_char(period_start, 'YYYY-MM') AS month,
+        COALESCE(SUM(CASE WHEN
+          LOWER(account_name) LIKE '%depreciation%' OR
+          LOWER(account_name) LIKE '%amortis%'      OR
+          LOWER(account_name) LIKE '%amortiz%'
+          THEN ABS(value) ELSE 0 END), 0) AS da,
+        COALESCE(SUM(CASE WHEN
+          LOWER(account_name) LIKE '%interest%'
+          THEN ABS(value) ELSE 0 END), 0) AS interest,
+        COALESCE(SUM(CASE WHEN
+          LOWER(account_name) LIKE '%income tax%'   OR
+          LOWER(account_name) LIKE '%tax expense%'  OR
+          (LOWER(account_name) LIKE '%tax%' AND LOWER(section) LIKE '%tax%')
+          THEN ABS(value) ELSE 0 END), 0) AS tax_exp
+      FROM xero_pl_lines
+      WHERE period_end >= $1 AND period_start <= $2
+      GROUP BY to_char(period_start, 'YYYY-MM')
+    `, [start, end]);
+
+    const addbackMap = {};
+    for (const r of addbackRows) {
+      addbackMap[r.month] = {
+        da:       parseFloat(r.da),
+        interest: parseFloat(r.interest),
+        taxExp:   parseFloat(r.tax_exp),
+      };
+    }
+
     const s = sRows[0];
     const g = gRows[0];
     const m = mRows[0];
@@ -3405,14 +3436,22 @@ app.get('/api/bi/summary', async (req, res) => {
         mer:            totalSpend > 0 ? sRevenue / totalSpend : 0,
         adCostPerOrder: sOrders  > 0 ? totalSpend / sOrders  : 0,
       },
-      xero: xRows.map((r) => ({
-        month:       r.month,
-        revenue:     parseFloat(r.revenue),
-        cogs:        parseFloat(r.cogs),
-        grossProfit: parseFloat(r.gross_profit),
-        expenses:    parseFloat(r.expenses),
-        netProfit:   parseFloat(r.net_profit),
-      })),
+      xero: xRows.map((r) => {
+        const ab = addbackMap[r.month] || { da: 0, interest: 0, taxExp: 0 };
+        const netProfit = parseFloat(r.net_profit);
+        return {
+          month:       r.month,
+          revenue:     parseFloat(r.revenue),
+          cogs:        parseFloat(r.cogs),
+          grossProfit: parseFloat(r.gross_profit),
+          expenses:    parseFloat(r.expenses),
+          netProfit,
+          da:          ab.da,
+          interest:    ab.interest,
+          taxExp:      ab.taxExp,
+          ebitda:      netProfit + ab.da + ab.interest + ab.taxExp,
+        };
+      }),
     });
   } catch (err) {
     console.error('[bi/summary] Error:', err.message);

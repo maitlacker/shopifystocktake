@@ -68,6 +68,7 @@
     .bi-kpi--items::before    { background: #0891b2; }
     .bi-kpi--groas::before    { background: #ea580c; }
     .bi-kpi--mroas::before    { background: #1d4ed8; }
+    .bi-kpi--ebitda::before   { background: #0f766e; }
 
     .bi-kpi-label {
       font-size: 0.68rem;
@@ -247,6 +248,11 @@
           <div class="bi-kpi-value" id="kpiMroas">–</div>
           <div class="bi-kpi-sub" id="kpiMspend">–</div>
         </div>
+        <div class="bi-kpi bi-kpi--ebitda">
+          <div class="bi-kpi-label">EBITDA</div>
+          <div class="bi-kpi-value" id="kpiEbitda">–</div>
+          <div class="bi-kpi-sub" id="kpiEbitdaSub">–</div>
+        </div>
 
       </div>
 
@@ -288,6 +294,9 @@
                 <th>Expenses</th>
                 <th>Net Profit</th>
                 <th>NP%</th>
+                <th title="Depreciation &amp; Amortisation addback">D&amp;A</th>
+                <th>EBITDA</th>
+                <th>EBITDA%</th>
               </tr>
             </thead>
             <tbody id="xeroTbody"></tbody>
