@@ -9,6 +9,7 @@
       if (btn.dataset.tab === 'pending')   loadPending();
       if (btn.dataset.tab === 'history')   loadHistory();
       if (btn.dataset.tab === 'employees') loadEmployees();
+      if (btn.dataset.tab === 'blackouts') loadBlackouts();
     });
   });
 
@@ -231,6 +232,74 @@
         </td>
         <td>${active}</td>
       </tr>`;
+  }
+
+  // ── Blackout dates ────────────────────────────────────────────────
+  document.getElementById('blackoutForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const name  = document.getElementById('boName').value.trim();
+    const start = document.getElementById('boStart').value;
+    const end   = document.getElementById('boEnd').value;
+    if (new Date(end) < new Date(start)) {
+      showStatus('End date must be on or after start date', 'error');
+      return;
+    }
+    try {
+      const res  = await fetch('/api/leave/blackouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, start_date: start, end_date: end }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      document.getElementById('boName').value  = '';
+      document.getElementById('boStart').value = '';
+      document.getElementById('boEnd').value   = '';
+      showStatus(`Blackout period "${name}" added`, 'success');
+      loadBlackouts();
+    } catch (err) {
+      showStatus(`Failed: ${err.message}`, 'error');
+    }
+  });
+
+  async function loadBlackouts() {
+    const tbody = document.getElementById('blackoutTbody');
+    tbody.innerHTML = `<tr><td colspan="5" class="la-empty">Loading…</td></tr>`;
+    try {
+      const res  = await fetch('/api/leave/blackouts');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      const rows = data.blackouts || [];
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="5" class="la-empty">No blackout periods defined</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = rows.map(b => {
+        const days = Math.round((new Date(b.end_date) - new Date(b.start_date)) / 86400000) + 1;
+        return `<tr>
+          <td style="font-weight:600;">${escHtml(b.name)}</td>
+          <td>${fmtDate(b.start_date)}</td>
+          <td>${fmtDate(b.end_date)}</td>
+          <td>${days} day${days !== 1 ? 's' : ''}</td>
+          <td><button class="la-action-btn reject" data-del="${b.id}">Remove</button></td>
+        </tr>`;
+      }).join('');
+      tbody.querySelectorAll('[data-del]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Remove this blackout period?')) return;
+          try {
+            const res = await fetch(`/api/leave/blackouts/${btn.dataset.del}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error((await res.json()).error);
+            showStatus('Blackout period removed', 'success');
+            loadBlackouts();
+          } catch (err) {
+            showStatus(`Failed: ${err.message}`, 'error');
+          }
+        });
+      });
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="5" class="la-empty">Error: ${escHtml(err.message)}</td></tr>`;
+    }
   }
 
   // ── Slack digest ──────────────────────────────────────────────────

@@ -4450,6 +4450,20 @@ app.post('/api/leave/requests', requireAuth, async (req, res) => {
 
   try {
     const email = req.user.email;
+    // Check blackout periods
+    const { rows: blackouts } = await pool.query(
+      `SELECT name, start_date, end_date FROM leave_blackouts
+       WHERE start_date <= $2 AND end_date >= $1`,
+      [start_date, end_date]
+    );
+    if (blackouts.length) {
+      const names = blackouts.map(b => b.name).join(', ');
+      return res.status(400).json({
+        error: `Your requested dates overlap a blackout period: ${names}. Annual leave cannot be taken during this time.`,
+        blackout: true,
+      });
+    }
+
     // Find linked employee
     const { rows: empRows } = await pool.query(
       `SELECT id FROM leave_employees WHERE wms_email=$1 AND is_active=TRUE LIMIT 1`,
@@ -4522,6 +4536,51 @@ app.get('/api/leave/slack-preview', requireAuth, requireLeaveAdmin, async (req, 
   try {
     const message = await leaveSync.buildSlackMessage(pool);
     res.json({ message });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/leave/blackouts — list all blackout periods (all staff, so the form can validate)
+app.get('/api/leave/blackouts', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM leave_blackouts ORDER BY start_date`
+    );
+    res.json({ blackouts: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/leave/blackouts — create a blackout period (admin only)
+app.post('/api/leave/blackouts', requireAuth, requireLeaveAdmin, async (req, res) => {
+  const { name, start_date, end_date } = req.body;
+  if (!name || !start_date || !end_date) {
+    return res.status(400).json({ error: 'name, start_date and end_date are required' });
+  }
+  if (new Date(end_date) < new Date(start_date)) {
+    return res.status(400).json({ error: 'end_date must be on or after start_date' });
+  }
+  try {
+    const { rows: [blackout] } = await pool.query(
+      `INSERT INTO leave_blackouts (name, start_date, end_date) VALUES ($1,$2,$3) RETURNING *`,
+      [name.trim(), start_date, end_date]
+    );
+    res.json({ blackout });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/leave/blackouts/:id (admin only)
+app.delete('/api/leave/blackouts/:id', requireAuth, requireLeaveAdmin, async (req, res) => {
+  try {
+    const { rowCount } = await pool.query(
+      `DELETE FROM leave_blackouts WHERE id=$1`, [req.params.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

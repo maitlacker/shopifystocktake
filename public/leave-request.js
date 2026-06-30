@@ -16,6 +16,35 @@
   startDate.min = today;
   endDate.min   = today;
 
+  // ── Load & display blackout periods ───────────────────────────────
+  let blackouts = [];
+
+  async function loadBlackouts() {
+    try {
+      const res  = await fetch('/api/leave/blackouts');
+      const data = await res.json();
+      blackouts = data.blackouts || [];
+      if (!blackouts.length) return;
+      const lines = blackouts.map(b =>
+        `<strong>${escHtml(b.name)}</strong>: ${fmtDate(b.start_date)} – ${fmtDate(b.end_date)}`
+      ).join('<br>');
+      const banner = document.createElement('div');
+      banner.style.cssText = 'background:#fef2f2;border:1px solid #fca5a5;border-radius:12px;padding:14px 18px;margin-bottom:18px;font-size:0.85rem;color:#7f1d1d;';
+      banner.innerHTML = `<strong style="display:block;margin-bottom:6px;">🚫 Annual Leave Blackout Periods</strong>${lines}`;
+      document.getElementById('statusBar').insertAdjacentElement('afterend', banner);
+    } catch (e) { /* non-fatal */ }
+  }
+
+  // Check if selected dates overlap any blackout
+  function checkBlackoutOverlap() {
+    const s = startDate.value;
+    const e = endDate.value;
+    if (!s || !e || !blackouts.length) return null;
+    return blackouts.find(b =>
+      new Date(b.start_date) <= new Date(e) && new Date(b.end_date) >= new Date(s)
+    ) || null;
+  }
+
   // ── Check if user is linked ────────────────────────────────────────
   async function checkLinked() {
     try {
@@ -41,6 +70,13 @@
     if (!s || !e) { daysHint.textContent = ''; btnSubmit.disabled = !linkedEmployee; return; }
     if (new Date(e) < new Date(s)) {
       daysHint.textContent = '⚠ End date must be on or after start date';
+      daysHint.style.color = '#b91c1c';
+      btnSubmit.disabled = true;
+      return;
+    }
+    const overlap = checkBlackoutOverlap();
+    if (overlap) {
+      daysHint.textContent = `⛔ Blackout period: ${overlap.name}`;
       daysHint.style.color = '#b91c1c';
       btnSubmit.disabled = true;
       return;
@@ -145,6 +181,7 @@
   }
 
   // ── Init ──────────────────────────────────────────────────────────
+  loadBlackouts();
   checkLinked();
   loadRequests();
 })();

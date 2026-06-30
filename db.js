@@ -628,6 +628,16 @@ async function initDb() {
       ON leave_requests(start_date, end_date);
     CREATE INDEX IF NOT EXISTS idx_leave_requests_status
       ON leave_requests(status);
+
+    CREATE TABLE IF NOT EXISTS leave_blackouts (
+      id          SERIAL PRIMARY KEY,
+      name        TEXT NOT NULL,
+      start_date  DATE NOT NULL,
+      end_date    DATE NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_leave_blackouts_dates
+      ON leave_blackouts(start_date, end_date);
   `);
 }
 
