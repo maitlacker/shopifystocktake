@@ -23,6 +23,7 @@ const stockValueSync   = require('./stock-value-sync');
 const adsAssetSync     = require('./google-ads-asset-sync');
 const arcadsSync       = require('./arcads-sync');
 const leaveSync        = require('./leave-sync');
+const mailer           = require('./email');
 
 const anthropicClient = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -4483,6 +4484,22 @@ app.post('/api/leave/requests', requireAuth, async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
       [employeeId, email, start_date, end_date, days, notes || null]
     );
+
+    // Notify admin
+    const { rows: [emp] } = await pool.query(
+      `SELECT first_name, last_name FROM leave_employees WHERE id=$1`, [employeeId]
+    );
+    const staffName = emp ? `${emp.first_name} ${emp.last_name}`.trim() : email;
+    mailer.sendLeaveRequestNotification({
+      adminEmail: LEAVE_ADMIN,
+      staffName,
+      staffEmail: email,
+      startDate:  start_date,
+      endDate:    end_date,
+      daysCount:  days,
+      notes:      notes || null,
+    }).catch(err => console.error('[email] Leave request notification failed:', err.message));
+
     res.json({ request });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -4496,14 +4513,31 @@ app.patch('/api/leave/requests/:id', requireAuth, requireLeaveAdmin, async (req,
     return res.status(400).json({ error: 'status must be approved or rejected' });
   }
   try {
-    const { rows } = await pool.query(
+    await pool.query(
       `UPDATE leave_requests
        SET status=$1, approved_by=$2, approved_at=NOW(), reject_reason=$3, updated_at=NOW()
-       WHERE id=$4 RETURNING *`,
+       WHERE id=$4`,
       [status, req.user.email, reject_reason || null, req.params.id]
+    );
+    const { rows } = await pool.query(
+      `SELECT lr.*, le.first_name, le.last_name
+       FROM leave_requests lr
+       LEFT JOIN leave_employees le ON le.id = lr.employee_id
+       WHERE lr.id=$1`,
+      [req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Request not found' });
     const request = rows[0];
+
+    // Email notification to staff member
+    mailer[status === 'approved' ? 'sendLeaveApprovedNotification' : 'sendLeaveRejectedNotification']({
+      staffEmail:   request.wms_email,
+      staffName:    `${request.first_name || ''} ${request.last_name || ''}`.trim() || request.wms_email,
+      startDate:    request.start_date,
+      endDate:      request.end_date,
+      daysCount:    request.days_count,
+      rejectReason: request.reject_reason,
+    }).catch(err => console.error('[email] Leave status notification failed:', err.message));
 
     // Auto-create in Xero when approved
     if (status === 'approved' && request.employee_id) {
