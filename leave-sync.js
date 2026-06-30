@@ -59,13 +59,14 @@ function toXeroDate(dateStr) {
 // ── Leave types ────────────────────────────────────────────────────
 async function getAnnualLeaveTypeId() {
   if (_annualLeaveTypeId) return _annualLeaveTypeId;
-  const data = await payrollGet('/LeaveTypes');
-  const types = data.LeaveTypes || [];
+  // AU Payroll: leave types are nested inside PayItems, not a top-level endpoint
+  const data  = await payrollGet('/PayItems');
+  const types = (data.PayItems && data.PayItems.LeaveTypes) || [];
   const annual = types.find(t =>
     (t.Name || '').toLowerCase().includes('annual') ||
     (t.Name || '').toLowerCase().includes('holiday')
   );
-  if (!annual) throw new Error(`No "Annual Leave" type found in Xero — found: ${types.map(t => t.Name).join(', ')}`);
+  if (!annual) throw new Error(`No "Annual Leave" type found in Xero PayItems — found: ${types.map(t => t.Name).join(', ')}`);
   _annualLeaveTypeId = annual.LeaveTypeID;
   console.log(`[leave] Annual Leave type ID: ${_annualLeaveTypeId} ("${annual.Name}")`);
   return _annualLeaveTypeId;
