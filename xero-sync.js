@@ -228,12 +228,14 @@ function parseProfitAndLoss(report) {
     if (!summaryRow?.Cells || summaryRow.Cells.length < 2) continue;
     const total = Math.abs(parseFloat(summaryRow.Cells[1]?.Value || 0));
 
-    if (INCOME_KEYWORDS.some(k => title.includes(k))) {
-      console.log(`[xero-parse] INCOME section "${section.Title}" → ${total}`);
-      result.revenue += total;
-    } else if (COGS_KEYWORDS.some(k => title.includes(k))) {
+    // COGS must be checked before INCOME — "Less Cost of Sales" contains "sales"
+    // which would otherwise match the income keywords first
+    if (COGS_KEYWORDS.some(k => title.includes(k))) {
       console.log(`[xero-parse] COGS section "${section.Title}" → ${total}`);
       result.cogs += total;
+    } else if (INCOME_KEYWORDS.some(k => title.includes(k))) {
+      console.log(`[xero-parse] INCOME section "${section.Title}" → ${total}`);
+      result.revenue += total;
     } else {
       console.log(`[xero-parse] EXPENSES section "${section.Title}" → ${total}`);
       result.expenses += total;
