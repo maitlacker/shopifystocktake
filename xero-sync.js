@@ -187,25 +187,48 @@ function parseProfitAndLoss(report) {
   const rows = report.Reports?.[0]?.Rows || [];
   const result = { revenue: 0, cogs: 0, grossProfit: 0, expenses: 0, netProfit: 0 };
 
-  function sumSection(sectionTitle) {
-    for (const section of rows) {
-      if (!section.Title) continue;
-      const title = section.Title.toLowerCase();
-      if (!title.includes(sectionTitle.toLowerCase())) continue;
-      const sectionRows = section.Rows || [];
-      const summaryRow  = sectionRows.find(r => r.RowType === 'SummaryRow');
-      if (summaryRow?.Cells?.length >= 2) {
-        return Math.abs(parseFloat(summaryRow.Cells[1]?.Value || 0));
+  const INCOME_KEYWORDS  = ['income', 'revenue', 'trading income', 'sales'];
+  const COGS_KEYWORDS    = ['cost of sales', 'direct costs', 'cogs', 'cost of goods'];
+  // Skip these — they are derived totals, not independent buckets
+  const DERIVED_KEYWORDS = ['gross profit', 'net profit', 'net loss', 'net income'];
+
+  let xeroNetProfit = null;
+
+  for (const section of rows) {
+    if (!section.Title) continue;
+    const title = section.Title.toLowerCase();
+
+    // Extract this section's SummaryRow total
+    const summaryRow = (section.Rows || []).find(r => r.RowType === 'SummaryRow');
+    const total = summaryRow?.Cells?.length >= 2
+      ? Math.abs(parseFloat(summaryRow.Cells[1]?.Value || 0))
+      : 0;
+
+    // Capture Xero's own Net Profit figure (authoritative)
+    if (title.includes('net profit') || title.includes('net loss') || title.includes('net income')) {
+      const netRow = (section.Rows || []).find(r => r.RowType === 'Row');
+      if (netRow?.Cells?.length >= 2) {
+        xeroNetProfit = parseFloat(netRow.Cells[1]?.Value || 0);
       }
+      continue;
     }
-    return 0;
+
+    // Skip other derived-total sections
+    if (DERIVED_KEYWORDS.some(k => title.includes(k))) continue;
+
+    if (INCOME_KEYWORDS.some(k => title.includes(k))) {
+      result.revenue += total;
+    } else if (COGS_KEYWORDS.some(k => title.includes(k))) {
+      result.cogs += total;
+    } else {
+      // Sum ALL remaining sections as expenses (operating, other expenses, depreciation, etc.)
+      result.expenses += total;
+    }
   }
 
-  result.revenue     = sumSection('income') || sumSection('revenue') || sumSection('trading income');
-  result.cogs        = sumSection('cost of sales') || sumSection('direct costs') || sumSection('cogs');
   result.grossProfit = result.revenue - result.cogs;
-  result.expenses    = sumSection('operating') || sumSection('overhead') || sumSection('expenses');
-  result.netProfit   = result.grossProfit - result.expenses;
+  // Prefer Xero's own net profit over our recalculation
+  result.netProfit = xeroNetProfit !== null ? xeroNetProfit : result.grossProfit - result.expenses;
 
   return result;
 }
