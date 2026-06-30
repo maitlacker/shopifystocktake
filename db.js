@@ -590,6 +590,44 @@ async function initDb() {
       ON creative_jobs(status, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_creative_jobs_arcads
       ON creative_jobs(arcads_job_id);
+
+    CREATE TABLE IF NOT EXISTS leave_employees (
+      id                SERIAL PRIMARY KEY,
+      xero_employee_id  TEXT NOT NULL UNIQUE,
+      first_name        TEXT,
+      last_name         TEXT,
+      xero_email        TEXT,
+      wms_email         TEXT,
+      is_active         BOOLEAN DEFAULT TRUE,
+      synced_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_leave_employees_wms
+      ON leave_employees(wms_email);
+
+    CREATE TABLE IF NOT EXISTS leave_requests (
+      id               SERIAL PRIMARY KEY,
+      employee_id      INTEGER REFERENCES leave_employees(id),
+      wms_email        TEXT NOT NULL,
+      start_date       DATE NOT NULL,
+      end_date         DATE NOT NULL,
+      days_count       NUMERIC(4,1),
+      notes            TEXT,
+      status           TEXT NOT NULL DEFAULT 'pending',
+      approved_by      TEXT,
+      approved_at      TIMESTAMPTZ,
+      reject_reason    TEXT,
+      xero_leave_id    TEXT,
+      xero_status      TEXT,
+      xero_error       TEXT,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_leave_requests_email
+      ON leave_requests(wms_email);
+    CREATE INDEX IF NOT EXISTS idx_leave_requests_dates
+      ON leave_requests(start_date, end_date);
+    CREATE INDEX IF NOT EXISTS idx_leave_requests_status
+      ON leave_requests(status);
   `);
 }
 

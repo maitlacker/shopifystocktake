@@ -57,6 +57,13 @@
       ],
     },
     {
+      label: 'People',
+      children: [
+        { label: 'Leave Request', href: '/leave-request.html' },
+        { label: 'Leave Admin',   href: '/leave-admin.html', restrict: ['accounts@theselfstyler.com'] },
+      ],
+    },
+    {
       label: 'Marketing',
       children: [
         { label: 'Coupon Export',    href: '/coupon-export.html' },

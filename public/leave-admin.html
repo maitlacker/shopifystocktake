@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Leave Admin – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    .la-tabs {
+      display: flex;
+      gap: 4px;
+      border-bottom: 2px solid #f1f5f9;
+      margin-bottom: 20px;
+    }
+    .la-tab {
+      padding: 9px 18px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #64748b;
+      border: none;
+      background: none;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      transition: color 0.15s;
+    }
+    .la-tab.active { color: #6366f1; border-bottom-color: #6366f1; }
+    .la-tab:hover:not(.active) { color: #1e293b; }
+
+    .la-panel { display: none; }
+    .la-panel.active { display: block; }
+
+    .la-status {
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      margin-bottom: 16px;
+      display: none;
+    }
+    .la-status.info    { background: #eff6ff; color: #1d4ed8; display: block; }
+    .la-status.success { background: #f0fdf4; color: #15803d; display: block; }
+    .la-status.error   { background: #fef2f2; color: #b91c1c; display: block; }
+
+    /* Shared table */
+    .la-table-wrap { overflow-x: auto; }
+    .la-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    .la-table th {
+      text-align: left;
+      padding: 10px 12px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 2px solid #f1f5f9;
+      white-space: nowrap;
+    }
+    .la-table td {
+      padding: 11px 12px;
+      border-bottom: 1px solid #f8fafc;
+      color: #1e293b;
+      vertical-align: middle;
+    }
+    .la-table tr:last-child td { border-bottom: none; }
+    .la-empty { text-align: center; padding: 36px; color: #94a3b8; font-size: 0.88rem; }
+
+    .la-pill {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .la-pill.pending  { background: #fef9c3; color: #854d0e; }
+    .la-pill.approved { background: #f0fdf4; color: #15803d; }
+    .la-pill.rejected { background: #fef2f2; color: #b91c1c; }
+
+    .la-action-btn {
+      padding: 5px 12px;
+      border-radius: 7px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      margin-right: 4px;
+    }
+    .la-action-btn:hover { opacity: 0.8; }
+    .la-action-btn.approve { background: #16a34a; color: #fff; }
+    .la-action-btn.reject  { background: #fff; border-color: #fca5a5; color: #b91c1c; }
+    .la-action-btn.retry   { background: #6366f1; color: #fff; }
+    .la-action-btn.link    { background: #fff; border-color: #cbd5e1; color: #475569; }
+
+    /* Employee link inline form */
+    .la-link-form {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .la-link-form input {
+      padding: 5px 9px;
+      border: 1px solid #e2e8f0;
+      border-radius: 7px;
+      font-size: 0.82rem;
+      width: 210px;
+    }
+
+    .la-xero-badge { font-size: 0.7rem; color: #2563eb; background: #eff6ff; border-radius: 6px; padding: 1px 6px; margin-left: 4px; }
+    .la-xero-badge.error { color: #b91c1c; background: #fef2f2; }
+
+    /* Slack preview box */
+    .la-slack-box {
+      background: #1a1d21;
+      color: #d1d2d3;
+      border-radius: 10px;
+      padding: 20px 22px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      margin: 14px 0;
+      min-height: 80px;
+    }
+
+    .la-controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .la-reject-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .la-reject-row input {
+      padding: 4px 8px;
+      border: 1px solid #e2e8f0;
+      border-radius: 7px;
+      font-size: 0.8rem;
+      flex: 1;
+      min-width: 140px;
+    }
+  </style>
+</head>
+<body>
+  <header></header>
+
+  <main class="container" style="padding-top: 24px; padding-bottom: 48px;">
+
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h1 style="font-size:1.4rem; margin:0;">Leave Admin</h1>
+        <p style="color:#64748b; font-size:0.88rem; margin:4px 0 0;">
+          Approve requests, manage employee links, preview the Monday Slack digest
+        </p>
+      </div>
+    </div>
+
+    <div id="statusBar" class="la-status"></div>
+
+    <div class="la-tabs">
+      <button class="la-tab active" data-tab="pending">Pending <span id="pendingCount"></span></button>
+      <button class="la-tab" data-tab="history">All Requests</button>
+      <button class="la-tab" data-tab="employees">Employees</button>
+      <button class="la-tab" data-tab="slack">Slack Digest</button>
+    </div>
+
+    <!-- Pending -->
+    <div class="la-panel active" id="panel-pending">
+      <div class="la-controls">
+        <button class="btn btn-secondary" id="btnRefreshPending">Refresh</button>
+      </div>
+      <div class="la-table-wrap">
+        <table class="la-table">
+          <thead>
+            <tr>
+              <th>Staff</th>
+              <th>Dates</th>
+              <th>Days</th>
+              <th>Notes</th>
+              <th>Submitted</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="pendingTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- All Requests -->
+    <div class="la-panel" id="panel-history">
+      <div class="la-controls">
+        <select id="historyFilter" style="padding:7px 10px; border:1px solid #e2e8f0; border-radius:8px; font-size:0.85rem;">
+          <option value="">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+        </select>
+        <button class="btn btn-secondary" id="btnRefreshHistory">Refresh</button>
+      </div>
+      <div class="la-table-wrap">
+        <table class="la-table">
+          <thead>
+            <tr>
+              <th>Staff</th>
+              <th>Dates</th>
+              <th>Days</th>
+              <th>Status</th>
+              <th>Xero</th>
+              <th>Submitted</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="historyTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Employees -->
+    <div class="la-panel" id="panel-employees">
+      <div class="la-controls">
+        <button class="btn btn-primary" id="btnSyncEmps">Sync from Xero</button>
+        <span id="syncStatus" style="font-size:0.82rem; color:#94a3b8;"></span>
+      </div>
+      <p style="font-size:0.83rem; color:#64748b; margin: 0 0 14px;">
+        Link each Xero employee to their WMS login email so leave requests are matched correctly.
+      </p>
+      <div class="la-table-wrap">
+        <table class="la-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Xero Email</th>
+              <th>WMS Email (linked)</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="empTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Slack Digest -->
+    <div class="la-panel" id="panel-slack">
+      <p style="font-size:0.88rem; color:#64748b; margin-bottom:14px;">
+        Preview what will be posted to <strong>#annual-leave-updates</strong> on Monday mornings.
+        The digest covers the next 2 weeks of approved leave. Posts automatically at 8am AEST every Monday.
+      </p>
+      <div class="la-controls">
+        <button class="btn btn-secondary" id="btnPreviewSlack">Preview Message</button>
+        <button class="btn btn-primary"   id="btnSendSlack">Send Now</button>
+      </div>
+      <div class="la-slack-box" id="slackPreview">Click "Preview Message" to see what will be posted…</div>
+    </div>
+
+  </main>
+
+  <script src="leave-admin.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

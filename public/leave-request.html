@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Leave Request – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    .lr-layout {
+      display: grid;
+      grid-template-columns: 420px 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+    @media (max-width: 860px) { .lr-layout { grid-template-columns: 1fr; } }
+
+    .lr-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 22px 24px;
+    }
+    .lr-card h2 {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1e293b;
+      margin: 0 0 18px;
+    }
+
+    .lr-unlinked {
+      background: #fefce8;
+      border: 1px solid #fde68a;
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin-bottom: 20px;
+      font-size: 0.88rem;
+      color: #78350f;
+    }
+    .lr-unlinked strong { display: block; margin-bottom: 4px; }
+
+    .lr-field {
+      margin-bottom: 16px;
+    }
+    .lr-field label {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 5px;
+    }
+    .lr-field input[type=date],
+    .lr-field textarea {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-family: inherit;
+      background: #fff;
+      box-sizing: border-box;
+    }
+    .lr-field textarea { resize: vertical; min-height: 80px; }
+    .lr-field input:focus, .lr-field textarea:focus {
+      outline: none;
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+    }
+
+    .lr-date-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .lr-days-hint {
+      font-size: 0.8rem;
+      color: #6366f1;
+      font-weight: 600;
+      margin-top: 6px;
+      min-height: 18px;
+    }
+
+    .lr-submit-btn {
+      width: 100%;
+      padding: 11px;
+      background: #6366f1;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 0.92rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      margin-top: 4px;
+    }
+    .lr-submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .lr-submit-btn:not(:disabled):hover { opacity: 0.87; }
+
+    .lr-status {
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      margin-bottom: 16px;
+      display: none;
+    }
+    .lr-status.info    { background: #eff6ff; color: #1d4ed8; display: block; }
+    .lr-status.success { background: #f0fdf4; color: #15803d; display: block; }
+    .lr-status.error   { background: #fef2f2; color: #b91c1c; display: block; }
+
+    /* Requests table */
+    .lr-table-wrap { overflow-x: auto; }
+    .lr-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    .lr-table th {
+      text-align: left;
+      padding: 10px 12px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 2px solid #f1f5f9;
+      white-space: nowrap;
+    }
+    .lr-table td {
+      padding: 11px 12px;
+      border-bottom: 1px solid #f8fafc;
+      color: #1e293b;
+    }
+    .lr-table tr:last-child td { border-bottom: none; }
+
+    .lr-pill {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .lr-pill.pending  { background: #f1f5f9; color: #64748b; }
+    .lr-pill.approved { background: #f0fdf4; color: #15803d; }
+    .lr-pill.rejected { background: #fef2f2; color: #b91c1c; }
+
+    .lr-xero-badge {
+      font-size: 0.7rem;
+      color: #2563eb;
+      background: #eff6ff;
+      border-radius: 6px;
+      padding: 1px 6px;
+      margin-left: 4px;
+    }
+    .lr-xero-badge.error { color: #b91c1c; background: #fef2f2; }
+
+    .lr-empty {
+      text-align: center;
+      padding: 32px;
+      color: #94a3b8;
+      font-size: 0.88rem;
+    }
+  </style>
+</head>
+<body>
+  <header></header>
+
+  <main class="container" style="padding-top: 24px; padding-bottom: 48px;">
+
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h1 style="font-size:1.4rem; margin:0;">Annual Leave Request</h1>
+        <p style="color:#64748b; font-size:0.88rem; margin:4px 0 0;">
+          Submit a leave request — it will be reviewed by management before being lodged in Xero
+        </p>
+      </div>
+    </div>
+
+    <div id="statusBar" class="lr-status"></div>
+    <div id="unlinkedBanner" class="lr-unlinked" style="display:none;">
+      <strong>Account not linked</strong>
+      Your WMS login hasn't been linked to a Xero employee yet. Contact <a href="mailto:accounts@theselfstyler.com">accounts@theselfstyler.com</a> to get set up.
+    </div>
+
+    <div class="lr-layout">
+      <!-- Form -->
+      <div class="lr-card">
+        <h2>New Request</h2>
+        <form id="leaveForm">
+          <div class="lr-date-row">
+            <div class="lr-field">
+              <label>Start Date</label>
+              <input type="date" id="startDate" required />
+            </div>
+            <div class="lr-field">
+              <label>End Date</label>
+              <input type="date" id="endDate" required />
+            </div>
+          </div>
+          <div class="lr-days-hint" id="daysHint"></div>
+
+          <div class="lr-field" style="margin-top:8px;">
+            <label>Notes (optional)</label>
+            <textarea id="notes" placeholder="Any context you'd like to share…"></textarea>
+          </div>
+
+          <button type="submit" class="lr-submit-btn" id="btnSubmit" disabled>Submit Request</button>
+        </form>
+      </div>
+
+      <!-- History -->
+      <div>
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+          <div style="font-size:0.72rem; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.07em;">
+            My Requests
+          </div>
+          <button class="btn btn-secondary" id="btnRefresh" style="font-size:0.78rem;">Refresh</button>
+        </div>
+        <div class="lr-card" style="padding:0;">
+          <div class="lr-table-wrap">
+            <table class="lr-table">
+              <thead>
+                <tr>
+                  <th>Dates</th>
+                  <th>Days</th>
+                  <th>Status</th>
+                  <th>Xero</th>
+                  <th>Submitted</th>
+                </tr>
+              </thead>
+              <tbody id="requestsTbody">
+                <tr><td colspan="5" class="lr-empty">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script src="leave-request.js"></script>
+<script src="nav.js"></script>
+</body>
+</html>

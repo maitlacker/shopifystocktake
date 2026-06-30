@@ -1,0 +1,150 @@
+(() => {
+  let linkedEmployee = null;
+
+  const startDate  = document.getElementById('startDate');
+  const endDate    = document.getElementById('endDate');
+  const daysHint   = document.getElementById('daysHint');
+  const notes      = document.getElementById('notes');
+  const btnSubmit  = document.getElementById('btnSubmit');
+  const leaveForm  = document.getElementById('leaveForm');
+  const statusBar  = document.getElementById('statusBar');
+  const tbody      = document.getElementById('requestsTbody');
+  const btnRefresh = document.getElementById('btnRefresh');
+
+  // Set min date to today
+  const today = new Date().toISOString().slice(0, 10);
+  startDate.min = today;
+  endDate.min   = today;
+
+  // ── Check if user is linked ────────────────────────────────────────
+  async function checkLinked() {
+    try {
+      const res  = await fetch('/api/leave/me');
+      const data = await res.json();
+      linkedEmployee = data.employee;
+      if (!linkedEmployee) {
+        document.getElementById('unlinkedBanner').style.display = 'block';
+        btnSubmit.disabled = true;
+        startDate.disabled = true;
+        endDate.disabled   = true;
+        notes.disabled     = true;
+      }
+    } catch (e) {
+      console.error('Failed to check employee link', e);
+    }
+  }
+
+  // ── Days calculation ───────────────────────────────────────────────
+  function updateDays() {
+    const s = startDate.value;
+    const e = endDate.value;
+    if (!s || !e) { daysHint.textContent = ''; btnSubmit.disabled = !linkedEmployee; return; }
+    if (new Date(e) < new Date(s)) {
+      daysHint.textContent = '⚠ End date must be on or after start date';
+      daysHint.style.color = '#b91c1c';
+      btnSubmit.disabled = true;
+      return;
+    }
+    const days = Math.round((new Date(e) - new Date(s)) / 86400000) + 1;
+    daysHint.textContent = `${days} calendar day${days !== 1 ? 's' : ''}`;
+    daysHint.style.color = '#6366f1';
+    btnSubmit.disabled = !linkedEmployee;
+  }
+
+  startDate.addEventListener('change', () => {
+    if (endDate.value && endDate.value < startDate.value) endDate.value = startDate.value;
+    endDate.min = startDate.value;
+    updateDays();
+  });
+  endDate.addEventListener('change', updateDays);
+
+  // ── Submit ────────────────────────────────────────────────────────
+  leaveForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    btnSubmit.disabled = true;
+    showStatus('Submitting…', 'info');
+    try {
+      const res = await fetch('/api/leave/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          start_date: startDate.value,
+          end_date:   endDate.value,
+          notes:      notes.value.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Submission failed');
+      showStatus('Request submitted — you will be notified once approved.', 'success');
+      startDate.value = '';
+      endDate.value   = '';
+      notes.value     = '';
+      daysHint.textContent = '';
+      loadRequests();
+    } catch (err) {
+      showStatus(err.message, 'error');
+      btnSubmit.disabled = false;
+    }
+  });
+
+  // ── Load my requests ───────────────────────────────────────────────
+  async function loadRequests() {
+    try {
+      const res  = await fetch('/api/leave/requests');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      renderRequests(data.requests || []);
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="5" class="lr-empty">Error: ${escHtml(err.message)}</td></tr>`;
+    }
+  }
+
+  function renderRequests(requests) {
+    if (!requests.length) {
+      tbody.innerHTML = `<tr><td colspan="5" class="lr-empty">No requests yet</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = requests.map(r => {
+      const start  = fmtDate(r.start_date);
+      const end    = fmtDate(r.end_date);
+      const dates  = start === end ? start : `${start} – ${end}`;
+      const days   = r.days_count || '—';
+      const filed  = fmtDate(r.created_at);
+      let xeroBadge = '';
+      if (r.xero_leave_id) {
+        xeroBadge = `<span class="lr-xero-badge">✓ Xero</span>`;
+      } else if (r.xero_status === 'error') {
+        xeroBadge = `<span class="lr-xero-badge error" title="${escHtml(r.xero_error || '')}">⚠ Xero</span>`;
+      }
+      return `<tr>
+        <td>${escHtml(dates)}</td>
+        <td>${days}</td>
+        <td><span class="lr-pill ${r.status}">${r.status}</span>${r.status === 'rejected' && r.reject_reason ? `<br><small style="color:#94a3b8;">${escHtml(r.reject_reason)}</small>` : ''}</td>
+        <td>${xeroBadge || '<span style="color:#cbd5e1;">—</span>'}</td>
+        <td style="color:#94a3b8; font-size:0.8rem;">${filed}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  btnRefresh.addEventListener('click', loadRequests);
+
+  // ── Helpers ───────────────────────────────────────────────────────
+  function fmtDate(d) {
+    if (!d) return '—';
+    return new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
+  function showStatus(msg, type) {
+    statusBar.textContent = msg;
+    statusBar.className = `lr-status ${type}`;
+    if (type === 'success') setTimeout(() => { statusBar.className = 'lr-status'; }, 6000);
+  }
+
+  function escHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────
+  checkLinked();
+  loadRequests();
+})();

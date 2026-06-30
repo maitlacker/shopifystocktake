@@ -22,6 +22,7 @@ const restockSync      = require('./restock-sync');
 const stockValueSync   = require('./stock-value-sync');
 const adsAssetSync     = require('./google-ads-asset-sync');
 const arcadsSync       = require('./arcads-sync');
+const leaveSync        = require('./leave-sync');
 
 const anthropicClient = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -4356,6 +4357,186 @@ async function runGstGapAnalysis(from, to, keywordsStr, excludeGiftCards) {
   };
 }
 
+// ── Leave Management ──────────────────────────────────────────────
+
+const LEAVE_ADMIN = 'accounts@theselfstyler.com';
+
+function requireLeaveAdmin(req, res, next) {
+  if (!req.user || req.user.email !== LEAVE_ADMIN) {
+    return res.status(403).json({ error: 'Leave admin access only' });
+  }
+  next();
+}
+
+// GET /api/leave/employees — list all Xero employees
+app.get('/api/leave/employees', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM leave_employees ORDER BY last_name, first_name`
+    );
+    res.json({ employees: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/leave/employees/sync — pull employees from Xero (admin only)
+app.post('/api/leave/employees/sync', requireAuth, requireLeaveAdmin, async (req, res) => {
+  try {
+    const count = await leaveSync.syncEmployees(pool);
+    res.json({ synced: count });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/leave/employees/:id/link — set wms_email on an employee (admin only)
+app.patch('/api/leave/employees/:id/link', requireAuth, requireLeaveAdmin, async (req, res) => {
+  const { wms_email } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `UPDATE leave_employees SET wms_email=$1 WHERE id=$2 RETURNING *`,
+      [wms_email || null, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Employee not found' });
+    res.json({ employee: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/leave/me — get the current user's linked employee
+app.get('/api/leave/me', requireAuth, async (req, res) => {
+  try {
+    const email = req.user.email;
+    const { rows } = await pool.query(
+      `SELECT * FROM leave_employees WHERE wms_email=$1 AND is_active=TRUE LIMIT 1`,
+      [email]
+    );
+    res.json({ employee: rows[0] || null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/leave/requests — admin sees all; staff sees their own
+app.get('/api/leave/requests', requireAuth, async (req, res) => {
+  const { status } = req.query;
+  try {
+    const isAdmin = req.user.email === LEAVE_ADMIN;
+    const params  = [];
+    const where   = [];
+    if (!isAdmin) { params.push(req.user.email); where.push(`lr.wms_email=$${params.length}`); }
+    if (status)   { params.push(status);          where.push(`lr.status=$${params.length}`); }
+    const { rows } = await pool.query(
+      `SELECT lr.*, le.first_name, le.last_name, le.xero_employee_id
+       FROM leave_requests lr
+       LEFT JOIN leave_employees le ON le.id = lr.employee_id
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       ORDER BY lr.created_at DESC`,
+      params
+    );
+    res.json({ requests: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/leave/requests — submit a leave request
+app.post('/api/leave/requests', requireAuth, async (req, res) => {
+  const { start_date, end_date, notes } = req.body;
+  if (!start_date || !end_date) return res.status(400).json({ error: 'start_date and end_date required' });
+  if (new Date(end_date) < new Date(start_date)) return res.status(400).json({ error: 'end_date must be on or after start_date' });
+
+  try {
+    const email = req.user.email;
+    // Find linked employee
+    const { rows: empRows } = await pool.query(
+      `SELECT id FROM leave_employees WHERE wms_email=$1 AND is_active=TRUE LIMIT 1`,
+      [email]
+    );
+    if (!empRows.length) {
+      return res.status(400).json({ error: 'Your account is not yet linked to a Xero employee. Contact accounts@theselfstyler.com.' });
+    }
+    const employeeId = empRows[0].id;
+
+    // Calculate calendar days
+    const ms = new Date(end_date) - new Date(start_date);
+    const days = Math.round(ms / 86400000) + 1;
+
+    const { rows: [request] } = await pool.query(
+      `INSERT INTO leave_requests (employee_id, wms_email, start_date, end_date, days_count, notes)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [employeeId, email, start_date, end_date, days, notes || null]
+    );
+    res.json({ request });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/leave/requests/:id — approve or reject (admin only)
+app.patch('/api/leave/requests/:id', requireAuth, requireLeaveAdmin, async (req, res) => {
+  const { status, reject_reason } = req.body;
+  if (!['approved', 'rejected'].includes(status)) {
+    return res.status(400).json({ error: 'status must be approved or rejected' });
+  }
+  try {
+    const { rows } = await pool.query(
+      `UPDATE leave_requests
+       SET status=$1, approved_by=$2, approved_at=NOW(), reject_reason=$3, updated_at=NOW()
+       WHERE id=$4 RETURNING *`,
+      [status, req.user.email, reject_reason || null, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Request not found' });
+    const request = rows[0];
+
+    // Auto-create in Xero when approved
+    if (status === 'approved' && request.employee_id) {
+      leaveSync.createLeaveInXero(pool, request.id).catch(err => {
+        console.error(`[leave] Xero write-back failed for request ${request.id}:`, err.message);
+        pool.query(
+          `UPDATE leave_requests SET xero_status='error', xero_error=$1, updated_at=NOW() WHERE id=$2`,
+          [err.message, request.id]
+        ).catch(() => {});
+      });
+    }
+    res.json({ request });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/leave/requests/:id/xero-retry — manually retry Xero write-back (admin only)
+app.post('/api/leave/requests/:id/xero-retry', requireAuth, requireLeaveAdmin, async (req, res) => {
+  try {
+    const leaveId = await leaveSync.createLeaveInXero(pool, Number(req.params.id));
+    res.json({ ok: true, xero_leave_id: leaveId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/leave/slack-preview — preview this week's Slack message (admin only)
+app.get('/api/leave/slack-preview', requireAuth, requireLeaveAdmin, async (req, res) => {
+  try {
+    const message = await leaveSync.buildSlackMessage(pool);
+    res.json({ message });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/leave/slack-send — manually trigger the Slack digest (admin only)
+app.post('/api/leave/slack-send', requireAuth, requireLeaveAdmin, async (req, res) => {
+  try {
+    await leaveSync.postWeeklySlackDigest(pool);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Creative Pipeline ─────────────────────────────────────────────
 
 const CREATIVE_TEMPLATES = [
@@ -4647,6 +4828,7 @@ initDb()
     stockValueSync.startCron(pool);
     adsAssetSync.startCron();
     arcadsSync.startCron(pool);
+    leaveSync.startCron(pool);
 
     // Recalculate margin tiers nightly at 02:00
     cron.schedule('0 2 * * *', async () => {
