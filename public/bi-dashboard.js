@@ -10,18 +10,24 @@ const biError     = document.getElementById('biError');
 // ── Date range helpers ────────────────────────────────────────────
 function computeRange(period) {
   const now = new Date();
-  const end = now.toISOString().slice(0, 10);
-  let start;
+  let start, end;
 
-  if (period === 'month') {
-    // first day of current calendar month
+  if (period === 'ttm') {
+    // Last 12 complete months: 1st of month 12 months ago → last day of last month
+    const endD   = new Date(now.getFullYear(), now.getMonth(), 0); // last day of prev month
+    const startD = new Date(endD.getFullYear(), endD.getMonth() - 11, 1); // 1st of month 12 months prior
+    start = startD.toISOString().slice(0, 10);
+    end   = endD.toISOString().slice(0, 10);
+  } else if (period === 'month') {
     const d = new Date(now.getFullYear(), now.getMonth(), 1);
     start = d.toISOString().slice(0, 10);
+    end   = now.toISOString().slice(0, 10);
   } else {
     const days = parseInt(period, 10);
     const d = new Date(now);
     d.setDate(d.getDate() - (days - 1));
     start = d.toISOString().slice(0, 10);
+    end   = now.toISOString().slice(0, 10);
   }
   return { start, end };
 }

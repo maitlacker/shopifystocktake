@@ -337,6 +337,7 @@ const xeroStatusTxt  = document.getElementById('xero-status-text');
 const xeroLog        = document.getElementById('xero-log');
 const btnXeroConnect = document.getElementById('btn-xero-connect');
 const btnXeroFull    = document.getElementById('btn-xero-full');
+const btnXeroTtm     = document.getElementById('btn-xero-ttm');
 const btnXeroDaily   = document.getElementById('btn-xero-daily');
 const btnXeroBs      = document.getElementById('btn-xero-bs');
 
@@ -363,12 +364,14 @@ async function loadXeroStatus() {
       setXeroStatus('ok', `Connected to ${data.tenantName} ${last}`);
       btnXeroConnect.style.display = 'none';
       btnXeroFull.style.display    = '';
+      btnXeroTtm.style.display     = '';
       btnXeroDaily.style.display   = '';
       btnXeroBs.style.display      = '';
     } else {
       setXeroStatus('idle', 'Not connected');
       btnXeroConnect.style.display = '';
       btnXeroFull.style.display    = 'none';
+      btnXeroTtm.style.display     = 'none';
       btnXeroDaily.style.display   = 'none';
       btnXeroBs.style.display      = 'none';
     }
@@ -379,6 +382,7 @@ async function loadXeroStatus() {
 
 async function runXeroSync(months) {
   btnXeroFull.disabled  = true;
+  btnXeroTtm.disabled   = true;
   btnXeroDaily.disabled = true;
   btnXeroBs.disabled    = true;
   setXeroStatus('syncing', `Syncing ${months} month${months !== 1 ? 's' : ''} of P&L…`);
@@ -404,6 +408,7 @@ async function runXeroSync(months) {
     appendXeroLog(`Error: ${err.message}`, 'error');
   } finally {
     btnXeroFull.disabled  = false;
+    btnXeroTtm.disabled   = false;
     btnXeroDaily.disabled = false;
     btnXeroBs.disabled    = false;
   }
@@ -432,6 +437,7 @@ btnXeroBs.addEventListener('click', async () => {
 });
 
 btnXeroFull.addEventListener('click',  () => runXeroSync(3));
+btnXeroTtm.addEventListener('click',   () => runXeroSync(12));
 btnXeroDaily.addEventListener('click', () => runXeroSync(1));
 
 loadXeroStatus();
