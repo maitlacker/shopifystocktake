@@ -3131,6 +3131,48 @@ app.get('/api/xero/pl-lines', async (req, res) => {
   }
 });
 
+// GET /api/xero/pl-debug — returns raw section structure from stored Xero P&L JSON
+app.get('/api/xero/pl-debug', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT period_start, period_end, revenue, cogs, gross_profit, expenses, net_profit, raw_json
+      FROM xero_financials
+      WHERE report_type = 'ProfitAndLoss'
+      ORDER BY period_start DESC
+      LIMIT 1
+    `);
+    if (!rows.length) return res.json({ error: 'No Xero P&L data synced yet' });
+
+    const row = rows[0];
+    let rawRows = [];
+    try {
+      const parsed = typeof row.raw_json === 'string' ? JSON.parse(row.raw_json) : row.raw_json;
+      rawRows = parsed?.Reports?.[0]?.Rows || [];
+    } catch { /* ignore parse error */ }
+
+    const sections = rawRows.map(s => {
+      if (!s.Title) return null;
+      const summaryRow = (s.Rows || []).find(r => r.RowType === 'SummaryRow');
+      const row0       = (s.Rows || []).find(r => r.RowType === 'Row');
+      return {
+        title:       s.Title,
+        rowType:     s.RowType,
+        summaryVal:  summaryRow?.Cells?.[1]?.Value ?? null,
+        firstRowVal: row0?.Cells?.[1]?.Value ?? null,
+        childCount:  (s.Rows || []).length,
+      };
+    }).filter(Boolean);
+
+    res.json({
+      period:      `${row.period_start} → ${row.period_end}`,
+      stored:      { revenue: row.revenue, cogs: row.cogs, gross_profit: row.gross_profit, expenses: row.expenses, net_profit: row.net_profit },
+      sections,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Weekly Business Pulse ──────────────────────────────────────────
 
 // GET /api/weekly-pulse/status

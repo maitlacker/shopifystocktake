@@ -187,49 +187,74 @@ function parseProfitAndLoss(report) {
   const rows = report.Reports?.[0]?.Rows || [];
   const result = { revenue: 0, cogs: 0, grossProfit: 0, expenses: 0, netProfit: 0 };
 
-  const INCOME_KEYWORDS  = ['income', 'revenue', 'trading income', 'sales'];
-  const COGS_KEYWORDS    = ['cost of sales', 'direct costs', 'cogs', 'cost of goods'];
-  // Skip these — they are derived totals, not independent buckets
-  const DERIVED_KEYWORDS = ['gross profit', 'net profit', 'net loss', 'net income'];
+  const INCOME_KEYWORDS = ['income', 'revenue', 'trading income', 'sales'];
+  const COGS_KEYWORDS   = [
+    'cost of sales', 'direct costs', 'cogs', 'cost of goods',
+    'cost of revenue', 'purchases', 'less cost',
+  ];
 
-  let xeroNetProfit = null;
+  let xeroGrossProfit = null;
+  let xeroNetProfit   = null;
+
+  // Extract the best numeric value from a section (prefers SummaryRow, falls back to Row)
+  function extractSectionValue(section) {
+    const summaryRow = (section.Rows || []).find(r => r.RowType === 'SummaryRow');
+    if (summaryRow?.Cells?.length >= 2) return parseFloat(summaryRow.Cells[1]?.Value || 0);
+    const row = (section.Rows || []).find(r => r.RowType === 'Row');
+    if (row?.Cells?.length >= 2) return parseFloat(row.Cells[1]?.Value || 0);
+    return null;
+  }
 
   for (const section of rows) {
     if (!section.Title) continue;
-    const title = section.Title.toLowerCase();
+    const title = section.Title.toLowerCase().trim();
 
-    // Extract this section's SummaryRow total
-    const summaryRow = (section.Rows || []).find(r => r.RowType === 'SummaryRow');
-    const total = summaryRow?.Cells?.length >= 2
-      ? Math.abs(parseFloat(summaryRow.Cells[1]?.Value || 0))
-      : 0;
-
-    // Capture Xero's own Net Profit figure (authoritative)
+    // Capture Xero's own derived figures (authoritative — avoid recomputing them)
+    if (title.includes('gross profit') || title.includes('gross loss')) {
+      const val = extractSectionValue(section);
+      if (val !== null) xeroGrossProfit = val;
+      console.log(`[xero-parse] Gross Profit section "${section.Title}" → ${val}`);
+      continue;
+    }
     if (title.includes('net profit') || title.includes('net loss') || title.includes('net income')) {
-      const netRow = (section.Rows || []).find(r => r.RowType === 'Row');
-      if (netRow?.Cells?.length >= 2) {
-        xeroNetProfit = parseFloat(netRow.Cells[1]?.Value || 0);
-      }
+      const val = extractSectionValue(section);
+      if (val !== null) xeroNetProfit = val;
+      console.log(`[xero-parse] Net Profit section "${section.Title}" → ${val}`);
       continue;
     }
 
-    // Skip other derived-total sections
-    if (DERIVED_KEYWORDS.some(k => title.includes(k))) continue;
+    // Use SummaryRow total for all non-derived sections
+    const summaryRow = (section.Rows || []).find(r => r.RowType === 'SummaryRow');
+    if (!summaryRow?.Cells || summaryRow.Cells.length < 2) continue;
+    const total = Math.abs(parseFloat(summaryRow.Cells[1]?.Value || 0));
 
     if (INCOME_KEYWORDS.some(k => title.includes(k))) {
+      console.log(`[xero-parse] INCOME section "${section.Title}" → ${total}`);
       result.revenue += total;
     } else if (COGS_KEYWORDS.some(k => title.includes(k))) {
+      console.log(`[xero-parse] COGS section "${section.Title}" → ${total}`);
       result.cogs += total;
     } else {
-      // Sum ALL remaining sections as expenses (operating, other expenses, depreciation, etc.)
+      console.log(`[xero-parse] EXPENSES section "${section.Title}" → ${total}`);
       result.expenses += total;
     }
   }
 
-  result.grossProfit = result.revenue - result.cogs;
-  // Prefer Xero's own net profit over our recalculation
+  // Prefer Xero's computed Gross Profit; if not available, compute from Revenue - COGS
+  if (xeroGrossProfit !== null) {
+    result.grossProfit = xeroGrossProfit;
+    // If we didn't detect a COGS section by keyword, back-compute from Xero's figures
+    if (result.cogs === 0 && result.revenue > 0) {
+      result.cogs = result.revenue - xeroGrossProfit;
+      console.log(`[xero-parse] COGS back-computed from Revenue - GrossProfit = ${result.cogs}`);
+    }
+  } else {
+    result.grossProfit = result.revenue - result.cogs;
+  }
+
   result.netProfit = xeroNetProfit !== null ? xeroNetProfit : result.grossProfit - result.expenses;
 
+  console.log(`[xero-parse] Final: revenue=${result.revenue} cogs=${result.cogs} gp=${result.grossProfit} exp=${result.expenses} np=${result.netProfit}`);
   return result;
 }
 
