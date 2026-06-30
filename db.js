@@ -550,6 +550,46 @@ async function initDb() {
       updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE(product_id, variant_id)
     );
+
+    CREATE TABLE IF NOT EXISTS creative_products (
+      id                  SERIAL PRIMARY KEY,
+      shopify_product_id  TEXT NOT NULL UNIQUE,
+      title               TEXT,
+      vendor              TEXT,
+      product_type        TEXT,
+      tags                TEXT,
+      description         TEXT,
+      price               NUMERIC(10,2),
+      compare_at_price    NUMERIC(10,2),
+      images              JSONB NOT NULL DEFAULT '[]',
+      collections         JSONB NOT NULL DEFAULT '[]',
+      inventory_count     INT DEFAULT 0,
+      is_available        BOOLEAN DEFAULT TRUE,
+      synced_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_creative_products_shopify
+      ON creative_products(shopify_product_id);
+    CREATE INDEX IF NOT EXISTS idx_creative_products_synced
+      ON creative_products(synced_at DESC);
+
+    CREATE TABLE IF NOT EXISTS creative_jobs (
+      id                   SERIAL PRIMARY KEY,
+      job_type             TEXT NOT NULL DEFAULT 'single',
+      shopify_product_ids  TEXT[] NOT NULL DEFAULT '{}',
+      template_type        TEXT,
+      arcads_job_id        TEXT,
+      status               TEXT NOT NULL DEFAULT 'queued',
+      brief                JSONB NOT NULL DEFAULT '{}',
+      result_urls          JSONB NOT NULL DEFAULT '[]',
+      error_message        TEXT,
+      created_by           TEXT,
+      created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_creative_jobs_status
+      ON creative_jobs(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_creative_jobs_arcads
+      ON creative_jobs(arcads_job_id);
   `);
 }
 

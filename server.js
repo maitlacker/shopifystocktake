@@ -21,6 +21,7 @@ const opsSync          = require('./ops-sync');
 const restockSync      = require('./restock-sync');
 const stockValueSync   = require('./stock-value-sync');
 const adsAssetSync     = require('./google-ads-asset-sync');
+const arcadsSync       = require('./arcads-sync');
 
 const anthropicClient = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -4355,6 +4356,280 @@ async function runGstGapAnalysis(from, to, keywordsStr, excludeGiftCards) {
   };
 }
 
+// ── Creative Pipeline ─────────────────────────────────────────────
+
+const CREATIVE_TEMPLATES = [
+  { id: 'new_arrival',        label: 'New Arrival Drop' },
+  { id: 'three_ways_to_style', label: '3 Ways to Style' },
+  { id: 'low_stock_urgency',  label: 'Low Stock Urgency' },
+  { id: 'founder_ugc',        label: 'Founder UGC' },
+  { id: 'outfit_transform',   label: 'Outfit Transformation' },
+  { id: 'sale_event',         label: 'Sale Event' },
+  { id: 'product_showcase',   label: 'Product Showcase' },
+];
+
+// Fetch a product from Shopify GraphQL by GID
+async function fetchShopifyProduct(gid) {
+  const query = `{
+    product(id: "${gid}") {
+      id title vendor productType description tags
+      priceRangeV2 { minVariantPrice { amount } }
+      compareAtPriceRange { maxVariantCompareAtPrice { amount } }
+      images(first: 6) { nodes { url altText } }
+      collections(first: 10) { nodes { title } }
+      totalInventory status
+    }
+  }`;
+  const res = await fetch(
+    `https://${SHOPIFY_SHOP}/admin/api/2024-01/graphql.json`,
+    {
+      method: 'POST',
+      headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    }
+  );
+  const json = await res.json();
+  return json.data && json.data.product ? json.data.product : null;
+}
+
+// Search Shopify products by title query
+async function searchShopifyProducts(q, first = 30) {
+  const query = `{
+    products(first: ${first}, query: "title:*${q}*") {
+      nodes {
+        id title vendor productType tags status totalInventory
+        priceRangeV2 { minVariantPrice { amount } }
+        images(first: 1) { nodes { url } }
+      }
+    }
+  }`;
+  const res = await fetch(
+    `https://${SHOPIFY_SHOP}/admin/api/2024-01/graphql.json`,
+    {
+      method: 'POST',
+      headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    }
+  );
+  const json = await res.json();
+  return (json.data && json.data.products && json.data.products.nodes) || [];
+}
+
+// GET /api/creative/products — list synced products (with optional search)
+app.get('/api/creative/products', requireAuth, async (req, res) => {
+  const { q = '', limit = 50, offset = 0 } = req.query;
+  try {
+    const filter = q ? `AND (title ILIKE $3 OR tags ILIKE $3)` : '';
+    const params = q
+      ? [Number(limit), Number(offset), `%${q}%`]
+      : [Number(limit), Number(offset)];
+    const { rows } = await pool.query(
+      `SELECT * FROM creative_products ${filter ? 'WHERE ' + filter.slice(4) : ''}
+       ORDER BY synced_at DESC LIMIT $1 OFFSET $2`,
+      params
+    );
+    res.json({ products: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/creative/products/search — live Shopify search
+app.post('/api/creative/products/search', requireAuth, async (req, res) => {
+  const { q = '' } = req.body;
+  try {
+    const products = await searchShopifyProducts(q.trim() || '*');
+    res.json({ products: products.map(p => ({
+      shopify_product_id: p.id,
+      title:              p.title,
+      vendor:             p.vendor,
+      product_type:       p.productType,
+      tags:               p.tags ? p.tags.join(', ') : '',
+      price:              p.priceRangeV2.minVariantPrice.amount,
+      inventory_count:    p.totalInventory,
+      is_available:       p.status === 'ACTIVE',
+      images:             (p.images.nodes || []).map(i => i.url),
+    })) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/creative/products/sync — save selected products to DB
+app.post('/api/creative/products/sync', requireAuth, async (req, res) => {
+  const { productIds } = req.body;  // array of Shopify GIDs
+  if (!Array.isArray(productIds) || !productIds.length) {
+    return res.status(400).json({ error: 'productIds array required' });
+  }
+  if (productIds.length > 20) {
+    return res.status(400).json({ error: 'Max 20 products per sync' });
+  }
+  try {
+    const synced = [];
+    for (const gid of productIds) {
+      const p = await fetchShopifyProduct(gid);
+      if (!p) continue;
+      const images      = (p.images.nodes || []).map(n => n.url);
+      const collections = (p.collections.nodes || []).map(n => n.title);
+      const price       = parseFloat(p.priceRangeV2.minVariantPrice.amount) || 0;
+      const cap         = parseFloat((p.compareAtPriceRange.maxVariantCompareAtPrice || {}).amount) || null;
+      await pool.query(
+        `INSERT INTO creative_products
+           (shopify_product_id, title, vendor, product_type, tags, description,
+            price, compare_at_price, images, collections, inventory_count, is_available, synced_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
+         ON CONFLICT (shopify_product_id) DO UPDATE SET
+           title=$2, vendor=$3, product_type=$4, tags=$5, description=$6,
+           price=$7, compare_at_price=$8, images=$9, collections=$10,
+           inventory_count=$11, is_available=$12, synced_at=NOW()`,
+        [
+          p.id, p.title, p.vendor, p.productType,
+          (p.tags || []).join(', '), p.description || '',
+          price, cap,
+          JSON.stringify(images), JSON.stringify(collections),
+          p.totalInventory || 0, p.status === 'ACTIVE',
+        ]
+      );
+      synced.push(p.id);
+    }
+    res.json({ synced: synced.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/creative/templates — list available templates
+app.get('/api/creative/templates', requireAuth, (_req, res) => {
+  res.json({ templates: CREATIVE_TEMPLATES });
+});
+
+// POST /api/creative/jobs — create a new generation job
+app.post('/api/creative/jobs', requireAuth, async (req, res) => {
+  const { productIds, templateType, jobType = 'single', brief: extraBrief = {} } = req.body;
+  if (!Array.isArray(productIds) || !productIds.length) {
+    return res.status(400).json({ error: 'productIds required' });
+  }
+  if (jobType === 'single' && productIds.length > 1) {
+    return res.status(400).json({ error: 'Single jobs take exactly one product; use jobType=collage for multiple' });
+  }
+  try {
+    // Fetch product rows from DB
+    const { rows: products } = await pool.query(
+      `SELECT * FROM creative_products WHERE shopify_product_id = ANY($1)`,
+      [productIds]
+    );
+    if (!products.length) {
+      return res.status(404).json({ error: 'No matching synced products found — sync them first' });
+    }
+
+    // Build brief
+    const brief = {
+      jobType,
+      templateType,
+      product:  products[0],
+      products: products,
+      ...extraBrief,
+    };
+
+    // Submit to Arcads if enabled
+    let arcadsJobId = null;
+    let status = 'queued';
+    if (arcadsSync.arcadsEnabled()) {
+      try {
+        const resp = jobType === 'collage'
+          ? await arcadsSync.submitCollageJob(brief)
+          : await arcadsSync.submitJob(brief);
+        arcadsJobId = resp.id || resp.job_id || resp.video_id || null;
+        if (arcadsJobId) status = 'generating';
+      } catch (arcadsErr) {
+        console.error('[arcads] Submit error:', arcadsErr.message);
+        // Fall through — job stays in 'queued' for manual retry
+      }
+    }
+
+    const { rows: [job] } = await pool.query(
+      `INSERT INTO creative_jobs
+         (job_type, shopify_product_ids, template_type, arcads_job_id, status, brief, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [
+        jobType,
+        productIds,
+        templateType,
+        arcadsJobId,
+        status,
+        JSON.stringify(brief),
+        req.user ? req.user.email : null,
+      ]
+    );
+    res.json({ job });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/creative/jobs — list jobs
+app.get('/api/creative/jobs', requireAuth, async (req, res) => {
+  const { status, limit = 50, offset = 0 } = req.query;
+  try {
+    const params = [Number(limit), Number(offset)];
+    const where  = status ? `WHERE status=$3` : '';
+    if (status) params.push(status);
+    const { rows } = await pool.query(
+      `SELECT * FROM creative_jobs ${where} ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+      params
+    );
+    res.json({ jobs: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/creative/jobs/:id
+app.get('/api/creative/jobs/:id', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`SELECT * FROM creative_jobs WHERE id=$1`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json({ job: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/creative/jobs/:id — update status (approve/reject/archive)
+app.patch('/api/creative/jobs/:id', requireAuth, async (req, res) => {
+  const { status, error_message } = req.body;
+  const ALLOWED = ['approved', 'rejected', 'archived', 'queued'];
+  if (status && !ALLOWED.includes(status)) {
+    return res.status(400).json({ error: `status must be one of: ${ALLOWED.join(', ')}` });
+  }
+  try {
+    const sets = ['updated_at=NOW()'];
+    const params = [];
+    if (status)        { params.push(status);        sets.push(`status=$${params.length}`); }
+    if (error_message !== undefined) { params.push(error_message); sets.push(`error_message=$${params.length}`); }
+    params.push(req.params.id);
+    const { rows } = await pool.query(
+      `UPDATE creative_jobs SET ${sets.join(',')} WHERE id=$${params.length} RETURNING *`,
+      params
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json({ job: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/creative/jobs/:id
+app.delete('/api/creative/jobs/:id', requireAuth, async (req, res) => {
+  try {
+    const { rowCount } = await pool.query(`DELETE FROM creative_jobs WHERE id=$1`, [req.params.id]);
+    if (!rowCount) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
@@ -4371,6 +4646,7 @@ initDb()
     restockSync.startCron(pool);
     stockValueSync.startCron(pool);
     adsAssetSync.startCron();
+    arcadsSync.startCron(pool);
 
     // Recalculate margin tiers nightly at 02:00
     cron.schedule('0 2 * * *', async () => {

@@ -63,6 +63,8 @@
         { label: 'Gift Card Export', href: '/gift-card-export.html' },
         { label: 'Margin Tagger',    href: '/margin-tagger.html' },
         { label: 'EDM Builder',      href: '/edm-builder.html' },
+        { label: 'Creative Studio',  href: '/creative-studio.html' },
+        { label: 'Creative Review',  href: '/creative-review.html' },
       ],
     },
   ];
