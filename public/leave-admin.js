@@ -155,16 +155,22 @@
   }
 
   function historyRow(r) {
-    const name  = `${escHtml(r.first_name || '')} ${escHtml(r.last_name || '')}`.trim() || escHtml(r.wms_email);
+    const isCasual = r.approved_by === 'casual-auto';
+    const baseName = `${escHtml(r.first_name || '')} ${escHtml(r.last_name || '')}`.trim() || escHtml(r.wms_email);
+    const name  = isCasual
+      ? `${baseName} <span style="font-size:0.68rem;background:#ede9fe;color:#6d28d9;padding:1px 6px;border-radius:4px;font-weight:700;">CASUAL</span>`
+      : baseName;
     const dates = fmtDateRange(r.start_date, r.end_date);
     const filed = fmtDate(r.created_at);
     let xeroBadge = '<span style="color:#cbd5e1;">—</span>';
-    if (r.xero_leave_id) {
-      xeroBadge = `<span class="la-xero-badge">✓ ${r.xero_leave_id.slice(0,8)}…</span>`;
-    } else if (r.xero_status === 'error') {
-      xeroBadge = `<span class="la-xero-badge error" title="${escHtml(r.xero_error || '')}">⚠ Failed</span>`;
+    if (!isCasual) {
+      if (r.xero_leave_id) {
+        xeroBadge = `<span class="la-xero-badge">✓ ${r.xero_leave_id.slice(0,8)}…</span>`;
+      } else if (r.xero_status === 'error') {
+        xeroBadge = `<span class="la-xero-badge error" title="${escHtml(r.xero_error || '')}">⚠ Failed</span>`;
+      }
     }
-    const retryBtn = (r.status === 'approved' && !r.xero_leave_id)
+    const retryBtn = (!isCasual && r.status === 'approved' && !r.xero_leave_id)
       ? `<button class="la-action-btn retry" data-retry="${r.id}">Retry Xero</button>` : '';
     return `
       <tr>
@@ -223,6 +229,27 @@
         return;
       }
       tbody.innerHTML = emps.map(empRow).join('');
+      tbody.querySelectorAll('[data-casual-id]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id       = btn.dataset.casualId;
+          const newVal   = btn.dataset.casualVal === 'true';
+          const label    = newVal ? 'casual' : 'permanent';
+          if (!confirm(`Mark this employee as ${label}?`)) return;
+          try {
+            const res  = await fetch(`/api/leave/employees/${id}/casual`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ is_casual: newVal }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error);
+            showStatus(`Employee updated to ${label}`, 'success');
+            loadEmployees();
+          } catch (err) {
+            showStatus(`Failed: ${err.message}`, 'error');
+          }
+        });
+      });
       tbody.querySelectorAll('form[data-emp-id]').forEach(form => {
         form.addEventListener('submit', async e => {
           e.preventDefault();
@@ -249,13 +276,16 @@
   }
 
   function empRow(e) {
-    const name    = `${escHtml(e.first_name)} ${escHtml(e.last_name)}`.trim();
-    const active  = e.is_active
+    const name      = `${escHtml(e.first_name)} ${escHtml(e.last_name)}`.trim();
+    const active    = e.is_active
       ? '<span style="color:#15803d; font-size:0.75rem; font-weight:600;">Active</span>'
       : '<span style="color:#94a3b8; font-size:0.75rem;">Inactive</span>';
-    const linked  = e.wms_email
+    const linked    = e.wms_email
       ? `<span style="color:#15803d; font-size:0.8rem; font-weight:600;">✓ ${escHtml(e.wms_email)}</span>`
       : '<span style="color:#f59e0b; font-size:0.78rem;">Not linked</span>';
+    const casualBtn = e.is_casual
+      ? `<button class="la-action-btn" data-casual-id="${e.id}" data-casual-val="false" style="background:#ede9fe;color:#6d28d9;border-color:#c4b5fd;">● Casual</button>`
+      : `<button class="la-action-btn link" data-casual-id="${e.id}" data-casual-val="true">Set Casual</button>`;
     return `
       <tr>
         <td style="font-weight:600;">${name}</td>
@@ -267,7 +297,10 @@
             <button type="submit" class="la-action-btn link">Save</button>
           </form>
         </td>
-        <td>${active}</td>
+        <td>
+          ${active}
+          <div style="margin-top:4px;">${casualBtn}</div>
+        </td>
       </tr>`;
   }
 

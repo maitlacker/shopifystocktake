@@ -601,6 +601,7 @@ async function initDb() {
       is_active         BOOLEAN DEFAULT TRUE,
       synced_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE leave_employees ADD COLUMN IF NOT EXISTS is_casual BOOLEAN NOT NULL DEFAULT FALSE;
     CREATE INDEX IF NOT EXISTS idx_leave_employees_wms
       ON leave_employees(wms_email);
 

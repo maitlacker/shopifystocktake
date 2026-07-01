@@ -85,18 +85,20 @@
       }
     });
 
-    // Leave (expand day by day, weekdays only)
+    // Leave + casual unavailability (expand day by day, weekdays only)
     data.leave.forEach(l => {
       const firstName = (l.first_name || '').trim();
       const lastName  = (l.last_name  || '').trim();
       const fullName  = firstName && lastName ? `${firstName} ${lastName}` : firstName || l.wms_email.split('@')[0];
       const shortName = firstName ? `${firstName}${lastName ? ' ' + lastName[0] + '.' : ''}` : fullName;
+      const type      = l.is_casual ? 'casual' : 'leave';
+      const typeLabel = l.is_casual ? 'Unavailable' : 'Annual Leave';
       const end = new Date(l.end_date);
       const cur = new Date(l.start_date);
       while (cur <= end) {
         const dow = cur.getDay();
         if (dow !== 0 && dow !== 6) {
-          add(cur.toISOString().slice(0, 10), { type: 'leave', label: shortName, title: `${fullName} — Annual Leave` });
+          add(cur.toISOString().slice(0, 10), { type, label: shortName, title: `${fullName} — ${typeLabel}` });
         }
         cur.setDate(cur.getDate() + 1);
       }

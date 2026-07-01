@@ -81,6 +81,20 @@
         startDate.disabled = true;
         endDate.disabled   = true;
         notes.disabled     = true;
+        return;
+      }
+      // Relabel the form for casual staff
+      if (linkedEmployee.is_casual) {
+        document.getElementById('pageTitle').textContent    = 'Unavailability Notice';
+        document.getElementById('pageSubtitle').textContent = 'Mark the dates you are unavailable — recorded instantly on the team calendar, no approval needed.';
+        document.getElementById('formTitle').textContent    = 'New Entry';
+        btnSubmit.textContent = 'Mark as Unavailable';
+        // Casual badge next to history heading
+        const histHeading = document.querySelector('[style*="My Requests"], .lr-table-wrap');
+        const badge = document.createElement('span');
+        badge.style.cssText = 'font-size:0.7rem;background:#ede9fe;color:#6d28d9;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:6px;text-transform:uppercase;letter-spacing:0.04em;';
+        badge.textContent = 'Casual';
+        document.querySelector('[style*="My Requests"]')?.appendChild(badge);
       }
     } catch (e) {
       console.error('Failed to check employee link', e);
@@ -151,7 +165,10 @@
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Submission failed');
-      showStatus('Request submitted — you will be notified once approved.', 'success');
+      const msg = data.isCasual
+        ? 'Unavailability recorded — visible on the team calendar.'
+        : 'Request submitted — you will be notified once approved.';
+      showStatus(msg, 'success');
       startDate.value = '';
       endDate.value   = '';
       notes.value     = '';

@@ -4391,6 +4391,21 @@ app.post('/api/leave/employees/sync', requireAuth, requireLeaveAdmin, async (req
   }
 });
 
+// PATCH /api/leave/employees/:id/casual — toggle casual flag (admin only)
+app.patch('/api/leave/employees/:id/casual', requireAuth, requireLeaveAdmin, async (req, res) => {
+  const { is_casual } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `UPDATE leave_employees SET is_casual=$1 WHERE id=$2 RETURNING *`,
+      [Boolean(is_casual), req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json({ employee: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PATCH /api/leave/employees/:id/link — set wms_email on an employee (admin only)
 app.patch('/api/leave/employees/:id/link', requireAuth, requireLeaveAdmin, async (req, res) => {
   const { wms_email } = req.body;
@@ -4481,15 +4496,17 @@ app.post('/api/leave/requests', requireAuth, async (req, res) => {
       });
     }
 
-    // Find linked employee
+    // Find linked employee (include is_casual)
     const { rows: empRows } = await pool.query(
-      `SELECT id FROM leave_employees WHERE wms_email=$1 AND is_active=TRUE LIMIT 1`,
+      `SELECT id, first_name, last_name, is_casual FROM leave_employees WHERE wms_email=$1 AND is_active=TRUE LIMIT 1`,
       [email]
     );
     if (!empRows.length) {
       return res.status(400).json({ error: 'Your account is not yet linked to a Xero employee. Contact accounts@theselfstyler.com.' });
     }
-    const employeeId = empRows[0].id;
+    const emp        = empRows[0];
+    const employeeId = emp.id;
+    const isCasual   = emp.is_casual;
 
     // Count working days (Mon–Fri, excluding QLD public holidays)
     const { rows: phRows } = await pool.query(
@@ -4510,28 +4527,43 @@ app.post('/api/leave/requests', requireAuth, async (req, res) => {
       return count;
     })();
 
+    // Casual staff: auto-approve immediately, never write to Xero
+    const insertStatus    = isCasual ? 'approved' : 'pending';
+    const insertApprovedBy = isCasual ? 'casual-auto' : null;
+
     const { rows: [request] } = await pool.query(
-      `INSERT INTO leave_requests (employee_id, wms_email, start_date, end_date, days_count, notes)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [employeeId, email, start_date, end_date, days, notes || null]
+      `INSERT INTO leave_requests
+         (employee_id, wms_email, start_date, end_date, days_count, notes, status, approved_by, approved_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, ${isCasual ? 'NOW()' : 'NULL'}) RETURNING *`,
+      [employeeId, email, start_date, end_date, days, notes || null, insertStatus, insertApprovedBy]
     );
 
-    // Notify admin
-    const { rows: [emp] } = await pool.query(
-      `SELECT first_name, last_name FROM leave_employees WHERE id=$1`, [employeeId]
-    );
-    const staffName = emp ? `${emp.first_name} ${emp.last_name}`.trim() : email;
-    mailer.sendLeaveRequestNotification({
-      adminEmail: LEAVE_ADMIN,
-      staffName,
-      staffEmail: email,
-      startDate:  start_date,
-      endDate:    end_date,
-      daysCount:  days,
-      notes:      notes || null,
-    }).catch(err => console.error('[email] Leave request notification failed:', err.message));
+    const staffName = `${emp.first_name} ${emp.last_name}`.trim() || email;
 
-    res.json({ request });
+    if (isCasual) {
+      // FYI email to admin — no approval action needed
+      mailer.sendCasualUnavailabilityNotification({
+        adminEmail: LEAVE_ADMIN,
+        staffName,
+        staffEmail: email,
+        startDate:  start_date,
+        endDate:    end_date,
+        daysCount:  days,
+        notes:      notes || null,
+      }).catch(err => console.error('[email] Casual notification failed:', err.message));
+    } else {
+      mailer.sendLeaveRequestNotification({
+        adminEmail: LEAVE_ADMIN,
+        staffName,
+        staffEmail: email,
+        startDate:  start_date,
+        endDate:    end_date,
+        daysCount:  days,
+        notes:      notes || null,
+      }).catch(err => console.error('[email] Leave request notification failed:', err.message));
+    }
+
+    res.json({ request, isCasual });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4712,7 +4744,7 @@ app.get('/api/leave/calendar', requireAuth, async (req, res) => {
     const [leaveRes, holidayRes, blackoutRes] = await Promise.all([
       pool.query(
         `SELECT lr.id, lr.start_date::text, lr.end_date::text,
-                le.first_name, le.last_name, lr.wms_email
+                le.first_name, le.last_name, lr.wms_email, le.is_casual
          FROM leave_requests lr
          LEFT JOIN leave_employees le ON le.id = lr.employee_id
          WHERE lr.status = 'approved'
