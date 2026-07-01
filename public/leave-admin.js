@@ -298,7 +298,7 @@
         return;
       }
       tbody.innerHTML = rows.map(b => {
-        const days = Math.round((new Date(b.end_date) - new Date(b.start_date)) / 86400000) + 1;
+        const days = countWorkingDays(b.start_date, b.end_date);
         return `<tr>
           <td style="font-weight:600;">${escHtml(b.name)}</td>
           <td>${fmtDate(b.start_date)}</td>
@@ -353,6 +353,18 @@
   });
 
   // ── Helpers ───────────────────────────────────────────────────────
+  function countWorkingDays(startStr, endStr) {
+    let count = 0;
+    const end = new Date(endStr);
+    const cur = new Date(startStr);
+    while (cur <= end) {
+      const day = cur.getDay();
+      if (day !== 0 && day !== 6) count++;
+      cur.setDate(cur.getDate() + 1);
+    }
+    return count;
+  }
+
   function fmtDate(d) {
     if (!d) return '—';
     return new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });

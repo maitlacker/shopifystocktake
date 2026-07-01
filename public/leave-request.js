@@ -81,8 +81,8 @@
       btnSubmit.disabled = true;
       return;
     }
-    const days = Math.round((new Date(e) - new Date(s)) / 86400000) + 1;
-    daysHint.textContent = `${days} calendar day${days !== 1 ? 's' : ''}`;
+    const days = countWorkingDays(s, e);
+    daysHint.textContent = `${days} working day${days !== 1 ? 's' : ''}`;
     daysHint.style.color = '#6366f1';
     btnSubmit.disabled = !linkedEmployee;
   }
@@ -165,6 +165,18 @@
   btnRefresh.addEventListener('click', loadRequests);
 
   // ── Helpers ───────────────────────────────────────────────────────
+  function countWorkingDays(startStr, endStr) {
+    let count = 0;
+    const end = new Date(endStr);
+    const cur = new Date(startStr);
+    while (cur <= end) {
+      const day = cur.getDay();
+      if (day !== 0 && day !== 6) count++;
+      cur.setDate(cur.getDate() + 1);
+    }
+    return count;
+  }
+
   function fmtDate(d) {
     if (!d) return '—';
     return new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });

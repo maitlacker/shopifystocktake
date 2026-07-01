@@ -4475,9 +4475,18 @@ app.post('/api/leave/requests', requireAuth, async (req, res) => {
     }
     const employeeId = empRows[0].id;
 
-    // Calculate calendar days
-    const ms = new Date(end_date) - new Date(start_date);
-    const days = Math.round(ms / 86400000) + 1;
+    // Count working days (Mon–Fri only)
+    const days = (() => {
+      let count = 0;
+      const end = new Date(end_date);
+      const cur = new Date(start_date);
+      while (cur <= end) {
+        const d = cur.getDay();
+        if (d !== 0 && d !== 6) count++;
+        cur.setDate(cur.getDate() + 1);
+      }
+      return count;
+    })();
 
     const { rows: [request] } = await pool.query(
       `INSERT INTO leave_requests (employee_id, wms_email, start_date, end_date, days_count, notes)

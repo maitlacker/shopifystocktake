@@ -180,7 +180,7 @@ async function importLeaveFromXero(pool) {
     // Use wms_email if linked, otherwise fall back to xero_employee_id as placeholder
     const wmsEmail = emp.wms_email || `xero:${app.EmployeeID}`;
 
-    const days = Math.round((new Date(endDate) - new Date(startDate)) / 86400000) + 1;
+    const days = countWorkingDays(startDate, endDate);
 
     await pool.query(
       `INSERT INTO leave_requests
@@ -226,9 +226,16 @@ function formatDate(d) {
   });
 }
 
-function countDays(start, end) {
-  const ms = new Date(end) - new Date(start);
-  return Math.round(ms / 86400000) + 1;
+function countWorkingDays(startStr, endStr) {
+  let count = 0;
+  const end = new Date(endStr);
+  const cur = new Date(startStr);
+  while (cur <= end) {
+    const day = cur.getDay();
+    if (day !== 0 && day !== 6) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
 }
 
 async function buildSlackMessage(pool) {
@@ -256,7 +263,7 @@ async function buildSlackMessage(pool) {
   const lines = leaves.map(l => {
     const start   = formatDate(l.start_date);
     const end     = formatDate(l.end_date);
-    const days    = l.days_count || countDays(l.start_date, l.end_date);
+    const days    = l.days_count || countWorkingDays(l.start_date, l.end_date);
     const name    = `${l.first_name} ${l.last_name}`.trim();
     const dateStr = start === end ? start : `${start} – ${end}`;
     return `• *${name}* — ${dateStr} _(${days} day${days !== 1 ? 's' : ''})_`;
