@@ -6,10 +6,20 @@
 // assigns a selling rating (AA+/A/B/C/F), calculates per-size runway
 // accounting for pending purchase orders, and fires Slack alerts.
 //
-// Two alert tiers per product — one of each, never repeated until the
-// corresponding restock order is marked 'received':
-//   Sea: fires once when effective runway ≤ sea lead days  (F suppressed)
-//   Air: fires once when effective runway ≤ air lead days  (F suppressed)
+// Three alert tiers per product — each fires at most once per product
+// until the corresponding restock order is marked 'received':
+//   Sea:      runway ≤ sea lead days      (B/A/AA+ only; C/F suppressed)
+//   Air:      runway ≤ air lead days      (B/A/AA+ only; C/F suppressed)
+//   Critical: runway ≤ CRITICAL_DAYS      (A/AA+ only; fires even if sea/air already sent)
+//
+// Alert triggers require 2+ active sizes (≥0.05 units/day) to be
+// heading for stockout before delivery, OR the top-selling size alone.
+// Products in the Final Sale collection are always excluded.
+//
+// Suggested order quantities include a velocity buffer:
+//   AA+: +25%  |  A: +10%  |  B: no buffer
+// This accounts for accelerating demand — the cover calculation
+// undershoots when sales are growing quickly.
 
 const fetch = require('node-fetch');
 const cron  = require('node-cron');
@@ -22,15 +32,28 @@ const SHOPIFY_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const API_VERSION   = '2024-01';
 const APP_URL       = (process.env.APP_URL || '').replace(/\/$/, '');
 
+// Name of the Shopify collection to exclude from restock alerts (case-insensitive).
+// Override via FINAL_SALE_COLLECTION_TITLE env var if your collection has a different name.
+const FINAL_SALE_TITLE = (process.env.FINAL_SALE_COLLECTION_TITLE || 'final sale').toLowerCase().trim();
+
+// Runway threshold for the CRITICAL alert tier (days).
+const CRITICAL_DAYS = 14;
+
 function shopifyHeaders() {
   return { 'X-Shopify-Access-Token': SHOPIFY_TOKEN };
+}
+
+function fmtDate(daysFromNow) {
+  const d = new Date();
+  d.setDate(d.getDate() + daysFromNow);
+  return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 // ── Shopify fetchers ───────────────────────────────────────────────
 async function fetchAllProducts() {
   const products = [];
   let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products.json` +
-    `?limit=250&status=active&fields=id,title,variants,images`;
+    `?limit=250&status=active&fields=id,title,variants,images,tags`;
   while (url) {
     const r = await fetch(url, { headers: shopifyHeaders() });
     if (!r.ok) throw new Error(`Shopify products: ${r.status}`);
@@ -60,22 +83,66 @@ async function fetchOrdersSince(sinceDate) {
   return orders;
 }
 
+// Returns the Set of Shopify product IDs in the Final Sale collection.
+// Fails gracefully — returns an empty set if the collection isn't found.
+async function fetchFinalSaleProductIds() {
+  try {
+    // Search custom collections for one matching FINAL_SALE_TITLE
+    let colUrl = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/custom_collections.json` +
+      `?fields=id,title&limit=250`;
+    let colId = null;
+    while (colUrl && !colId) {
+      const r = await fetch(colUrl, { headers: shopifyHeaders() });
+      if (!r.ok) break;
+      const data = await r.json();
+      const match = (data.custom_collections || []).find(c =>
+        c.title.toLowerCase().trim() === FINAL_SALE_TITLE
+      );
+      if (match) { colId = match.id; break; }
+      const link = r.headers.get('link') || '';
+      const m = link.match(/<([^>]+)>;\s*rel="next"/);
+      colUrl = m ? m[1] : null;
+    }
+    if (!colId) {
+      console.log(`[restock] Final Sale collection "${FINAL_SALE_TITLE}" not found — no exclusions`);
+      return new Set();
+    }
+    // Collect all product IDs in that collection
+    const productIds = new Set();
+    let collectUrl = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/collects.json` +
+      `?collection_id=${colId}&fields=product_id&limit=250`;
+    while (collectUrl) {
+      const cr = await fetch(collectUrl, { headers: shopifyHeaders() });
+      if (!cr.ok) break;
+      const cd = await cr.json();
+      (cd.collects || []).forEach(c => productIds.add(String(c.product_id)));
+      const link = cr.headers.get('link') || '';
+      const m = link.match(/<([^>]+)>;\s*rel="next"/);
+      collectUrl = m ? m[1] : null;
+    }
+    console.log(`[restock] Final Sale collection: ${productIds.size} products excluded from alerts`);
+    return productIds;
+  } catch (e) {
+    console.error('[restock] fetchFinalSaleProductIds error:', e.message);
+    return new Set();
+  }
+}
+
 // ── Selling rating ─────────────────────────────────────────────────
 // Based on velocity trend (recent half vs older half) + absolute volume.
 // Returns 'AA+', 'A', 'B', 'C', 'F', or null (insufficient data).
 function calculateRating(avgDailyVel, recentDailyVel, olderDailyVel, totalSold) {
-  if (totalSold < 5) return null;  // too little history
+  if (totalSold < 5) return null;
 
-  // trend ratio: how recent velocity compares to earlier
   const trendRatio = olderDailyVel > 0
     ? recentDailyVel / olderDailyVel
     : (recentDailyVel > 0 ? 2.0 : 0);
 
-  if (recentDailyVel < 0.05 || trendRatio < 0.25) return 'F';   // sales stopped
-  if (trendRatio < 0.55)                           return 'C';   // significant decline
-  if (trendRatio < 0.80 || avgDailyVel < 0.30)    return 'B';   // slight decline / low vol
-  if (trendRatio < 1.20)                           return 'A';   // stable
-  return 'AA+';                                                   // accelerating
+  if (recentDailyVel < 0.05 || trendRatio < 0.25) return 'F';
+  if (trendRatio < 0.55)                           return 'C';
+  if (trendRatio < 0.80 || avgDailyVel < 0.30)    return 'B';
+  if (trendRatio < 1.20)                           return 'A';
+  return 'AA+';
 }
 
 function trendArrow(trendRatio) {
@@ -85,6 +152,28 @@ function trendArrow(trendRatio) {
   if (trendRatio >= 0.90) return '→';
   if (trendRatio >= 0.60) return '↓';
   return '↓↓';
+}
+
+// ── Coverage failure check ─────────────────────────────────────────
+// Determines whether the alert trigger condition is met for a given
+// lead time: 2+ active sizes will sell out before the restock arrives,
+// OR the top-selling size alone will sell out.
+// "Active" = selling at ≥0.05 units/day (filters out near-dead sizes).
+function coverageFailure(variants, leadDays) {
+  const active = variants.filter(v => v.demandDailyVel >= 0.05);
+  if (!active.length) return false;
+
+  const failing = active.filter(v =>
+    v.effectiveDaysRemaining !== null && v.effectiveDaysRemaining <= leadDays
+  );
+  if (failing.length >= 2) return true;
+
+  // Even a single failing size triggers if it's the top seller
+  if (failing.length === 1) {
+    const top = active.reduce((m, v) => v.demandDailyVel > m.demandDailyVel ? v : m, active[0]);
+    if (failing[0].id === top.id) return true;
+  }
+  return false;
 }
 
 // ── Slack ──────────────────────────────────────────────────────────
@@ -102,54 +191,127 @@ async function sendSlack(text) {
   if (!r.ok) throw new Error(`Slack: ${r.status}`);
 }
 
+// ── Slack message formatters ───────────────────────────────────────
 function formatSlackAlert(product, alertType, coverWeeks) {
   const isAir    = alertType === 'air';
   const icon     = isAir ? '✈️' : '🚢';
   const modeStr  = isAir ? 'AIR FREIGHT' : 'SEA FREIGHT';
   const leadDays = isAir ? product.effectiveAirLeadDays : product.effectiveSeaLeadDays;
   const leadWks  = Math.round(leadDays / 7);
+  const deliveryStr = fmtDate(leadDays);
+
   const ratingEmoji = { 'AA+': '🚀', A: '✅', B: '📊', C: '⚠️', F: '⛔' };
   const re = ratingEmoji[product.rating] || '';
 
-  const sugKey = isAir ? 'suggestedAirQty' : 'suggestedSeaQty';
+  // Velocity buffer: AA+ orders 25% more, A orders 10% more
+  const buffer  = product.velocityBuffer || 1.0;
+  const bufNote = buffer > 1.0 ? ` _(incl. ${Math.round((buffer - 1) * 100)}% ${product.rating} buffer)_` : '';
+
+  const sugKey    = isAir ? 'suggestedAirQty' : 'suggestedSeaQty';
+  const totalVel  = product.variants.reduce((s, v) => s + (v.demandDailyVel || 0), 0);
+
   const variantLines = product.variants
-    .filter(v => v.recentDailyVel > 0 || (v[sugKey] || 0) > 0)
+    .filter(v => v.demandDailyVel >= 0.05 || (v[sugKey] || 0) > 0)
+    .sort((a, b) => (b.demandDailyVel || 0) - (a.demandDailyVel || 0))
     .map(v => {
-      const qty  = v[sugKey] || 0;
-      const days = v.effectiveDaysRemaining !== null ? `${v.effectiveDaysRemaining}d` : '∞';
-      return `  ${v.title}: *${qty > 0 ? '+' + qty : 'covered'}*  (${days} runway)`;
+      const rawQty = v[sugKey] || 0;
+      const qty    = Math.ceil(rawQty * buffer);
+      const days   = v.effectiveDaysRemaining !== null ? `${v.effectiveDaysRemaining}d runway` : '∞';
+      const velPct = totalVel > 0 ? Math.round((v.demandDailyVel / totalVel) * 100) : 0;
+      const pct    = velPct > 0 ? ` · ${velPct}% of sales` : '';
+      const oosWarn = (v.effectiveDaysRemaining !== null && v.effectiveDaysRemaining <= leadDays)
+        ? ' ⚠' : '';
+      return `  ${v.title}: *+${qty > 0 ? qty : 'covered'}* units  (${days}${pct}${oosWarn})`;
     });
 
-  const totalSuggested = product.variants.reduce((s, v) => s + (v[sugKey] || 0), 0);
+  const totalRaw       = product.variants.reduce((s, v) => s + (v[sugKey] || 0), 0);
+  const totalBuffered  = Math.ceil(totalRaw * buffer);
 
   const incomingLines = product.incomingOrders.length
     ? product.incomingOrders.map(o =>
         `📦 Incoming ${o.freightMode.toUpperCase()}: ${o.totalQty} units · due ${o.expectedDelivery}`
       ).join('\n')
-    : '📦 No pending orders for this style';
+    : '📦 No pending orders — order now';
 
   const supplierLine = product.supplierName
     ? `🏭 Supplier: *${product.supplierName}*`
     : null;
 
   const plannerLink = APP_URL
-    ? `\n📋 <${APP_URL}/restock.html|Open Restock Planner>`
-    : '';
+    ? `📋 <${APP_URL}/restock.html|Open Restock Planner>`
+    : null;
 
   return [
     `${icon} *${modeStr} RESTOCK ALERT*  —  ${product.title}`,
-    `Rating: ${re} *${product.rating}*  ·  ${product.avgDailyVel.toFixed(2)} units/day  ${trendArrow(product.trendRatio)}`,
+    `${re} Rating: *${product.rating}*  ·  ${product.avgDailyVel.toFixed(2)} units/day  ${trendArrow(product.trendRatio)}`,
     '',
-    `⏱ Shortest runway: *${product.minDaysRemaining} days* (${product.criticalVariant})`,
-    `${icon} ${modeStr} lead time: *${leadDays} days* (~${leadWks} wks)  ←  _order now to avoid stockout_`,
+    `⏱ Shortest runway: *${product.minDaysRemaining} days* (size ${product.criticalVariant})`,
+    `${icon} ${modeStr} lead time: *~${leadWks} weeks*  →  order today, stock arrives *~${deliveryStr}*`,
     ...(supplierLine ? [supplierLine] : []),
     '',
-    `Suggested reorder (${coverWeeks}-week post-delivery cover):`,
+    `*Suggested reorder* (${coverWeeks}-week cover after delivery)${bufNote}:`,
     ...variantLines,
-    `  *Total: ${totalSuggested} units*`,
+    `  ──────────────────────────`,
+    `  *Total: ${totalBuffered} units*`,
     '',
     incomingLines,
-    plannerLink,
+    ...(plannerLink ? ['', plannerLink] : []),
+  ].join('\n');
+}
+
+function formatCriticalAlert(product, coverWeeks) {
+  const ratingEmoji = { 'AA+': '🚀', A: '✅', B: '📊', C: '⚠️', F: '⛔' };
+  const re = ratingEmoji[product.rating] || '';
+  const buffer      = product.velocityBuffer || 1.0;
+  const airDelivery = fmtDate(product.effectiveAirLeadDays);
+  const seaDelivery = fmtDate(product.effectiveSeaLeadDays);
+  const airWks      = Math.round(product.effectiveAirLeadDays / 7);
+
+  const totalVel  = product.variants.reduce((s, v) => s + (v.demandDailyVel || 0), 0);
+  const variantLines = product.variants
+    .filter(v => v.demandDailyVel >= 0.05 || (v.suggestedAirQty || 0) > 0)
+    .sort((a, b) => (b.demandDailyVel || 0) - (a.demandDailyVel || 0))
+    .map(v => {
+      const qty    = Math.ceil((v.suggestedAirQty || 0) * buffer);
+      const days   = v.effectiveDaysRemaining !== null ? `${v.effectiveDaysRemaining}d` : '∞';
+      const velPct = totalVel > 0 ? Math.round((v.demandDailyVel / totalVel) * 100) : 0;
+      const pct    = velPct > 0 ? ` · ${velPct}%` : '';
+      return `  ${v.title}: *+${qty > 0 ? qty : '—'}* units  (${days} runway${pct})`;
+    });
+
+  const totalRaw      = product.variants.reduce((s, v) => s + (v.suggestedAirQty || 0), 0);
+  const totalBuffered = Math.ceil(totalRaw * buffer);
+
+  const incomingLines = product.incomingOrders.length
+    ? product.incomingOrders.map(o =>
+        `📦 Incoming ${o.freightMode.toUpperCase()}: ${o.totalQty} units · due ${o.expectedDelivery}`
+      ).join('\n')
+    : '📦 *No orders placed* — immediate action required';
+
+  const supplierLine = product.supplierName
+    ? `🏭 Supplier: *${product.supplierName}*`
+    : null;
+
+  const plannerLink = APP_URL
+    ? `📋 <${APP_URL}/restock.html|Open Restock Planner>`
+    : null;
+
+  return [
+    `🚨 *CRITICAL STOCK ALERT*  —  ${product.title}`,
+    `${re} Rating: *${product.rating}*  ·  ${product.avgDailyVel.toFixed(2)} units/day  ${trendArrow(product.trendRatio)}`,
+    '',
+    `⚠️ *Only ${product.minDaysRemaining} days of stock remaining* (size ${product.criticalVariant})`,
+    `✈️ AIR FREIGHT only window: *~${airWks} weeks* → stock arrives *~${airDelivery}*`,
+    `🚢 SEA FREIGHT would arrive *~${seaDelivery}* — too late`,
+    ...(supplierLine ? [supplierLine] : []),
+    '',
+    `*Emergency reorder* (${coverWeeks}-week cover):`,
+    ...variantLines,
+    `  ──────────────────────────`,
+    `  *Total: ${totalBuffered} units*`,
+    '',
+    incomingLines,
+    ...(plannerLink ? ['', plannerLink] : []),
   ].join('\n');
 }
 
@@ -208,32 +370,34 @@ async function runAnalysis() {
       ordersByProduct[key].push(o);
     }
 
-    // 5. Alert log (already-sent alerts)
+    // 5. Alert log (already-sent alerts per product+type)
     const { rows: alertRows } = await pool.query(
       'SELECT product_id, alert_type FROM restock_alerts_log'
     );
     const alertSentSet = new Set(alertRows.map(r => `${r.product_id}:${r.alert_type}`));
 
-    // 6. Shopify data
+    // 6. Final Sale collection — products in here are never alerted
+    const finalSaleIds = await fetchFinalSaleProductIds();
+
+    // 7. Shopify data
     const products = await fetchAllProducts();
     const since = new Date();
     since.setDate(since.getDate() - velocity_days);
     const orders = await fetchOrdersSince(since);
 
-    // 7. Build per-variant sales maps — split at the half-period boundary
+    // 8. Build per-variant sales maps — split at the half-period boundary
     const recentCutoff = new Date();
     recentCutoff.setDate(recentCutoff.getDate() - halfDays);
 
     const salesRecent = {};
     const salesOlder  = {};
-    const returnsByVariant = {};  // variantId → units physically returned
+    const returnsByVariant = {};
     let totalRefundsSeen = 0;
     let totalReturnLinesSeen = 0;
     for (const order of orders) {
       if (order.cancelled_at) continue;
       const isRecent = new Date(order.created_at) >= recentCutoff;
 
-      // Build a fast line_item_id → variant_id lookup for this order
       const liVariantMap = {};
       for (const item of (order.line_items || [])) {
         if (!item.variant_id) continue;
@@ -242,14 +406,11 @@ async function runAnalysis() {
         if (isRecent) salesRecent[k] = (salesRecent[k] || 0) + item.quantity;
         else          salesOlder[k]  = (salesOlder[k]  || 0) + item.quantity;
       }
-      // Tally physical returns (restock_type==='return' means item was sent back)
       for (const refund of (order.refunds || [])) {
         totalRefundsSeen++;
         for (const rli of (refund.refund_line_items || [])) {
           totalReturnLinesSeen++;
           if (rli.restock_type !== 'return') continue;
-          // Prefer nested line_item.variant_id, fall back to cross-referencing
-          // order.line_items via line_item_id (handles fields-param stripping)
           const vid = String(
             (rli.line_item && rli.line_item.variant_id) ||
             rli.variant_id ||
@@ -267,10 +428,11 @@ async function runAnalysis() {
       `return-type units tallied: ${totalReturnsFound}, ` +
       `variants with returns: ${Object.keys(returnsByVariant).length}`);
 
-    // 8. Analyse each product
+    // 9. Analyse each product
     const analysedProducts = [];
-    let seaAlertCount = 0;
-    let airAlertCount = 0;
+    let seaAlertCount      = 0;
+    let airAlertCount      = 0;
+    let criticalAlertCount = 0;
 
     for (const product of products) {
       const cfg          = configMap[String(product.id)] || {};
@@ -301,11 +463,9 @@ async function runAnalysis() {
         const olderVel   = soldOlder  / halfDays;
         const avgVel     = (soldRecent + soldOlder) / velocity_days;
 
-        // Sum incoming qty for this variant (matched by title, case-insensitive)
         const varTitle = (v.title === 'Default Title' ? '' : v.title) || '';
         const incomingQty = incoming.reduce((sum, o) => {
           const byV = o.qty_by_variant || {};
-          // Try exact match, then case-insensitive
           const qty = byV[varTitle]
             ?? byV[String(v.id)]
             ?? Object.entries(byV).find(([k2]) => k2.toLowerCase() === varTitle.toLowerCase())?.[1]
@@ -313,19 +473,17 @@ async function runAnalysis() {
           return sum + qty;
         }, 0);
 
-        const currentStock = Math.max(0, v.inventory_quantity || 0);
+        const currentStock   = Math.max(0, v.inventory_quantity || 0);
         const effectiveStock = currentStock + incomingQty;
 
-        // If a variant has no stock and no incoming, recent velocity is suppressed
-        // by lack of available units — not lack of demand. Use the older period as
-        // the demand proxy so suggestions aren't falsely zeroed out.
-        const isOos = currentStock === 0 && incomingQty === 0;
+        // If a variant has no stock and no incoming, use older period velocity
+        // as the demand proxy (recent vel is suppressed by lack of supply).
+        const isOos     = currentStock === 0 && incomingQty === 0;
         const demandVel = (isOos && olderVel > recentVel) ? olderVel : recentVel;
 
         const daysRemaining          = demandVel > 0 ? Math.round(currentStock   / demandVel) : null;
         const effectiveDaysRemaining = demandVel > 0 ? Math.round(effectiveStock / demandVel) : null;
 
-        // Suggested order = units needed to reach cover target after delivery
         const coverTarget     = demandVel * effectiveCoverWeeks * 7;
         const projAtSea       = Math.max(0, effectiveStock - demandVel * effectiveSeaLeadDays);
         const projAtAir       = Math.max(0, effectiveStock - demandVel * effectiveAirLeadDays);
@@ -368,8 +526,6 @@ async function runAnalysis() {
       const styleOlderVel   = totalSoldOlder  / halfDays;
       const styleAvgVel     = totalSold       / velocity_days;
 
-      // If ≥50% of variants are OOS, recent velocity is unreliable for rating.
-      // Use older velocity as the demand proxy to avoid false F ratings.
       const oosVariantCount = variants.filter(v => v.isOos).length;
       const broadlyOos = oosVariantCount > 0 && oosVariantCount >= Math.ceil(variants.length * 0.5);
       const ratingRecentVel = broadlyOos ? Math.max(styleRecentVel, styleOlderVel) : styleRecentVel;
@@ -380,8 +536,11 @@ async function runAnalysis() {
 
       const rating = calculateRating(styleAvgVel, ratingRecentVel, styleOlderVel, totalSold);
 
-      // Effective runway = min days across variants with demand (includes OOS variants
-      // with historical sales — their 0d runway is a real signal)
+      // Velocity buffer for suggested order quantities:
+      //   AA+ (accelerating) → +25%   A (stable/growing) → +10%   B → no buffer
+      const velocityBuffer = rating === 'AA+' ? 1.25 : rating === 'A' ? 1.10 : 1.0;
+
+      // Minimum runway across active variants (those with real demand)
       const activeVars = variants.filter(v => v.demandDailyVel > 0);
       let minDaysRemaining = null;
       let criticalVariant  = null;
@@ -394,8 +553,9 @@ async function runAnalysis() {
         }
       }
 
-      const seaAlertSent = alertSentSet.has(`${product.id}:sea`);
-      const airAlertSent = alertSentSet.has(`${product.id}:air`);
+      const seaAlertSent      = alertSentSet.has(`${product.id}:sea`);
+      const airAlertSent      = alertSentSet.has(`${product.id}:air`);
+      const criticalAlertSent = alertSentSet.has(`${product.id}:critical`);
 
       const totalReturnedUnits = variants.reduce((s, v) => s + v.returnedUnits, 0);
       const returnRate = totalSold > 0
@@ -408,6 +568,7 @@ async function runAnalysis() {
         image:                product.images?.[0]?.src || null,
         supplierName:         supplierInfo?.name || null,
         rating,
+        velocityBuffer,
         trendRatio:           Math.round(styleTrendRatio * 100) / 100,
         avgDailyVel:          Math.round(styleAvgVel    * 100) / 100,
         recentDailyVel:       Math.round(styleRecentVel * 100) / 100,
@@ -424,18 +585,24 @@ async function runAnalysis() {
         effectiveCoverWeeks,
         seaAlertSent,
         airAlertSent,
+        criticalAlertSent,
         incomingOrders,
         variants,
       };
 
       analysedProducts.push(analysed);
 
-      // ── Fire Slack alerts ──────────────────────────────────────────
-      if (!restockEnabled || rating === 'F' || rating === null) continue;
+      // ── Alert gate ─────────────────────────────────────────────────
+      // Skip: restock disabled, Final Sale collection, declining/dead ratings,
+      // or no runway data.
+      if (!restockEnabled) continue;
+      if (finalSaleIds.has(String(product.id))) continue;
+      // C = significant decline, F = sales stopped, null = not enough data
+      if (!rating || rating === 'C' || rating === 'F') continue;
       if (minDaysRemaining === null) continue;
 
-      // Sea alert
-      if (!seaAlertSent && minDaysRemaining <= effectiveSeaLeadDays) {
+      // ── Sea alert (B/A/AA+): 2+ active sizes will OOS before SEA delivery ──
+      if (!seaAlertSent && coverageFailure(variants, effectiveSeaLeadDays)) {
         try {
           await pool.query(
             `INSERT INTO restock_alerts_log
@@ -454,8 +621,8 @@ async function runAnalysis() {
         }
       }
 
-      // Air alert
-      if (!airAlertSent && minDaysRemaining <= effectiveAirLeadDays) {
+      // ── Air alert (B/A/AA+): 2+ active sizes will OOS before AIR delivery ──
+      if (!airAlertSent && coverageFailure(variants, effectiveAirLeadDays)) {
         try {
           await pool.query(
             `INSERT INTO restock_alerts_log
@@ -473,15 +640,41 @@ async function runAnalysis() {
           console.error(`[restock] Air alert error for ${product.title}:`, e.message);
         }
       }
+
+      // ── Critical alert (A/AA+ only): runway ≤ CRITICAL_DAYS ──────────────
+      // Fires even if sea/air already sent — this is the escalation.
+      if (!criticalAlertSent && (rating === 'AA+' || rating === 'A') &&
+          minDaysRemaining <= CRITICAL_DAYS) {
+        try {
+          await pool.query(
+            `INSERT INTO restock_alerts_log
+               (product_id, product_title, alert_type, rating, days_remaining)
+             VALUES ($1,$2,'critical',$3,$4)
+             ON CONFLICT (product_id, alert_type) DO NOTHING`,
+            [product.id, product.title, rating, minDaysRemaining]
+          );
+          alertSentSet.add(`${product.id}:critical`);
+          analysed.criticalAlertSent = true;
+          criticalAlertCount++;
+          console.log(`[restock] Critical alert → ${product.title} (${minDaysRemaining}d, ${rating})`);
+          await sendSlack(formatCriticalAlert(analysed, effectiveCoverWeeks));
+        } catch (e) {
+          console.error(`[restock] Critical alert error for ${product.title}:`, e.message);
+        }
+      }
     }
 
-    // Sort: most urgent first (needs alert → fewest days remaining → everything else)
+    // Sort: critical first → sea-alert-needed → fewest days → velocity
     analysedProducts.sort((a, b) => {
-      const aUrgent = (a.rating && a.rating !== 'F' && a.minDaysRemaining !== null
-        && a.minDaysRemaining <= a.effectiveSeaLeadDays && !a.seaAlertSent) ? 1 : 0;
-      const bUrgent = (b.rating && b.rating !== 'F' && b.minDaysRemaining !== null
-        && b.minDaysRemaining <= b.effectiveSeaLeadDays && !b.seaAlertSent) ? 1 : 0;
-      if (bUrgent !== aUrgent) return bUrgent - aUrgent;
+      const score = p => {
+        if (!p.rating || p.rating === 'C' || p.rating === 'F') return 0;
+        if (p.minDaysRemaining !== null && p.minDaysRemaining <= CRITICAL_DAYS && !p.criticalAlertSent) return 3;
+        if (p.minDaysRemaining !== null && p.minDaysRemaining <= p.effectiveSeaLeadDays && !p.seaAlertSent) return 2;
+        if (p.minDaysRemaining !== null && p.minDaysRemaining <= p.effectiveAirLeadDays && !p.airAlertSent) return 1;
+        return 0;
+      };
+      const sa = score(a), sb = score(b);
+      if (sb !== sa) return sb - sa;
       if (a.minDaysRemaining !== null && b.minDaysRemaining !== null)
         return a.minDaysRemaining - b.minDaysRemaining;
       if (a.minDaysRemaining !== null) return -1;
@@ -494,18 +687,19 @@ async function runAnalysis() {
       `INSERT INTO app_settings (key, value, updated_at) VALUES ('restock_analysis', $1, NOW())
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
       [JSON.stringify({
-        generatedAt:   new Date().toISOString(),
-        periodDays:    velocity_days,
-        totalProducts: analysedProducts.length,
-        totalOrders:   orders.filter(o => !o.cancelled_at).length,
-        seaAlerts:     seaAlertCount,
-        airAlerts:     airAlertCount,
-        products:      analysedProducts,
+        generatedAt:    new Date().toISOString(),
+        periodDays:     velocity_days,
+        totalProducts:  analysedProducts.length,
+        totalOrders:    orders.filter(o => !o.cancelled_at).length,
+        seaAlerts:      seaAlertCount,
+        airAlerts:      airAlertCount,
+        criticalAlerts: criticalAlertCount,
+        products:       analysedProducts,
       })]
     );
 
     console.log(`[restock] Done — ${analysedProducts.length} products, ` +
-      `${seaAlertCount} sea alerts, ${airAlertCount} air alerts`);
+      `${seaAlertCount} sea / ${airAlertCount} air / ${criticalAlertCount} critical alerts`);
 
   } catch (err) {
     console.error('[restock] Analysis error:', err.message);
