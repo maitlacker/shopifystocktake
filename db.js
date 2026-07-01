@@ -377,13 +377,17 @@ async function initDb() {
     -- Global defaults (singleton row, id=1 always)
     CREATE TABLE IF NOT EXISTS restock_settings (
       id              INT PRIMARY KEY DEFAULT 1,
-      sea_lead_days   INT NOT NULL DEFAULT 60,
-      air_lead_days   INT NOT NULL DEFAULT 14,
+      sea_lead_days   INT NOT NULL DEFAULT 49,
+      air_lead_days   INT NOT NULL DEFAULT 28,
       cover_weeks     INT NOT NULL DEFAULT 8,
       velocity_days   INT NOT NULL DEFAULT 42,
       updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-    INSERT INTO restock_settings (id) VALUES (1) ON CONFLICT DO NOTHING;
+    INSERT INTO restock_settings (id, sea_lead_days, air_lead_days, cover_weeks, velocity_days)
+      VALUES (1, 49, 28, 8, 42) ON CONFLICT DO NOTHING;
+    -- Migration: update default lead days if still at old shipped defaults
+    UPDATE restock_settings SET sea_lead_days=49, air_lead_days=28, updated_at=NOW()
+      WHERE id=1 AND sea_lead_days=60 AND air_lead_days=14;
 
     -- Per-style lead-time overrides and restock toggle
     CREATE TABLE IF NOT EXISTS product_restock_config (

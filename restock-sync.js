@@ -166,7 +166,7 @@ async function runAnalysis() {
 
     // 1. Settings
     const { rows: sRows } = await pool.query('SELECT * FROM restock_settings WHERE id = 1');
-    const settings = sRows[0] || { sea_lead_days: 60, air_lead_days: 14, cover_weeks: 8, velocity_days: 42 };
+    const settings = sRows[0] || { sea_lead_days: 49, air_lead_days: 28, cover_weeks: 8, velocity_days: 42 };
     const { sea_lead_days, air_lead_days, cover_weeks, velocity_days } = settings;
     const halfDays = Math.floor(velocity_days / 2);
 
