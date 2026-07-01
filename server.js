@@ -4429,8 +4429,24 @@ app.get('/api/leave/requests', requireAuth, async (req, res) => {
     const where   = [];
     if (!isAdmin) { params.push(req.user.email); where.push(`lr.wms_email=$${params.length}`); }
     if (status)   { params.push(status);          where.push(`lr.status=$${params.length}`); }
+
+    // When admin views pending requests, include who else already has approved leave on the same dates
+    const conflictsCol = (isAdmin && (!status || status === 'pending')) ? `,
+      (SELECT COALESCE(json_agg(json_build_object(
+         'name',       TRIM(COALESCE(le2.first_name,'') || ' ' || COALESCE(le2.last_name,'')),
+         'start_date', lr2.start_date::text,
+         'end_date',   lr2.end_date::text
+       ) ORDER BY le2.last_name, le2.first_name), '[]'::json)
+       FROM leave_requests lr2
+       JOIN leave_employees le2 ON le2.id = lr2.employee_id
+       WHERE lr2.status = 'approved'
+         AND lr2.start_date <= lr.end_date
+         AND lr2.end_date  >= lr.start_date
+         AND lr2.id != lr.id
+      ) AS conflicts` : '';
+
     const { rows } = await pool.query(
-      `SELECT lr.*, le.first_name, le.last_name, le.xero_employee_id
+      `SELECT lr.*, le.first_name, le.last_name, le.xero_employee_id${conflictsCol}
        FROM leave_requests lr
        LEFT JOIN leave_employees le ON le.id = lr.employee_id
        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}

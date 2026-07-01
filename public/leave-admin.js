@@ -44,13 +44,26 @@
     const dates  = fmtDateRange(r.start_date, r.end_date);
     const days   = r.days_count || '—';
     const filed  = fmtDate(r.created_at);
+
+    // Warn if others already have approved leave overlapping these dates
+    let conflictHtml = '';
+    if (Array.isArray(r.conflicts) && r.conflicts.length) {
+      const names = r.conflicts.map(c => `<strong>${escHtml(c.name)}</strong>`).join(', ');
+      conflictHtml = `<div style="margin-top:5px; padding:5px 8px; background:#fffbeb; border:1px solid #fde68a; border-radius:6px; font-size:0.75rem; color:#92400e;">
+        ⚠ ${names} also on leave during these dates
+      </div>`;
+    }
+
     return `
       <tr id="req-${r.id}">
         <td>
           <div style="font-weight:600;">${name}</div>
           <div style="font-size:0.75rem; color:#94a3b8;">${escHtml(r.wms_email)}</div>
         </td>
-        <td>${dates}</td>
+        <td>
+          ${dates}
+          ${conflictHtml}
+        </td>
         <td>${days}</td>
         <td style="max-width:200px; color:#64748b; font-size:0.82rem;">${escHtml(r.notes || '—')}</td>
         <td style="color:#94a3b8; font-size:0.8rem;">${filed}</td>

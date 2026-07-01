@@ -8,6 +8,7 @@ const xeroSync = require('./xero-sync');
 const PAYROLL_API        = 'https://api.xero.com/payroll.xro/1.0';
 const SLACK_WEBHOOK_URL  = process.env.LEAVE_SLACK_WEBHOOK_URL || '';
 const ANNUAL_LEAVE_CRON  = process.env.LEAVE_SLACK_CRON || '0 22 * * 0'; // 8am Mon AEST
+const APP_URL            = (process.env.APP_URL || '').replace(/\/$/, '');
 
 // Cache the Annual Leave type ID to avoid fetching every time
 let _annualLeaveTypeId = null;
@@ -295,8 +296,12 @@ async function buildSlackMessage(pool) {
 
   const header = `📅 *Annual Leave — ${fmt(fromDate)} to ${fmt(toDate)}*`;
 
+  const links = APP_URL
+    ? `\n\n📋 <${APP_URL}/leave-calendar.html|View Calendar>  •  <${APP_URL}/leave-request.html|Submit Leave Request>`
+    : '';
+
   if (!leaves.length) {
-    return `${header}\n\n_No annual leave scheduled in the next 2 weeks_ ✅`;
+    return `${header}\n\n_No annual leave scheduled in the next 2 weeks_ ✅${links}`;
   }
 
   const holidaySet = await getHolidaySet(pool,
@@ -316,7 +321,7 @@ async function buildSlackMessage(pool) {
   const count = leaves.length;
   const footer = `_${count} team member${count !== 1 ? 's' : ''} on leave this fortnight_`;
 
-  return `${header}\n\n${lines.join('\n')}\n\n${footer}`;
+  return `${header}\n\n${lines.join('\n')}\n\n${footer}${links}`;
 }
 
 async function postWeeklySlackDigest(pool) {
