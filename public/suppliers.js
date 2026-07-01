@@ -21,7 +21,7 @@ async function loadSuppliers() {
 function renderTable() {
   const tbody = document.getElementById('sup-tbody');
   if (!suppliers.length) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="7">No suppliers yet — click <strong>+ Add Supplier</strong> to get started.</td></tr>`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="9">No suppliers yet — click <strong>+ Add Supplier</strong> to get started.</td></tr>`;
     return;
   }
   tbody.innerHTML = suppliers.map(s => `
@@ -32,6 +32,8 @@ function renderTable() {
       <td>${escHtml(s.contact_name || '—')}</td>
       <td>${s.email ? `<a href="mailto:${escHtml(s.email)}" style="color:#6366f1">${escHtml(s.email)}</a>` : '—'}</td>
       <td>${escHtml(s.phone || '—')}</td>
+      <td style="text-align:center">${s.lead_time_sea != null ? `<strong>${s.lead_time_sea}</strong> wks` : '—'}</td>
+      <td style="text-align:center">${s.lead_time_air != null ? `<strong>${s.lead_time_air}</strong> wks` : '—'}</td>
       <td style="white-space:nowrap">
         <button class="btn btn-secondary" style="padding:5px 10px;font-size:0.75rem;margin-right:4px"
           onclick="openModal(${s.id})">Edit</button>
@@ -45,14 +47,16 @@ function renderTable() {
 function openModal(id) {
   const s = id ? suppliers.find(x => x.id === id) : null;
   document.getElementById('modal-title').textContent = s ? 'Edit Supplier' : 'Add Supplier';
-  document.getElementById('sup-id').value       = s ? s.id : '';
-  document.getElementById('sup-company').value  = s ? s.company_name  : '';
-  document.getElementById('sup-location').value = s ? (s.location || '') : '';
-  document.getElementById('sup-currency').value = s ? s.currency : 'AUD';
-  document.getElementById('sup-contact').value  = s ? (s.contact_name || '') : '';
-  document.getElementById('sup-phone').value    = s ? (s.phone || '') : '';
-  document.getElementById('sup-email').value    = s ? (s.email || '') : '';
-  document.getElementById('sup-notes').value    = s ? (s.notes || '') : '';
+  document.getElementById('sup-id').value        = s ? s.id : '';
+  document.getElementById('sup-company').value   = s ? s.company_name  : '';
+  document.getElementById('sup-location').value  = s ? (s.location || '') : '';
+  document.getElementById('sup-currency').value  = s ? s.currency : 'AUD';
+  document.getElementById('sup-contact').value   = s ? (s.contact_name || '') : '';
+  document.getElementById('sup-phone').value     = s ? (s.phone || '') : '';
+  document.getElementById('sup-email').value     = s ? (s.email || '') : '';
+  document.getElementById('sup-lead-sea').value  = s && s.lead_time_sea != null ? s.lead_time_sea : '';
+  document.getElementById('sup-lead-air').value  = s && s.lead_time_air != null ? s.lead_time_air : '';
+  document.getElementById('sup-notes').value     = s ? (s.notes || '') : '';
   document.getElementById('sup-modal').classList.add('open');
   document.getElementById('sup-company').focus();
 }
@@ -66,6 +70,8 @@ async function saveSupplier() {
   const companyName = document.getElementById('sup-company').value.trim();
   if (!companyName) { alert('Company name is required.'); return; }
 
+  const rawSea = document.getElementById('sup-lead-sea').value.trim();
+  const rawAir = document.getElementById('sup-lead-air').value.trim();
   const payload = {
     companyName,
     location:    document.getElementById('sup-location').value.trim() || null,
@@ -74,6 +80,8 @@ async function saveSupplier() {
     phone:       document.getElementById('sup-phone').value.trim() || null,
     email:       document.getElementById('sup-email').value.trim() || null,
     notes:       document.getElementById('sup-notes').value.trim() || null,
+    leadTimeSea: rawSea ? parseInt(rawSea) : null,
+    leadTimeAir: rawAir ? parseInt(rawAir) : null,
   };
 
   const btn = document.getElementById('sup-save-btn');

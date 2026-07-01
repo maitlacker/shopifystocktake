@@ -1154,12 +1154,13 @@ app.get('/api/suppliers', async (req, res) => {
 });
 
 app.post('/api/suppliers', async (req, res) => {
-  const { companyName, location, currency, contactName, email, phone, notes } = req.body;
+  const { companyName, location, currency, contactName, email, phone, notes, leadTimeSea, leadTimeAir } = req.body;
   try {
     const { rows } = await pool.query(
-      `INSERT INTO suppliers (company_name,location,currency,contact_name,email,phone,notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [companyName, location||null, currency||'AUD', contactName||null, email||null, phone||null, notes||null]
+      `INSERT INTO suppliers (company_name,location,currency,contact_name,email,phone,notes,lead_time_sea,lead_time_air)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [companyName, location||null, currency||'AUD', contactName||null, email||null, phone||null, notes||null,
+       leadTimeSea ? parseInt(leadTimeSea) : null, leadTimeAir ? parseInt(leadTimeAir) : null]
     );
     res.json(rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1167,12 +1168,13 @@ app.post('/api/suppliers', async (req, res) => {
 
 app.put('/api/suppliers/:id', async (req, res) => {
   const id = parseInt(req.params.id);
-  const { companyName, location, currency, contactName, email, phone, notes } = req.body;
+  const { companyName, location, currency, contactName, email, phone, notes, leadTimeSea, leadTimeAir } = req.body;
   try {
     const { rows } = await pool.query(
       `UPDATE suppliers SET company_name=$1,location=$2,currency=$3,contact_name=$4,
-       email=$5,phone=$6,notes=$7,updated_at=NOW() WHERE id=$8 RETURNING *`,
-      [companyName, location||null, currency||'AUD', contactName||null, email||null, phone||null, notes||null, id]
+       email=$5,phone=$6,notes=$7,lead_time_sea=$8,lead_time_air=$9,updated_at=NOW() WHERE id=$10 RETURNING *`,
+      [companyName, location||null, currency||'AUD', contactName||null, email||null, phone||null, notes||null,
+       leadTimeSea ? parseInt(leadTimeSea) : null, leadTimeAir ? parseInt(leadTimeAir) : null, id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
     res.json(rows[0]);

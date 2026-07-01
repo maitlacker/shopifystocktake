@@ -20,6 +20,7 @@ let isRunning = false;
 const SHOPIFY_SHOP  = process.env.SHOPIFY_SHOP;
 const SHOPIFY_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const API_VERSION   = '2024-01';
+const APP_URL       = (process.env.APP_URL || '').replace(/\/$/, '');
 
 function shopifyHeaders() {
   return { 'X-Shopify-Access-Token': SHOPIFY_TOKEN };
@@ -88,10 +89,12 @@ function trendArrow(trendRatio) {
 
 // ── Slack ──────────────────────────────────────────────────────────
 async function sendSlack(text) {
-  const raw = process.env.SLACK_WEBHOOK_URL || '';
-  const webhookUrl = raw.trim().replace(/^["']|["']$/g, '');
-  if (!webhookUrl || !webhookUrl.startsWith('https://')) return;
-  const r = await fetch(webhookUrl, {
+  // RESTOCK_SLACK_WEBHOOK_URL lets you route restock alerts to a dedicated
+  // #production channel; falls back to the shared SLACK_WEBHOOK_URL.
+  const raw = (process.env.RESTOCK_SLACK_WEBHOOK_URL || process.env.SLACK_WEBHOOK_URL || '')
+    .trim().replace(/^["']|["']$/g, '');
+  if (!raw || !raw.startsWith('https://')) return;
+  const r = await fetch(raw, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ text }),
@@ -104,6 +107,7 @@ function formatSlackAlert(product, alertType, coverWeeks) {
   const icon     = isAir ? '✈️' : '🚢';
   const modeStr  = isAir ? 'AIR FREIGHT' : 'SEA FREIGHT';
   const leadDays = isAir ? product.effectiveAirLeadDays : product.effectiveSeaLeadDays;
+  const leadWks  = Math.round(leadDays / 7);
   const ratingEmoji = { 'AA+': '🚀', A: '✅', B: '📊', C: '⚠️', F: '⛔' };
   const re = ratingEmoji[product.rating] || '';
 
@@ -124,18 +128,28 @@ function formatSlackAlert(product, alertType, coverWeeks) {
       ).join('\n')
     : '📦 No pending orders for this style';
 
+  const supplierLine = product.supplierName
+    ? `🏭 Supplier: *${product.supplierName}*`
+    : null;
+
+  const plannerLink = APP_URL
+    ? `\n📋 <${APP_URL}/restock.html|Open Restock Planner>`
+    : '';
+
   return [
-    `${icon} *${modeStr} ALERT*  —  ${product.title}`,
+    `${icon} *${modeStr} RESTOCK ALERT*  —  ${product.title}`,
     `Rating: ${re} *${product.rating}*  ·  ${product.avgDailyVel.toFixed(2)} units/day  ${trendArrow(product.trendRatio)}`,
     '',
     `⏱ Shortest runway: *${product.minDaysRemaining} days* (${product.criticalVariant})`,
-    `${icon} ${modeStr} lead time: ${leadDays} days  ←  _order now to avoid stockout_`,
+    `${icon} ${modeStr} lead time: *${leadDays} days* (~${leadWks} wks)  ←  _order now to avoid stockout_`,
+    ...(supplierLine ? [supplierLine] : []),
     '',
     `Suggested reorder (${coverWeeks}-week post-delivery cover):`,
     ...variantLines,
     `  *Total: ${totalSuggested} units*`,
     '',
     incomingLines,
+    plannerLink,
   ].join('\n');
 }
 
@@ -161,7 +175,29 @@ async function runAnalysis() {
     const configMap = {};
     for (const c of cfgRows) configMap[String(c.product_id)] = c;
 
-    // 3. Pending purchase orders
+    // 3. Supplier lead times (via most-recent production order per product)
+    const { rows: supplierLinkRows } = await pool.query(`
+      SELECT DISTINCT ON (pol.product_id)
+        pol.product_id,
+        s.company_name,
+        s.lead_time_sea,
+        s.lead_time_air
+      FROM production_order_lines pol
+      JOIN production_orders po ON po.id = pol.order_id
+      JOIN suppliers s ON s.id = po.supplier_id
+      WHERE pol.product_id IS NOT NULL AND po.supplier_id IS NOT NULL
+      ORDER BY pol.product_id, po.created_at DESC
+    `);
+    const supplierLeadMap = {};
+    for (const r of supplierLinkRows) {
+      supplierLeadMap[String(r.product_id)] = {
+        name:    r.company_name,
+        seaDays: r.lead_time_sea ? r.lead_time_sea * 7 : null,
+        airDays: r.lead_time_air ? r.lead_time_air * 7 : null,
+      };
+    }
+
+    // 4. Pending purchase orders
     const { rows: orderRows } = await pool.query(
       `SELECT * FROM restock_orders WHERE status = 'pending' ORDER BY expected_delivery ASC`
     );
@@ -172,19 +208,19 @@ async function runAnalysis() {
       ordersByProduct[key].push(o);
     }
 
-    // 4. Alert log (already-sent alerts)
+    // 5. Alert log (already-sent alerts)
     const { rows: alertRows } = await pool.query(
       'SELECT product_id, alert_type FROM restock_alerts_log'
     );
     const alertSentSet = new Set(alertRows.map(r => `${r.product_id}:${r.alert_type}`));
 
-    // 5. Shopify data
+    // 6. Shopify data
     const products = await fetchAllProducts();
     const since = new Date();
     since.setDate(since.getDate() - velocity_days);
     const orders = await fetchOrdersSince(since);
 
-    // 6. Build per-variant sales maps — split at the half-period boundary
+    // 7. Build per-variant sales maps — split at the half-period boundary
     const recentCutoff = new Date();
     recentCutoff.setDate(recentCutoff.getDate() - halfDays);
 
@@ -231,16 +267,18 @@ async function runAnalysis() {
       `return-type units tallied: ${totalReturnsFound}, ` +
       `variants with returns: ${Object.keys(returnsByVariant).length}`);
 
-    // 7. Analyse each product
+    // 8. Analyse each product
     const analysedProducts = [];
     let seaAlertCount = 0;
     let airAlertCount = 0;
 
     for (const product of products) {
-      const cfg = configMap[String(product.id)] || {};
+      const cfg          = configMap[String(product.id)] || {};
+      const supplierInfo = supplierLeadMap[String(product.id)];
       const restockEnabled       = cfg.restock_enabled !== false;
-      const effectiveSeaLeadDays = cfg.sea_lead_days || sea_lead_days;
-      const effectiveAirLeadDays = cfg.air_lead_days || air_lead_days;
+      // Priority: per-product override → supplier lead time → global default
+      const effectiveSeaLeadDays = cfg.sea_lead_days || supplierInfo?.seaDays || sea_lead_days;
+      const effectiveAirLeadDays = cfg.air_lead_days || supplierInfo?.airDays || air_lead_days;
       const effectiveCoverWeeks  = cfg.cover_weeks   || cover_weeks;
 
       const incoming = ordersByProduct[String(product.id)] || [];
@@ -368,6 +406,7 @@ async function runAnalysis() {
         productId:            product.id,
         title:                product.title,
         image:                product.images?.[0]?.src || null,
+        supplierName:         supplierInfo?.name || null,
         rating,
         trendRatio:           Math.round(styleTrendRatio * 100) / 100,
         avgDailyVel:          Math.round(styleAvgVel    * 100) / 100,
@@ -395,7 +434,7 @@ async function runAnalysis() {
       if (!restockEnabled || rating === 'F' || rating === null) continue;
       if (minDaysRemaining === null) continue;
 
-      // Sea alert (Slack notifications paused — low-stock alerts only in that channel)
+      // Sea alert
       if (!seaAlertSent && minDaysRemaining <= effectiveSeaLeadDays) {
         try {
           await pool.query(
@@ -409,12 +448,13 @@ async function runAnalysis() {
           analysed.seaAlertSent = true;
           seaAlertCount++;
           console.log(`[restock] Sea alert → ${product.title} (${minDaysRemaining}d, ${rating})`);
+          await sendSlack(formatSlackAlert(analysed, 'sea', effectiveCoverWeeks));
         } catch (e) {
           console.error(`[restock] Sea alert error for ${product.title}:`, e.message);
         }
       }
 
-      // Air alert (Slack notifications paused — low-stock alerts only in that channel)
+      // Air alert
       if (!airAlertSent && minDaysRemaining <= effectiveAirLeadDays) {
         try {
           await pool.query(
@@ -428,6 +468,7 @@ async function runAnalysis() {
           analysed.airAlertSent = true;
           airAlertCount++;
           console.log(`[restock] Air alert → ${product.title} (${minDaysRemaining}d, ${rating})`);
+          await sendSlack(formatSlackAlert(analysed, 'air', effectiveCoverWeeks));
         } catch (e) {
           console.error(`[restock] Air alert error for ${product.title}:`, e.message);
         }

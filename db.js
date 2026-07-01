@@ -650,6 +650,9 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_leave_public_holidays_date
       ON leave_public_holidays(date);
+
+    ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS lead_time_sea INT;
+    ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS lead_time_air INT;
   `);
 }
 

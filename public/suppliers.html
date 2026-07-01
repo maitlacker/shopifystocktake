@@ -66,11 +66,13 @@
             <th>Contact</th>
             <th>Email</th>
             <th>Phone</th>
+            <th>Lead SEA</th>
+            <th>Lead AIR</th>
             <th style="width:90px"></th>
           </tr>
         </thead>
         <tbody id="sup-tbody">
-          <tr class="empty-row"><td colspan="7">Loading…</td></tr>
+          <tr class="empty-row"><td colspan="9">Loading…</td></tr>
         </tbody>
       </table>
     </div>
@@ -116,9 +118,19 @@
           <label>Email</label>
           <input type="email" id="sup-email" placeholder="contact@supplier.com" />
         </div>
+        <div class="sup-row2">
+          <div class="sup-field">
+            <label>Lead Time SEA (weeks)</label>
+            <input type="number" id="sup-lead-sea" min="1" max="52" placeholder="e.g. 10" />
+          </div>
+          <div class="sup-field">
+            <label>Lead Time AIR (weeks)</label>
+            <input type="number" id="sup-lead-air" min="1" max="52" placeholder="e.g. 2" />
+          </div>
+        </div>
         <div class="sup-field">
           <label>Notes</label>
-          <textarea id="sup-notes" placeholder="Payment terms, lead times, any other notes…"></textarea>
+          <textarea id="sup-notes" placeholder="Payment terms, any other notes…"></textarea>
         </div>
 
         <div class="sup-modal-footer">
