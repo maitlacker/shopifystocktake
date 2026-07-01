@@ -4575,6 +4575,16 @@ app.get('/api/leave/slack-preview', requireAuth, requireLeaveAdmin, async (req, 
   }
 });
 
+// POST /api/leave/import-xero — import all leave applications from Xero (admin only)
+app.post('/api/leave/import-xero', requireAuth, requireLeaveAdmin, async (req, res) => {
+  try {
+    const result = await leaveSync.importLeaveFromXero(pool);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/leave/blackouts — list all blackout periods (all staff, so the form can validate)
 app.get('/api/leave/blackouts', requireAuth, async (req, res) => {
   try {

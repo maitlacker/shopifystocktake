@@ -94,6 +94,29 @@
   document.getElementById('btnRefreshHistory').addEventListener('click', loadHistory);
   document.getElementById('historyFilter').addEventListener('change', loadHistory);
 
+  document.getElementById('btnImportXero').addEventListener('click', async () => {
+    if (!confirm('Import all leave applications from Xero? Already-imported records will be skipped.')) return;
+    const btn = document.getElementById('btnImportXero');
+    btn.disabled = true;
+    btn.textContent = 'Importing…';
+    showStatus('Importing leave from Xero…', 'info');
+    try {
+      const res  = await fetch('/api/leave/import-xero', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      showStatus(
+        `Import complete — ${data.imported} imported, ${data.skipped} already existed, ${data.unmatched} unmatched employees`,
+        'success'
+      );
+      loadHistory();
+    } catch (err) {
+      showStatus(`Import failed: ${err.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Import from Xero';
+    }
+  });
+
   async function loadHistory() {
     const tbody  = document.getElementById('historyTbody');
     const status = document.getElementById('historyFilter').value;

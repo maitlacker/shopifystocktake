@@ -138,6 +138,72 @@ async function createLeaveInXero(pool, requestId) {
   return created.LeaveApplicationID;
 }
 
+// ── Import leave applications from Xero ───────────────────────────
+function fromXeroDate(xeroDate) {
+  if (!xeroDate) return null;
+  const match = String(xeroDate).match(/\/Date\((-?\d+)/);
+  return match ? new Date(parseInt(match[1])) : null;
+}
+
+function toDateStr(d) {
+  return d ? d.toISOString().slice(0, 10) : null;
+}
+
+async function importLeaveFromXero(pool) {
+  // Fetch all leave applications from Xero (no date filter — get everything)
+  const data  = await payrollGet('/LeaveApplications');
+  const apps  = data.LeaveApplications || [];
+  console.log(`[leave] Xero returned ${apps.length} leave application(s)`);
+
+  let imported = 0, skipped = 0, unmatched = 0;
+
+  for (const app of apps) {
+    const xeroLeaveId = app.LeaveApplicationID;
+    const startDate   = toDateStr(fromXeroDate(app.StartDate));
+    const endDate     = toDateStr(fromXeroDate(app.EndDate));
+
+    if (!xeroLeaveId || !startDate || !endDate) { skipped++; continue; }
+
+    // Skip if already imported
+    const { rows: existing } = await pool.query(
+      `SELECT id FROM leave_requests WHERE xero_leave_id=$1`, [xeroLeaveId]
+    );
+    if (existing.length) { skipped++; continue; }
+
+    // Match to our employee record
+    const { rows: empRows } = await pool.query(
+      `SELECT id, wms_email FROM leave_employees WHERE xero_employee_id=$1`, [app.EmployeeID]
+    );
+    if (!empRows.length) { unmatched++; continue; }
+    const emp = empRows[0];
+
+    // Use wms_email if linked, otherwise fall back to xero_employee_id as placeholder
+    const wmsEmail = emp.wms_email || `xero:${app.EmployeeID}`;
+
+    const days = Math.round((new Date(endDate) - new Date(startDate)) / 86400000) + 1;
+
+    await pool.query(
+      `INSERT INTO leave_requests
+         (employee_id, wms_email, start_date, end_date, days_count, notes,
+          status, approved_by, approved_at, xero_leave_id, xero_status)
+       VALUES ($1,$2,$3,$4,$5,$6,'approved','xero-import',NOW(),$7,'created')`,
+      [
+        emp.id,
+        wmsEmail,
+        startDate,
+        endDate,
+        days,
+        app.Description || null,
+        xeroLeaveId,
+      ]
+    );
+    imported++;
+  }
+
+  console.log(`[leave] Import complete — imported: ${imported}, skipped: ${skipped}, unmatched employees: ${unmatched}`);
+  return { imported, skipped, unmatched };
+}
+
 // ── Upcoming leave lookup ──────────────────────────────────────────
 async function getUpcomingLeave(pool, fromDate, toDate) {
   const { rows } = await pool.query(
@@ -233,6 +299,7 @@ function startCron(pool) {
 module.exports = {
   startCron,
   syncEmployees,
+  importLeaveFromXero,
   createLeaveInXero,
   getUpcomingLeave,
   buildSlackMessage,
