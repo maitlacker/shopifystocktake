@@ -3,6 +3,7 @@
 let allProducts  = [];
 let filteredProducts = [];
 let activeFilter = 'all';
+let activeSortField = 'default';
 let expandedRows = new Set();
 let globalSettings = {};
 let productConfigs = {};  // productId → config row
@@ -183,12 +184,17 @@ function renderAnalysis(data) {
 
 function applyFilterAndRender() {
   filteredProducts = activeFilter === 'all'
-    ? allProducts
+    ? allProducts.slice()
     : activeFilter === 'null'
       ? allProducts.filter(p => p.rating === null)
       : activeFilter === 'highReturn'
         ? allProducts.filter(p => (p.returnRate || 0) >= 10)
         : allProducts.filter(p => p.rating === activeFilter);
+
+  if (activeSortField === 'velocity') {
+    filteredProducts.sort((a, b) => (b.avgDailyVel || 0) - (a.avgDailyVel || 0));
+  }
+
   renderProductTable();
 }
 
@@ -197,6 +203,11 @@ function setFilter(f, btn) {
   document.querySelectorAll('.rs-filter-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   expandedRows.clear();
+  applyFilterAndRender();
+}
+
+function setSort(val) {
+  activeSortField = val;
   applyFilterAndRender();
 }
 
@@ -284,10 +295,12 @@ function productRow(p, expanded) {
   const cfg = productConfigs[String(p.productId)] || {};
   const disabledNote = cfg.restock_enabled === false
     ? ' <span style="font-size:0.7rem;color:#dc2626;font-weight:700">[disabled]</span>' : '';
+  const finalSaleNote = p.isFinalSale
+    ? ' <span style="font-size:0.7rem;font-weight:700;background:#fef9c3;color:#713f12;border:1px solid #fde68a;padding:1px 6px;border-radius:10px;margin-left:4px">Final Sale</span>' : '';
 
-  return `<tr class="rs-row${expanded ? ' expanded' : ''}" onclick="toggleExpand(${p.productId})" data-pid="${p.productId}">
+  return `<tr class="rs-row${expanded ? ' expanded' : ''}${p.isFinalSale ? ' rs-row-finalsale' : ''}" onclick="toggleExpand(${p.productId})" data-pid="${p.productId}">
     <td>
-      ${thumb(p.image)}${escHtml(p.title)}${disabledNote}
+      ${thumb(p.image)}${escHtml(p.title)}${disabledNote}${finalSaleNote}
     </td>
     <td><span class="rs-rating ${ratingClass(p.rating)}">${ratingLabel(p.rating)}</span></td>
     <td>

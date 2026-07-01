@@ -128,6 +128,8 @@
     .rs-row { cursor: pointer; transition: background 0.15s; }
     .rs-row:hover { background: #f8fafc; }
     .rs-row.expanded { background: #f8fafc; }
+    .rs-row-finalsale td { opacity: 0.65; }
+    .rs-row-finalsale:hover td { opacity: 0.85; }
     .rs-row td { padding: 12px 12px; border-bottom: 1px solid #f1f5f9;
       vertical-align: middle; }
     .rs-row td:first-child { padding-left: 16px; }
@@ -436,6 +438,16 @@
       <button class="rs-filter-btn rs-filter-btn--returns" data-filter="highReturn" onclick="setFilter('highReturn',this)">
         ↩ High Returns <span class="rs-badge" id="fb-ret">0</span>
       </button>
+    </div>
+
+    <!-- Sort control -->
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <label for="rs-sort-select" style="font-size:0.78rem;font-weight:600;color:#64748b;white-space:nowrap">Sort by:</label>
+      <select id="rs-sort-select" onchange="setSort(this.value)"
+        style="font-size:0.82rem;padding:5px 10px;border:1.5px solid #e2e8f0;border-radius:8px;background:#fff;color:#334155;cursor:pointer">
+        <option value="default">Default (risk priority)</option>
+        <option value="velocity">Velocity (highest first)</option>
+      </select>
     </div>
 
     <!-- Product table -->

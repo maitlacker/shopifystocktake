@@ -597,6 +597,7 @@ async function runAnalysis() {
         title:                product.title,
         image:                product.images?.[0]?.src || null,
         supplierName:         supplierInfo?.name || null,
+        isFinalSale:          finalSaleIds.has(String(product.id)),
         rating,
         velocityBuffer,
         trendRatio:           Math.round(styleTrendRatio * 100) / 100,
