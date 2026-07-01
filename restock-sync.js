@@ -53,7 +53,7 @@ function fmtDate(daysFromNow) {
 async function fetchAllProducts() {
   const products = [];
   let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products.json` +
-    `?limit=250&status=active&fields=id,title,variants,images,tags`;
+    `?limit=250&status=active&fields=id,title,variants,images,tags,published_at`;
   while (url) {
     const r = await fetch(url, { headers: shopifyHeaders() });
     if (!r.ok) throw new Error(`Shopify products: ${r.status}`);
@@ -389,15 +389,22 @@ async function runAnalysis() {
     const recentCutoff = new Date();
     recentCutoff.setDate(recentCutoff.getDate() - halfDays);
 
-    const salesRecent = {};
-    const salesOlder  = {};
-    const returnsByVariant = {};
+    // Precompute millisecond timestamps used in every variant's effective-window calc
+    const windowStartMs  = since.getTime();
+    const recentCutoffMs = recentCutoff.getTime();
+    const analysisNowMs  = Date.now();
+
+    const salesRecent        = {};
+    const salesOlder         = {};
+    const lastSaleDateByVariant = {}; // variantId → ms timestamp of most-recent sale
+    const returnsByVariant   = {};
     let totalRefundsSeen = 0;
     let totalReturnLinesSeen = 0;
     for (const order of orders) {
       if (order.cancelled_at) continue;
       const isRecent = new Date(order.created_at) >= recentCutoff;
 
+      const orderDateMs  = new Date(order.created_at).getTime();
       const liVariantMap = {};
       for (const item of (order.line_items || [])) {
         if (!item.variant_id) continue;
@@ -405,6 +412,10 @@ async function runAnalysis() {
         liVariantMap[String(item.id)] = k;
         if (isRecent) salesRecent[k] = (salesRecent[k] || 0) + item.quantity;
         else          salesOlder[k]  = (salesOlder[k]  || 0) + item.quantity;
+        // Track most-recent sale date per variant (used to trim OOS windows)
+        if (!lastSaleDateByVariant[k] || orderDateMs > lastSaleDateByVariant[k]) {
+          lastSaleDateByVariant[k] = orderDateMs;
+        }
       }
       for (const refund of (order.refunds || [])) {
         totalRefundsSeen++;
@@ -459,9 +470,6 @@ async function runAnalysis() {
         const k          = String(v.id);
         const soldRecent = salesRecent[k] || 0;
         const soldOlder  = salesOlder[k]  || 0;
-        const recentVel  = soldRecent / halfDays;
-        const olderVel   = soldOlder  / halfDays;
-        const avgVel     = (soldRecent + soldOlder) / velocity_days;
 
         const varTitle = (v.title === 'Default Title' ? '' : v.title) || '';
         const incomingQty = incoming.reduce((sum, o) => {
@@ -475,11 +483,33 @@ async function runAnalysis() {
 
         const currentStock   = Math.max(0, v.inventory_quantity || 0);
         const effectiveStock = currentStock + incomingQty;
+        const isOos          = currentStock === 0 && incomingQty === 0;
 
-        // If a variant has no stock and no incoming, use older period velocity
-        // as the demand proxy (recent vel is suppressed by lack of supply).
-        const isOos     = currentStock === 0 && incomingQty === 0;
-        const demandVel = (isOos && olderVel > recentVel) ? olderVel : recentVel;
+        // ── Effective selling window ──────────────────────────────────
+        // Start: latest of velocity window start, product publish date, variant
+        //        create date. Ensures new products aren't penalised by dividing
+        //        their sales over a 42-day window when they've only been live 5 days.
+        const publishedMs  = product.published_at ? new Date(product.published_at).getTime() : 0;
+        const varCreatedMs = v.created_at ? new Date(v.created_at).getTime() : 0;
+        const sellStartMs  = Math.max(windowStartMs, publishedMs, varCreatedMs);
+
+        // End: if the variant is OOS, cap the window at its last sale date.
+        // Days with zero stock have zero sales by definition — including them
+        // in the denominator artificially deflates the measured velocity.
+        const lastSaleMs = lastSaleDateByVariant[k] || null;
+        const sellEndMs  = (isOos && lastSaleMs) ? lastSaleMs : analysisNowMs;
+
+        const effectiveTotalDays  = Math.max(1, (sellEndMs - sellStartMs) / 86400000);
+        const effectiveRecentDays = Math.max(0, (sellEndMs  - Math.max(recentCutoffMs, sellStartMs)) / 86400000);
+        const effectiveOlderDays  = Math.max(0, (Math.min(recentCutoffMs, sellEndMs) - sellStartMs) / 86400000);
+
+        const recentVel = effectiveRecentDays > 0 ? soldRecent / effectiveRecentDays : 0;
+        const olderVel  = effectiveOlderDays  > 0 ? soldOlder  / effectiveOlderDays  : 0;
+        const avgVel    = (soldRecent + soldOlder) / effectiveTotalDays;
+
+        // For OOS variants use the full-window average — the recent period may be
+        // a partial window (sold out mid-period) so recentVel alone undershoots.
+        const demandVel = isOos ? avgVel : recentVel;
 
         const daysRemaining          = demandVel > 0 ? Math.round(currentStock   / demandVel) : null;
         const effectiveDaysRemaining = demandVel > 0 ? Math.round(effectiveStock / demandVel) : null;
