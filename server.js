@@ -4684,6 +4684,48 @@ app.post('/api/leave/public-holidays/sync', requireAuth, requireLeaveAdmin, asyn
   }
 });
 
+// GET /api/leave/calendar — monthly calendar data for all staff
+app.get('/api/leave/calendar', requireAuth, async (req, res) => {
+  const year  = Number(req.query.year)  || new Date().getFullYear();
+  const month = Number(req.query.month) || (new Date().getMonth() + 1);
+
+  const firstDay = `${year}-${String(month).padStart(2, '0')}-01`;
+  const lastDay  = new Date(year, month, 0).toISOString().slice(0, 10);
+
+  try {
+    const [leaveRes, holidayRes, blackoutRes] = await Promise.all([
+      pool.query(
+        `SELECT lr.id, lr.start_date::text, lr.end_date::text,
+                le.first_name, le.last_name, lr.wms_email
+         FROM leave_requests lr
+         LEFT JOIN leave_employees le ON le.id = lr.employee_id
+         WHERE lr.status = 'approved'
+           AND lr.start_date <= $2 AND lr.end_date >= $1
+         ORDER BY le.last_name, le.first_name`,
+        [firstDay, lastDay]
+      ),
+      pool.query(
+        `SELECT date::text AS date, name
+         FROM leave_public_holidays WHERE date >= $1 AND date <= $2 ORDER BY date`,
+        [firstDay, lastDay]
+      ),
+      pool.query(
+        `SELECT id, name, start_date::text, end_date::text
+         FROM leave_blackouts WHERE start_date <= $2 AND end_date >= $1 ORDER BY start_date`,
+        [firstDay, lastDay]
+      ),
+    ]);
+    res.json({
+      year, month,
+      leave:    leaveRes.rows,
+      holidays: holidayRes.rows,
+      blackouts: blackoutRes.rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/leave/slack-send — manually trigger the Slack digest (admin only)
 app.post('/api/leave/slack-send', requireAuth, requireLeaveAdmin, async (req, res) => {
   try {

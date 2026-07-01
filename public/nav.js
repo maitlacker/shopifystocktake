@@ -59,8 +59,9 @@
     {
       label: 'People',
       children: [
-        { label: 'Leave Request', href: '/leave-request.html' },
-        { label: 'Leave Admin',   href: '/leave-admin.html', restrict: ['accounts@theselfstyler.com'] },
+        { label: 'Leave Calendar', href: '/leave-calendar.html' },
+        { label: 'Leave Request',  href: '/leave-request.html' },
+        { label: 'Leave Admin',    href: '/leave-admin.html', restrict: ['accounts@theselfstyler.com'] },
       ],
     },
     {
