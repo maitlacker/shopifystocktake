@@ -1,5 +1,14 @@
 (() => {
-  const today = new Date().toISOString().slice(0, 10);
+  // toISOString() converts to UTC — in AEST (UTC+10) that shifts midnight to
+  // the previous day. Use local year/month/day for calendar grid keys instead.
+  function localDateStr(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const n = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${n}`;
+  }
+
+  const today = localDateStr(new Date());
   let currentYear  = new Date().getFullYear();
   let currentMonth = new Date().getMonth() + 1;
 
@@ -103,7 +112,7 @@
     for (let i = 0; i < 42; i++) {
       const date    = new Date(start);
       date.setDate(date.getDate() + i);
-      const dateStr  = date.toISOString().slice(0, 10);
+      const dateStr  = localDateStr(date); // local date — toISOString() would give UTC (wrong in AEST)
       const inMonth  = date.getMonth() === data.month - 1;
       const dow      = date.getDay();
       const isWeekend = dow === 0 || dow === 6;
