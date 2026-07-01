@@ -80,7 +80,7 @@
       text-transform: uppercase;
       letter-spacing: 0.06em;
     }
-    .lc-col-header.weekend { color: #cbd5e1; }
+    .lc-col-header.weekend { background: #f1f5f9; color: #b0bac7; }
 
     .lc-day {
       background: #fff;
@@ -90,8 +90,10 @@
       flex-direction: column;
       gap: 2px;
     }
-    .lc-day.other-month   { background: #f9fafb; }
-    .lc-day.weekend       { background: #fafafa; }
+    .lc-day.other-month            { background: #f8fafc; }
+    .lc-day.weekend                { background: #f1f5f9; }
+    .lc-day.weekend.other-month    { background: #edf0f4; }
+    .lc-day.weekend .lc-day-num    { color: #b0bac7; }
     .lc-day.other-month .lc-day-num { color: #cbd5e1; }
 
     .lc-day-num {

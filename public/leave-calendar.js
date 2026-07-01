@@ -76,7 +76,7 @@
       }
     });
 
-    // Leave (expand day by day, show first name + last initial)
+    // Leave (expand day by day, weekdays only)
     data.leave.forEach(l => {
       const firstName = (l.first_name || '').trim();
       const lastName  = (l.last_name  || '').trim();
@@ -85,7 +85,10 @@
       const end = new Date(l.end_date);
       const cur = new Date(l.start_date);
       while (cur <= end) {
-        add(cur.toISOString().slice(0, 10), { type: 'leave', label: shortName, title: `${fullName} — Annual Leave` });
+        const dow = cur.getDay();
+        if (dow !== 0 && dow !== 6) {
+          add(cur.toISOString().slice(0, 10), { type: 'leave', label: shortName, title: `${fullName} — Annual Leave` });
+        }
         cur.setDate(cur.getDate() + 1);
       }
     });
