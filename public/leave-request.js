@@ -16,6 +16,30 @@
   startDate.min = today;
   endDate.min   = today;
 
+  // ── Public holidays ────────────────────────────────────────────────
+  let publicHolidaySet  = new Set();   // Set of 'YYYY-MM-DD' strings
+  let publicHolidayList = [];          // full objects for display
+
+  async function loadPublicHolidays() {
+    try {
+      const res  = await fetch('/api/leave/public-holidays');
+      const data = await res.json();
+      publicHolidayList = data.holidays || [];
+      publicHolidaySet  = new Set(publicHolidayList.map(h => String(h.date).slice(0, 10)));
+
+      // Show upcoming holidays (next 12 months)
+      const upcoming = publicHolidayList.filter(h => String(h.date).slice(0, 10) >= today).slice(0, 8);
+      if (!upcoming.length) return;
+      const lines = upcoming.map(h =>
+        `<strong>${escHtml(h.name)}</strong>: ${fmtDate(h.date)}`
+      ).join('<br>');
+      const banner = document.createElement('div');
+      banner.style.cssText = 'background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:14px 18px;margin-bottom:18px;font-size:0.85rem;color:#1e3a8a;';
+      banner.innerHTML = `<strong style="display:block;margin-bottom:6px;">📅 Queensland Public Holidays</strong>${lines}`;
+      document.getElementById('statusBar').insertAdjacentElement('afterend', banner);
+    } catch (e) { /* non-fatal */ }
+  }
+
   // ── Load & display blackout periods ───────────────────────────────
   let blackouts = [];
 
@@ -82,7 +106,23 @@
       return;
     }
     const days = countWorkingDays(s, e);
-    daysHint.textContent = `${days} working day${days !== 1 ? 's' : ''}`;
+
+    // Check for public holidays within the selected range
+    const holidaysInRange = publicHolidayList.filter(h => {
+      const d = String(h.date).slice(0, 10);
+      return d >= s && d <= e;
+    });
+    // Only count weekday holidays (weekends are already excluded)
+    const weekdayHolidays = holidaysInRange.filter(h => {
+      const dow = new Date(String(h.date).slice(0, 10)).getDay();
+      return dow !== 0 && dow !== 6;
+    });
+
+    let hint = `${days} working day${days !== 1 ? 's' : ''}`;
+    if (weekdayHolidays.length) {
+      hint += ` <span style="color:#64748b;font-size:0.8em;">(excl. ${weekdayHolidays.length} public holiday${weekdayHolidays.length !== 1 ? 's' : ''}: ${weekdayHolidays.map(h => escHtml(h.name)).join(', ')})</span>`;
+    }
+    daysHint.innerHTML = hint;
     daysHint.style.color = '#6366f1';
     btnSubmit.disabled = !linkedEmployee;
   }
@@ -165,13 +205,14 @@
   btnRefresh.addEventListener('click', loadRequests);
 
   // ── Helpers ───────────────────────────────────────────────────────
-  function countWorkingDays(startStr, endStr) {
+  function countWorkingDays(startStr, endStr, holidays = publicHolidaySet) {
     let count = 0;
     const end = new Date(endStr);
     const cur = new Date(startStr);
     while (cur <= end) {
       const day = cur.getDay();
-      if (day !== 0 && day !== 6) count++;
+      const dateStr = cur.toISOString().slice(0, 10);
+      if (day !== 0 && day !== 6 && !holidays.has(dateStr)) count++;
       cur.setDate(cur.getDate() + 1);
     }
     return count;
@@ -193,6 +234,7 @@
   }
 
   // ── Init ──────────────────────────────────────────────────────────
+  loadPublicHolidays();
   loadBlackouts();
   checkLinked();
   loadRequests();

@@ -176,6 +176,7 @@
       <button class="la-tab" data-tab="employees">Employees</button>
       <button class="la-tab" data-tab="slack">Slack Digest</button>
       <button class="la-tab" data-tab="blackouts">Blackout Dates</button>
+      <button class="la-tab" data-tab="holidays">Public Holidays</button>
     </div>
 
     <!-- Pending -->
@@ -292,6 +293,34 @@
             </tr>
           </thead>
           <tbody id="blackoutTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Public Holidays -->
+    <div class="la-panel" id="panel-holidays">
+      <p style="font-size:0.88rem; color:#64748b; margin-bottom:16px;">
+        Queensland public holidays sourced from <strong>Nager.Date</strong> (no API key required).
+        These dates are automatically excluded from annual leave day counts.
+      </p>
+      <div class="la-controls">
+        <select id="holidayYearFilter" style="padding:7px 10px; border:1px solid #e2e8f0; border-radius:8px; font-size:0.85rem;">
+          <option value="">Current &amp; next year</option>
+        </select>
+        <button class="btn btn-primary" id="btnSyncHolidays">Sync from Nager.Date</button>
+        <span id="holidaySyncStatus" style="font-size:0.82rem; color:#94a3b8;"></span>
+      </div>
+      <div class="la-table-wrap">
+        <table class="la-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Day</th>
+              <th>Holiday</th>
+              <th>Year</th>
+            </tr>
+          </thead>
+          <tbody id="holidaysTbody"></tbody>
         </table>
       </div>
     </div>

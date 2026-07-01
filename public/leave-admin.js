@@ -10,6 +10,7 @@
       if (btn.dataset.tab === 'history')   loadHistory();
       if (btn.dataset.tab === 'employees') loadEmployees();
       if (btn.dataset.tab === 'blackouts') loadBlackouts();
+      if (btn.dataset.tab === 'holidays')  loadPublicHolidays();
     });
   });
 
@@ -325,6 +326,78 @@
     }
   }
 
+  // ── Public holidays ───────────────────────────────────────────────
+  // Populate year options
+  const holidayYearFilter = document.getElementById('holidayYearFilter');
+  const _cy = new Date().getFullYear();
+  [_cy - 1, _cy, _cy + 1, _cy + 2].forEach(y => {
+    const opt = document.createElement('option');
+    opt.value = y;
+    opt.textContent = y;
+    if (y === _cy) opt.textContent += ' (current)';
+    holidayYearFilter.appendChild(opt);
+  });
+
+  holidayYearFilter.addEventListener('change', loadPublicHolidays);
+
+  document.getElementById('btnSyncHolidays').addEventListener('click', async () => {
+    const syncStatus = document.getElementById('holidaySyncStatus');
+    const btn = document.getElementById('btnSyncHolidays');
+    btn.disabled = true;
+    syncStatus.textContent = 'Syncing…';
+    try {
+      const year = holidayYearFilter.value ? Number(holidayYearFilter.value) : null;
+      const body = year ? { year } : {};
+      const res  = await fetch('/api/leave/public-holidays/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      const total = data.results.reduce((s, r) => s + r.upserted, 0);
+      syncStatus.textContent = `Synced ${total} holiday${total !== 1 ? 's' : ''}`;
+      loadPublicHolidays();
+    } catch (err) {
+      syncStatus.textContent = `Error: ${err.message}`;
+      showStatus(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  async function loadPublicHolidays() {
+    const tbody = document.getElementById('holidaysTbody');
+    tbody.innerHTML = `<tr><td colspan="4" class="la-empty">Loading…</td></tr>`;
+    try {
+      const year = holidayYearFilter.value;
+      const qs   = year ? `?year=${encodeURIComponent(year)}` : '';
+      const res  = await fetch(`/api/leave/public-holidays${qs}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      const rows = data.holidays || [];
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="la-empty">No holidays found — click "Sync from Nager.Date" to import</td></tr>`;
+        return;
+      }
+      const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      tbody.innerHTML = rows.map(h => {
+        const dateStr = String(h.date).slice(0, 10);
+        const dow     = new Date(dateStr).getDay();
+        const isWeekend = dow === 0 || dow === 6;
+        const dayCell = `<span style="color:${isWeekend ? '#94a3b8' : '#1e293b'}">${dayNames[dow]}</span>`;
+        return `<tr style="${isWeekend ? 'opacity:0.55;' : ''}">
+          <td style="font-variant-numeric:tabular-nums;">${fmtDate(dateStr)}</td>
+          <td>${dayCell}</td>
+          <td style="font-weight:${isWeekend ? '400' : '600'};">${escHtml(h.name)}</td>
+          <td style="color:#94a3b8;">${h.year}</td>
+        </tr>`;
+      }).join('');
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="4" class="la-empty">Error: ${escHtml(err.message)}</td></tr>`;
+    }
+  }
+
   // ── Slack digest ──────────────────────────────────────────────────
   document.getElementById('btnPreviewSlack').addEventListener('click', async () => {
     const box = document.getElementById('slackPreview');
@@ -353,13 +426,14 @@
   });
 
   // ── Helpers ───────────────────────────────────────────────────────
-  function countWorkingDays(startStr, endStr) {
+  function countWorkingDays(startStr, endStr, holidaySet = new Set()) {
     let count = 0;
     const end = new Date(endStr);
     const cur = new Date(startStr);
     while (cur <= end) {
       const day = cur.getDay();
-      if (day !== 0 && day !== 6) count++;
+      const dateStr = cur.toISOString().slice(0, 10);
+      if (day !== 0 && day !== 6 && !holidaySet.has(dateStr)) count++;
       cur.setDate(cur.getDate() + 1);
     }
     return count;

@@ -4475,14 +4475,20 @@ app.post('/api/leave/requests', requireAuth, async (req, res) => {
     }
     const employeeId = empRows[0].id;
 
-    // Count working days (Mon–Fri only)
+    // Count working days (Mon–Fri, excluding QLD public holidays)
+    const { rows: phRows } = await pool.query(
+      `SELECT date::text AS date FROM leave_public_holidays WHERE date >= $1 AND date <= $2`,
+      [start_date, end_date]
+    );
+    const publicHolidaySet = new Set(phRows.map(r => r.date));
     const days = (() => {
       let count = 0;
       const end = new Date(end_date);
       const cur = new Date(start_date);
       while (cur <= end) {
         const d = cur.getDay();
-        if (d !== 0 && d !== 6) count++;
+        const dateStr = cur.toISOString().slice(0, 10);
+        if (d !== 0 && d !== 6 && !publicHolidaySet.has(dateStr)) count++;
         cur.setDate(cur.getDate() + 1);
       }
       return count;
@@ -4634,6 +4640,45 @@ app.delete('/api/leave/blackouts/:id', requireAuth, requireLeaveAdmin, async (re
     );
     if (!rowCount) return res.status(404).json({ error: 'Not found' });
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/leave/public-holidays — list QLD public holidays (all staff)
+app.get('/api/leave/public-holidays', requireAuth, async (req, res) => {
+  try {
+    const { year, from, to } = req.query;
+    let query, params;
+    if (year) {
+      query  = `SELECT * FROM leave_public_holidays WHERE year=$1 ORDER BY date`;
+      params = [Number(year)];
+    } else if (from && to) {
+      query  = `SELECT * FROM leave_public_holidays WHERE date >= $1 AND date <= $2 ORDER BY date`;
+      params = [from, to];
+    } else {
+      query  = `SELECT * FROM leave_public_holidays WHERE year >= EXTRACT(YEAR FROM NOW()) ORDER BY date`;
+      params = [];
+    }
+    const { rows } = await pool.query(query, params);
+    res.json({ holidays: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/leave/public-holidays/sync — sync QLD holidays from Nager.Date (admin only)
+app.post('/api/leave/public-holidays/sync', requireAuth, requireLeaveAdmin, async (req, res) => {
+  try {
+    const currentYear = new Date().getFullYear();
+    const years = req.body.year
+      ? [Number(req.body.year)]
+      : [currentYear, currentYear + 1];
+    const results = [];
+    for (const y of years) {
+      results.push(await leaveSync.syncPublicHolidays(pool, y));
+    }
+    res.json({ ok: true, results });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4941,6 +4986,20 @@ initDb()
     adsAssetSync.startCron();
     arcadsSync.startCron(pool);
     leaveSync.startCron(pool);
+
+    // Auto-sync QLD public holidays for current + next year
+    const _holidayYear = new Date().getFullYear();
+    Promise.all([
+      leaveSync.syncPublicHolidays(pool, _holidayYear),
+      leaveSync.syncPublicHolidays(pool, _holidayYear + 1),
+    ]).catch(err => console.error('[leave] Holiday auto-sync failed:', err.message));
+
+    // On Jan 1st, pull in the newly-started year's holidays
+    cron.schedule('0 1 1 1 *', async () => {
+      const yr = new Date().getFullYear();
+      try { await leaveSync.syncPublicHolidays(pool, yr + 1); }
+      catch (err) { console.error('[leave] New-year holiday sync failed:', err.message); }
+    });
 
     // Recalculate margin tiers nightly at 02:00
     cron.schedule('0 2 * * *', async () => {

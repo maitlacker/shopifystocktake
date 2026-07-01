@@ -155,6 +155,10 @@ async function importLeaveFromXero(pool) {
   const apps  = data.LeaveApplications || [];
   console.log(`[leave] Xero returned ${apps.length} leave application(s)`);
 
+  // Load all public holidays once so we can exclude them from day counts
+  const { rows: phRows } = await pool.query(`SELECT date::text AS date FROM leave_public_holidays`);
+  const allHolidays = new Set(phRows.map(r => r.date));
+
   let imported = 0, skipped = 0, unmatched = 0;
 
   for (const app of apps) {
@@ -180,7 +184,7 @@ async function importLeaveFromXero(pool) {
     // Use wms_email if linked, otherwise fall back to xero_employee_id as placeholder
     const wmsEmail = emp.wms_email || `xero:${app.EmployeeID}`;
 
-    const days = countWorkingDays(startDate, endDate);
+    const days = countWorkingDays(startDate, endDate, allHolidays);
 
     await pool.query(
       `INSERT INTO leave_requests
@@ -226,16 +230,51 @@ function formatDate(d) {
   });
 }
 
-function countWorkingDays(startStr, endStr) {
+function countWorkingDays(startStr, endStr, holidaySet = new Set()) {
   let count = 0;
   const end = new Date(endStr);
   const cur = new Date(startStr);
   while (cur <= end) {
     const day = cur.getDay();
-    if (day !== 0 && day !== 6) count++;
+    const dateStr = cur.toISOString().slice(0, 10);
+    if (day !== 0 && day !== 6 && !holidaySet.has(dateStr)) count++;
     cur.setDate(cur.getDate() + 1);
   }
   return count;
+}
+
+async function getHolidaySet(pool, fromDate, toDate) {
+  const { rows } = await pool.query(
+    `SELECT date::text AS date FROM leave_public_holidays WHERE date >= $1 AND date <= $2`,
+    [fromDate, toDate]
+  );
+  return new Set(rows.map(r => r.date));
+}
+
+// Sync QLD (+ national AU) public holidays from the Nager.Date free API
+async function syncPublicHolidays(pool, year) {
+  const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/AU`);
+  if (!res.ok) throw new Error(`Nager.Date API error ${res.status}: ${await res.text()}`);
+  const all = await res.json();
+
+  // Keep national (global) holidays + QLD-specific ones
+  const qld = all.filter(h =>
+    h.global === true ||
+    (Array.isArray(h.counties) && h.counties.includes('AU-QLD'))
+  );
+
+  let upserted = 0;
+  for (const h of qld) {
+    await pool.query(
+      `INSERT INTO leave_public_holidays (date, name, year, state)
+       VALUES ($1, $2, $3, 'QLD')
+       ON CONFLICT (date, state) DO UPDATE SET name=$2, year=$3`,
+      [h.date, h.localName || h.name, year]
+    );
+    upserted++;
+  }
+  console.log(`[leave] Synced ${upserted} public holidays for ${year} (QLD)`);
+  return { year, upserted };
 }
 
 async function buildSlackMessage(pool) {
@@ -260,10 +299,15 @@ async function buildSlackMessage(pool) {
     return `${header}\n\n_No annual leave scheduled in the next 2 weeks_ ✅`;
   }
 
+  const holidaySet = await getHolidaySet(pool,
+    fromDate.toISOString().slice(0, 10),
+    toDate.toISOString().slice(0, 10)
+  );
+
   const lines = leaves.map(l => {
     const start   = formatDate(l.start_date);
     const end     = formatDate(l.end_date);
-    const days    = l.days_count || countWorkingDays(l.start_date, l.end_date);
+    const days    = l.days_count || countWorkingDays(l.start_date, l.end_date, holidaySet);
     const name    = `${l.first_name} ${l.last_name}`.trim();
     const dateStr = start === end ? start : `${start} – ${end}`;
     return `• *${name}* — ${dateStr} _(${days} day${days !== 1 ? 's' : ''})_`;
@@ -311,4 +355,6 @@ module.exports = {
   getUpcomingLeave,
   buildSlackMessage,
   postWeeklySlackDigest,
+  syncPublicHolidays,
+  getHolidaySet,
 };

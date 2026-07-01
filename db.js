@@ -638,6 +638,17 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_leave_blackouts_dates
       ON leave_blackouts(start_date, end_date);
+
+    CREATE TABLE IF NOT EXISTS leave_public_holidays (
+      id        SERIAL PRIMARY KEY,
+      date      DATE NOT NULL,
+      name      TEXT NOT NULL,
+      year      INT NOT NULL,
+      state     TEXT NOT NULL DEFAULT 'QLD',
+      UNIQUE(date, state)
+    );
+    CREATE INDEX IF NOT EXISTS idx_leave_public_holidays_date
+      ON leave_public_holidays(date);
   `);
 }
 
