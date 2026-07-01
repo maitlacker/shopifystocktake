@@ -6,7 +6,7 @@ const cron     = require('node-cron');
 const xeroSync = require('./xero-sync');
 
 const PAYROLL_API        = 'https://api.xero.com/payroll.xro/1.0';
-const SLACK_WEBHOOK_URL  = process.env.SLACK_WEBHOOK_URL || '';
+const SLACK_WEBHOOK_URL  = process.env.LEAVE_SLACK_WEBHOOK_URL || '';
 const ANNUAL_LEAVE_CRON  = process.env.LEAVE_SLACK_CRON || '0 22 * * 0'; // 8am Mon AEST
 
 // Cache the Annual Leave type ID to avoid fetching every time
