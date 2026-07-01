@@ -564,7 +564,8 @@ async function runAnalysis() {
         ? ratingRecentVel / styleOlderVel
         : (ratingRecentVel > 0 ? 2.0 : 0);
 
-      const rating = calculateRating(styleAvgVel, ratingRecentVel, styleOlderVel, totalSold);
+      let rating = calculateRating(styleAvgVel, ratingRecentVel, styleOlderVel, totalSold);
+      if (finalSaleIds.has(String(product.id))) rating = 'F';
 
       // Velocity buffer for suggested order quantities:
       //   AA+ (accelerating) → +25%   A (stable/growing) → +10%   B → no buffer
