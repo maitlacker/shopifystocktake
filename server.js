@@ -901,6 +901,7 @@ app.get('/api/picking/orders', async (req, res) => {
 
     // Fetch orders from Shopify (newest first), stop once order_number < start
     const items = [];
+    const removedItems = [];
     const orderNumbersSeen = new Set();
     let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json` +
       `?status=any&limit=250&fields=id,name,order_number,line_items,note`;
@@ -923,6 +924,19 @@ app.get('/api/picking/orders', async (req, res) => {
         for (const item of (order.line_items || [])) {
           // x-redo is a shipping insurance add-on — not a physical item to pick
           if ((item.sku || '').toLowerCase() === 'x-redo') continue;
+          // fulfillable_quantity = qty still needing fulfillment after refunds/edits
+          const fulfillableQty = item.fulfillable_quantity ?? item.quantity;
+          if (fulfillableQty <= 0) {
+            if (item.quantity > 0) {
+              removedItems.push({
+                orderNumber:  order.order_number,
+                title:        item.title,
+                variantTitle: (item.variant_title && item.variant_title !== 'Default Title') ? item.variant_title : null,
+                sku:          item.sku || '',
+              });
+            }
+            continue;
+          }
           items.push({
             orderNumber:  order.order_number,
             variantId:    item.variant_id,
@@ -930,7 +944,9 @@ app.get('/api/picking/orders', async (req, res) => {
             title:        item.title,
             variantTitle: (item.variant_title && item.variant_title !== 'Default Title') ? item.variant_title : null,
             sku:          item.sku || '',
-            qty:          item.quantity,
+            qty:          fulfillableQty,
+            originalQty:  item.quantity,
+            modified:     fulfillableQty < item.quantity,
             image:        variantImageMap[String(item.variant_id)] || null,
             stock:        variantStockMap[String(item.variant_id)] ?? null,
             note:         order.note || null,
@@ -951,9 +967,66 @@ app.get('/api/picking/orders', async (req, res) => {
     items.sort((a, b) => a.orderNumber - b.orderNumber);
     const orders = [...orderNumbersSeen].sort((a, b) => a - b);
 
-    res.json({ orders, orderCount: orders.length, items });
+    res.json({ orders, orderCount: orders.length, items, removedItems });
   } catch (err) {
     console.error('[picking] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/picking/job — get or create a picking job for an order range (shared across devices)
+app.post('/api/picking/job', async (req, res) => {
+  const { orderStart, orderEnd, initials } = req.body;
+  if (!orderStart || !orderEnd) return res.status(400).json({ error: 'orderStart and orderEnd required' });
+
+  try {
+    // Find a job for this range within the last 16 hours (covers any single shift)
+    const { rows: existing } = await pool.query(
+      `SELECT id FROM picking_jobs
+       WHERE order_start = $1 AND order_end = $2
+         AND created_at > NOW() - INTERVAL '16 hours'
+       ORDER BY created_at DESC LIMIT 1`,
+      [orderStart, orderEnd]
+    );
+
+    let jobId;
+    if (existing.length) {
+      jobId = existing[0].id;
+    } else {
+      const { rows: created } = await pool.query(
+        `INSERT INTO picking_jobs (order_start, order_end, created_by) VALUES ($1, $2, $3) RETURNING id`,
+        [orderStart, orderEnd, initials || null]
+      );
+      jobId = created[0].id;
+    }
+
+    const { rows: states } = await pool.query(
+      `SELECT order_number, variant_id::text AS variant_id, picked, picked_by
+       FROM picking_item_states WHERE job_id = $1`,
+      [jobId]
+    );
+
+    res.json({ jobId, states });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/picking/item-state — upsert a single item's pick state
+app.post('/api/picking/item-state', async (req, res) => {
+  const { jobId, orderNumber, variantId, picked, pickedBy } = req.body;
+  if (!jobId || !orderNumber || variantId == null) return res.status(400).json({ error: 'jobId, orderNumber, variantId required' });
+
+  try {
+    await pool.query(
+      `INSERT INTO picking_item_states (job_id, order_number, variant_id, picked, picked_by, picked_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (job_id, order_number, variant_id)
+       DO UPDATE SET picked = EXCLUDED.picked, picked_by = EXCLUDED.picked_by, picked_at = EXCLUDED.picked_at`,
+      [jobId, orderNumber, variantId, picked, pickedBy || null, picked ? new Date() : null]
+    );
+    res.json({ ok: true });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

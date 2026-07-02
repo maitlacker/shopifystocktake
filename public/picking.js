@@ -3,6 +3,7 @@ let lastTap      = {};
 let currentItems = [];
 let currentStart = null;
 let currentEnd   = null;
+let currentJobId = null;
 
 // ── Session tracking ───────────────────────────────────────────────
 let session = null; // active session data
@@ -133,6 +134,61 @@ function clearPickState() {
   } catch (_) {}
 }
 
+// ── DB-backed job management (shared across devices) ───────────────
+async function fetchOrCreateJob(start, end, initials) {
+  try {
+    const r = await fetch('/api/picking/job', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderStart: parseInt(start, 10), orderEnd: parseInt(end, 10), initials }),
+    });
+    if (!r.ok) return null;
+    return await r.json(); // { jobId, states: [{order_number, variant_id, picked, picked_by}] }
+  } catch (_) { return null; }
+}
+
+function restoreFromJob(states) {
+  const stateMap = {};
+  for (const s of states) {
+    stateMap[`${s.order_number}:${s.variant_id}`] = s;
+  }
+  currentItems.forEach((item, idx) => {
+    const s = stateMap[`${item.orderNumber}:${item.variantId}`];
+    if (!s?.picked) return;
+    const id = 'item-' + idx;
+    pickState[id] = true;
+    const el = document.getElementById('pick-' + id);
+    if (!el) return;
+    el.classList.add('picked');
+    if (s.picked_by) {
+      const byEl = document.createElement('div');
+      byEl.className = 'pick-by-label';
+      byEl.textContent = s.picked_by;
+      el.querySelector('.pick-right')?.appendChild(byEl);
+    }
+  });
+}
+
+async function savePick(idx, picked) {
+  if (!currentJobId) return;
+  const item = currentItems[idx];
+  if (!item) return;
+  const initials = (document.getElementById('pick-initials')?.value || '').toUpperCase().trim();
+  try {
+    await fetch('/api/picking/item-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jobId: currentJobId,
+        orderNumber: item.orderNumber,
+        variantId: item.variantId,
+        picked,
+        pickedBy: initials || null,
+      }),
+    });
+  } catch (_) { /* non-critical — state preserved in localStorage */ }
+}
+
 // ── Note popup ─────────────────────────────────────────────────────
 function showNotePopup(text) {
   const popup = document.getElementById('note-popup');
@@ -182,6 +238,7 @@ async function loadOrders() {
     pickState    = {};
     lastTap      = {};
     session      = null;
+    currentJobId = null;
     currentStart = start;
     currentEnd   = end;
 
@@ -191,8 +248,23 @@ async function loadOrders() {
     }
 
     renderList(data);
-    restorePickState();   // re-apply any saved ticks from localStorage
     sessionStart(data);
+
+    // Sync pick state with DB (shared across devices); fall back to localStorage if unavailable
+    const initials = (document.getElementById('pick-initials')?.value || '').toUpperCase().trim();
+    const job = await fetchOrCreateJob(start, end, initials);
+    if (job) {
+      currentJobId = job.jobId;
+      if (job.states.length) {
+        restoreFromJob(job.states);
+      } else {
+        restorePickState(); // no DB states yet — check localStorage
+      }
+    } else {
+      currentJobId = null;
+      restorePickState(); // DB unavailable — fall back to localStorage
+    }
+
     updateProgress();
 
   } catch (err) {
@@ -217,6 +289,16 @@ function renderList(data) {
     ? `Order #${data.orders[0]}`
     : `Orders #${data.orders[0]}–#${data.orders[data.orders.length - 1]} · ${data.orderCount} order${data.orderCount !== 1 ? 's' : ''}`;
 
+  const removedBannerHtml = data.removedItems?.length
+    ? `<div class="pick-removed-banner">
+        &#9888;&#65039; ${data.removedItems.length} item${data.removedItems.length > 1 ? 's' : ''} removed/refunded from
+        ${[...new Set(data.removedItems.map(r => '#' + r.orderNumber))].join(', ')} — not in pick list:
+        <ul>${data.removedItems.map(r =>
+          `<li>#${r.orderNumber} — ${escHtml(r.title)}${r.variantTitle ? ' / ' + escHtml(r.variantTitle) : ''}${r.sku ? ' (' + escHtml(r.sku) + ')' : ''}</li>`
+        ).join('')}</ul>
+      </div>`
+    : '';
+
   const itemsHtml = data.items.map((item, idx) => {
     const id      = `item-${idx}`;
     const isMulti = item.qty > 1;
@@ -228,6 +310,10 @@ function renderList(data) {
 
     const variantHtml = item.variantTitle
       ? `<div class="pick-variant">${escHtml(item.variantTitle)}</div>`
+      : '';
+
+    const modifiedHtml = item.modified
+      ? `<span class="pick-modified-badge" title="Original order qty: ${item.originalQty}">Qty reduced ${item.originalQty}→${item.qty}</span>`
       : '';
 
     const noteHtml = item.note
@@ -242,6 +328,7 @@ function renderList(data) {
           <div class="pick-sku">${escHtml(item.sku || '—')}</div>
           <div class="pick-title">${escHtml(item.title)}</div>
           ${variantHtml}
+          ${modifiedHtml}
         </div>
         <div class="pick-right">
           <div class="pick-order-num">#${item.orderNumber}</div>
@@ -256,6 +343,7 @@ function renderList(data) {
   }).join('');
 
   resultEl.innerHTML = `
+    ${removedBannerHtml}
     <p style="font-size:0.85rem;color:#64748b;margin-bottom:12px">${escHtml(orderLabel)} · ${data.items.length} line item${data.items.length !== 1 ? 's' : ''}</p>
     <div class="pick-list">${itemsHtml}</div>
   `;
@@ -294,11 +382,10 @@ function renderList(data) {
 
 function togglePicked(el, id) {
   pickState[id] = !pickState[id];
+  const idx = parseInt(id.replace('item-', ''), 10);
   if (pickState[id]) {
     el.classList.add('picked');
     sessionRecordPick();
-    // Check if all items for this order are now fully picked
-    const idx  = parseInt(id.replace('item-', ''), 10);
     const item = currentItems[idx];
     if (item) checkOrderCompletion(item.orderNumber);
   } else {
@@ -306,6 +393,7 @@ function togglePicked(el, id) {
     sessionRecordUnpick();
   }
   persistPickState();
+  savePick(idx, pickState[id]);
   updateProgress();
 }
 
@@ -386,6 +474,7 @@ function cancelPick() {
   currentItems = [];
   currentStart = null;
   currentEnd   = null;
+  currentJobId = null;
   document.getElementById('start-order').focus();
 }
 

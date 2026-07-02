@@ -372,6 +372,33 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_picked_orders_picked_at
       ON picked_orders(picked_at DESC);
 
+    -- Shared picking batches: multiple devices picking the same range share one job
+    CREATE TABLE IF NOT EXISTS picking_jobs (
+      id           SERIAL PRIMARY KEY,
+      order_start  INT NOT NULL,
+      order_end    INT NOT NULL,
+      created_by   TEXT,
+      created_at   TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_picking_jobs_range
+      ON picking_jobs(order_start, order_end, created_at DESC);
+
+    -- Per-item pick state within a job
+    CREATE TABLE IF NOT EXISTS picking_item_states (
+      id           SERIAL PRIMARY KEY,
+      job_id       INT NOT NULL REFERENCES picking_jobs(id) ON DELETE CASCADE,
+      order_number INT NOT NULL,
+      variant_id   BIGINT NOT NULL,
+      picked       BOOLEAN NOT NULL DEFAULT false,
+      picked_by    TEXT,
+      picked_at    TIMESTAMPTZ,
+      UNIQUE(job_id, order_number, variant_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_picking_item_states_job
+      ON picking_item_states(job_id);
+
     -- ── Restock Planner ──────────────────────────────────────────────
 
     -- Global defaults (singleton row, id=1 always)
