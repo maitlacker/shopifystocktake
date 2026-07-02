@@ -349,9 +349,22 @@ function expandRow(p, expanded) {
               title="${v.returnedUnits} unit${v.returnedUnits !== 1 ? 's' : ''} returned">${v.returnRate}%</span>`
       : `<span style="color:#cbd5e1;font-size:0.78rem">—</span>`;
 
+    const soldQty = v.soldRecent + v.soldOlder;
+    const stBase  = soldQty + v.inventory;
+    const sellThrough = stBase > 0 ? Math.round(soldQty / stBase * 100) : null;
+    const stColor = sellThrough === null ? '#94a3b8'
+      : sellThrough >= 80 ? '#dc2626'
+      : sellThrough >= 50 ? '#d97706'
+      : '#059669';
+    const stStr = sellThrough !== null
+      ? `<span style="font-weight:600;color:${stColor}" title="${soldQty} sold / ${stBase} observable">${sellThrough}%</span>`
+      : `<span style="color:#cbd5e1">—</span>`;
+
     return `<tr${v.isOos ? ' style="opacity:0.8"' : ''}>
       <td>${escHtml(v.title)}</td>
       <td>${v.inventory}</td>
+      <td style="font-variant-numeric:tabular-nums">${soldQty > 0 ? soldQty : '—'}</td>
+      <td>${stStr}</td>
       <td>${v.incomingQty > 0 ? '+' + v.incomingQty : '—'}</td>
       <td>${velDisplay}</td>
       <td>${retStr}</td>
@@ -365,8 +378,8 @@ function expandRow(p, expanded) {
   const oosNote = hasOos
     ? `<div style="font-size:0.75rem;color:#92400e;background:#fef3c7;border:1px solid #fde68a;
          border-radius:6px;padding:6px 10px;margin-bottom:10px">
-         ⚠️ <strong>OOS*</strong> — one or more sizes are out of stock. Recent velocity is 0 due to no available units,
-         not lack of demand. Suggestions use the older-period velocity as a demand proxy.
+         ⚠️ <strong>OOS</strong> — one or more sizes are out of stock. Velocity shows the frozen last-known selling rate, not zero.
+         Sell-through is 100% for OOS sizes. Suggestions use the frozen rate as the demand basis.
        </div>`
     : '';
 
@@ -374,7 +387,7 @@ function expandRow(p, expanded) {
     ${oosNote}
     <table class="rs-size-table">
       <thead><tr>
-        <th>Size</th><th>Stock</th><th>Incoming</th>
+        <th>Size</th><th>Stock</th><th>Sold (42d)</th><th>ST%</th><th>Incoming</th>
         <th>Vel/day</th><th>Returns</th><th>Runway</th>
         <th>🚢 Suggest</th><th>✈️ Suggest</th>
       </tr></thead>
