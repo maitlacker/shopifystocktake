@@ -924,17 +924,19 @@ app.get('/api/picking/orders', async (req, res) => {
         for (const item of (order.line_items || [])) {
           // x-redo is a shipping insurance add-on — not a physical item to pick
           if ((item.sku || '').toLowerCase() === 'x-redo') continue;
-          // fulfillable_quantity = qty still needing fulfillment after refunds/edits
+          // Skip items that are already fulfilled (shipped) — silently, no banner
+          if (item.fulfillment_status === 'fulfilled') continue;
+
+          // fulfillable_quantity = qty still needed after refunds/edits (for unfulfilled items)
           const fulfillableQty = item.fulfillable_quantity ?? item.quantity;
-          if (fulfillableQty <= 0) {
-            if (item.quantity > 0) {
-              removedItems.push({
-                orderNumber:  order.order_number,
-                title:        item.title,
-                variantTitle: (item.variant_title && item.variant_title !== 'Default Title') ? item.variant_title : null,
-                sku:          item.sku || '',
-              });
-            }
+          if (fulfillableQty <= 0 && item.quantity > 0) {
+            // Unfulfilled item with zero fulfillable qty = refunded/removed before picking
+            removedItems.push({
+              orderNumber:  order.order_number,
+              title:        item.title,
+              variantTitle: (item.variant_title && item.variant_title !== 'Default Title') ? item.variant_title : null,
+              sku:          item.sku || '',
+            });
             continue;
           }
           items.push({
