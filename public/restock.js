@@ -216,7 +216,7 @@ function renderProductTable() {
   const tbody = document.getElementById('rs-product-body');
 
   if (!filteredProducts.length) {
-    tbody.innerHTML = `<tr><td colspan="9" class="rs-empty">No products match this filter</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="rs-empty">No products match this filter</td></tr>`;
     return;
   }
 
@@ -292,6 +292,13 @@ function productRow(p, expanded) {
     ? `<span style="color:#4f46e5;font-weight:700">${p.incomingOrders.reduce((s,o)=>s+o.totalQty,0)} units</span>`
     : `<span style="color:#cbd5e1">none</span>`;
 
+  const adjVel = p.adjustedDailyVel || 0;
+  const adjLift = adjVel - (p.avgDailyVel || 0);
+  const oosCount = (p.variants || []).filter(v => v.isOos).length;
+  const adjVelStr = adjLift > 0.05
+    ? `<span class="rs-vel" style="color:#d97706" title="${oosCount} OOS size${oosCount !== 1 ? 's' : ''} add ${adjLift.toFixed(2)}/day of suppressed demand">${adjVel.toFixed(2)}</span>`
+    : `<span style="color:#cbd5e1;font-size:0.82rem">—</span>`;
+
   const cfg = productConfigs[String(p.productId)] || {};
   const disabledNote = cfg.restock_enabled === false
     ? ' <span style="font-size:0.7rem;color:#dc2626;font-weight:700">[disabled]</span>' : '';
@@ -310,6 +317,7 @@ function productRow(p, expanded) {
     <td>${returnRateCell(p.returnRate || 0, p.totalReturnedUnits || 0)}</td>
     <td>${daysStr}${p.criticalVariant ? `<div style="font-size:0.7rem;color:#94a3b8">${escHtml(p.criticalVariant)}</div>` : ''}</td>
     <td>${incomingStr}</td>
+    <td>${adjVelStr}</td>
     <td>${seaBadge}</td>
     <td>${airBadge}</td>
     <td style="text-align:center;color:#94a3b8;font-size:0.9rem">${expanded ? '▲' : '▼'}</td>

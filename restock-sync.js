@@ -570,15 +570,24 @@ async function runAnalysis() {
       const styleOlderVel   = effectiveStyleOlder  > 0 ? totalSoldOlder  / effectiveStyleOlder  : 0;
       const styleAvgVel     = totalSold / effectiveStyleDays;
 
+      // Adjusted velocity: sums each variant's frozen demand velocity (OOS variants
+      // contribute their last-known rate, not zero). Reflects true demand including
+      // sizes that have sold out, so it's always >= styleAvgVel when any size is OOS.
+      const adjustedDailyVel = Math.round(
+        variants.reduce((s, v) => s + v.demandDailyVel, 0) * 100
+      ) / 100;
+
       const oosVariantCount = variants.filter(v => v.isOos).length;
       const broadlyOos = oosVariantCount > 0 && oosVariantCount >= Math.ceil(variants.length * 0.5);
       const ratingRecentVel = broadlyOos ? Math.max(styleRecentVel, styleOlderVel) : styleRecentVel;
 
       const styleTrendRatio = styleOlderVel > 0
         ? ratingRecentVel / styleOlderVel
-        : (ratingRecentVel > 0 ? 2.0 : 0);
+        : (ratingRecentVel > 0 ? 1.0 : 0);
 
-      let rating = calculateRating(styleAvgVel, ratingRecentVel, styleOlderVel, totalSold);
+      // Use adjustedDailyVel for the volume threshold — true demand matters for
+      // restock decisions, not just what managed to sell while some sizes were OOS.
+      let rating = calculateRating(adjustedDailyVel, ratingRecentVel, styleOlderVel, totalSold);
       if (finalSaleIds.has(String(product.id))) rating = 'F';
 
       // Velocity buffer for suggested order quantities:
@@ -616,7 +625,8 @@ async function runAnalysis() {
         rating,
         velocityBuffer,
         trendRatio:           Math.round(styleTrendRatio * 100) / 100,
-        avgDailyVel:          Math.round(styleAvgVel    * 100) / 100,
+        avgDailyVel:          Math.round(styleAvgVel     * 100) / 100,
+        adjustedDailyVel,
         recentDailyVel:       Math.round(styleRecentVel * 100) / 100,
         olderDailyVel:        Math.round(styleOlderVel  * 100) / 100,
         totalSold,
