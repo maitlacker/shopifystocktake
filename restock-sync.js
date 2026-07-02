@@ -131,17 +131,22 @@ async function fetchFinalSaleProductIds() {
 // ── Selling rating ─────────────────────────────────────────────────
 // Based on velocity trend (recent half vs older half) + absolute volume.
 // Returns 'AA+', 'A', 'B', 'C', 'F', or null (insufficient data).
+//
+// AA+ requires BOTH high absolute velocity (≥3.0/day) AND a confirmed
+// accelerating trend (≥1.20). When there is no older-period data (new
+// product), trendRatio defaults to 1.0 (neutral/unknown) — not 2.0 —
+// so a new product with no comparison baseline can reach A at most.
 function calculateRating(avgDailyVel, recentDailyVel, olderDailyVel, totalSold) {
   if (totalSold < 5) return null;
 
   const trendRatio = olderDailyVel > 0
     ? recentDailyVel / olderDailyVel
-    : (recentDailyVel > 0 ? 2.0 : 0);
+    : (recentDailyVel > 0 ? 1.0 : 0);
 
   if (recentDailyVel < 0.05 || trendRatio < 0.25) return 'F';
   if (trendRatio < 0.55)                           return 'C';
   if (trendRatio < 0.80 || avgDailyVel < 0.30)    return 'B';
-  if (trendRatio < 1.20)                           return 'A';
+  if (trendRatio < 1.20 || avgDailyVel < 3.0)     return 'A';
   return 'AA+';
 }
 
