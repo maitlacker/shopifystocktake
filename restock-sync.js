@@ -553,13 +553,22 @@ async function runAnalysis() {
         };
       });
 
-      // Style-level aggregates
+      // Style-level aggregates — use effective selling window (same logic as per-variant).
+      // A product published 6 days ago divides by 6, not 42 — otherwise velocity is
+      // massively understated and the rating is wrong for new styles.
       const totalSoldRecent = variants.reduce((s, v) => s + v.soldRecent, 0);
       const totalSoldOlder  = variants.reduce((s, v) => s + v.soldOlder,  0);
       const totalSold       = totalSoldRecent + totalSoldOlder;
-      const styleRecentVel  = totalSoldRecent / halfDays;
-      const styleOlderVel   = totalSoldOlder  / halfDays;
-      const styleAvgVel     = totalSold       / velocity_days;
+
+      const stylePublishedMs    = product.published_at ? new Date(product.published_at).getTime() : 0;
+      const styleStartMs        = Math.max(windowStartMs, stylePublishedMs);
+      const effectiveStyleDays  = Math.max(1, (analysisNowMs - styleStartMs) / 86400000);
+      const effectiveStyleRecent = Math.max(0, (analysisNowMs - Math.max(recentCutoffMs, styleStartMs)) / 86400000);
+      const effectiveStyleOlder  = Math.max(0, (Math.min(recentCutoffMs, analysisNowMs) - styleStartMs) / 86400000);
+
+      const styleRecentVel  = effectiveStyleRecent > 0 ? totalSoldRecent / effectiveStyleRecent : 0;
+      const styleOlderVel   = effectiveStyleOlder  > 0 ? totalSoldOlder  / effectiveStyleOlder  : 0;
+      const styleAvgVel     = totalSold / effectiveStyleDays;
 
       const oosVariantCount = variants.filter(v => v.isOos).length;
       const broadlyOos = oosVariantCount > 0 && oosVariantCount >= Math.ceil(variants.length * 0.5);
