@@ -329,12 +329,11 @@ function expandRow(p, expanded) {
       : `<span class="rs-suggest zero">covered</span>`;
     const dStr = v.effectiveDaysRemaining !== null ? v.effectiveDaysRemaining + 'd' : '—';
 
-    // OOS: show demand velocity (from older period) with an OOS badge.
-    // The recent vel is 0 due to no stock, not no demand.
+    // OOS: show the frozen demand velocity (last known rate before selling out).
+    // recentDailyVel is 0 only because there's no stock — not because demand stopped.
     const velDisplay = v.isOos
-      ? `<span style="color:#9ca3af;text-decoration:line-through;font-size:0.75em">${v.recentDailyVel.toFixed(3)}</span>
-         <span style="background:#fef3c7;color:#92400e;font-size:0.68rem;font-weight:700;padding:1px 5px;border-radius:4px;margin-left:3px"
-               title="OOS — using older-period velocity (${v.demandDailyVel.toFixed(3)}) for suggestions">OOS*</span>`
+      ? `${v.demandDailyVel.toFixed(3)} <span style="background:#fef3c7;color:#92400e;font-size:0.68rem;font-weight:700;padding:1px 5px;border-radius:4px;margin-left:3px"
+               title="Out of stock — velocity frozen at last known selling rate">OOS</span>`
       : v.recentDailyVel.toFixed(3);
 
     const retStr = (v.returnedUnits > 0)
