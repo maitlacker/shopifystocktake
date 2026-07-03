@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Location Report — TSS WMS</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .lr-tabs {
+      display: flex;
+      gap: 0;
+      border-bottom: 2px solid #e2e8f0;
+      margin-bottom: 20px;
+    }
+    .lr-tab {
+      padding: 10px 20px;
+      border: none;
+      background: none;
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: #64748b;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      margin-bottom: -2px;
+      transition: color 0.15s, border-color 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .lr-tab.active { color: #4f46e5; border-bottom-color: #4f46e5; }
+    .lr-tab:hover:not(.active) { color: #334155; }
+    .lr-badge {
+      min-width: 20px;
+      height: 20px;
+      padding: 0 6px;
+      background: #e2e8f0;
+      border-radius: 10px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .lr-tab.active .lr-badge { background: #e0e7ff; color: #4f46e5; }
+    .lr-tab.warn .lr-badge { background: #fef3c7; color: #b45309; }
+    .lr-tab.active.warn .lr-badge { background: #fef3c7; color: #b45309; }
+
+    .lr-summary {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .lr-stat {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 12px 18px;
+      min-width: 140px;
+    }
+    .lr-stat strong { display: block; font-size: 1.4rem; color: #1a1a2e; font-weight: 800; }
+    .lr-stat span { font-size: 0.8rem; color: #64748b; }
+
+    /* Aisle sections */
+    .lr-aisle { margin-bottom: 18px; }
+    .lr-aisle-hdr {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 14px;
+      border-radius: 8px;
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.95rem;
+      margin-bottom: 6px;
+    }
+    .lr-aisle-label { font-size: 1.1rem; letter-spacing: 0.04em; }
+    .lr-aisle-count { font-size: 0.78rem; opacity: 0.88; margin-left: auto; }
+
+    .lr-bay-hdr {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 8px 10px 3px;
+      margin-top: 4px;
+    }
+
+    /* Item rows */
+    .lr-items { display: flex; flex-direction: column; gap: 4px; }
+    .lr-item-wrap { display: flex; flex-direction: column; gap: 3px; }
+    .lr-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 7px 12px;
+    }
+    .lr-thumb {
+      width: 46px; height: 46px;
+      border-radius: 6px;
+      object-fit: cover;
+      background: #f1f5f9;
+      flex-shrink: 0;
+    }
+    .lr-thumb-ph {
+      width: 46px; height: 46px;
+      border-radius: 6px;
+      background: #f1f5f9;
+      display: flex; align-items: center; justify-content: center;
+      color: #cbd5e1; font-size: 1.2rem;
+      flex-shrink: 0;
+    }
+    .lr-info { flex: 1; min-width: 0; }
+    .lr-title {
+      font-size: 0.88rem; font-weight: 600; color: #1a1a2e;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .lr-sub { font-size: 0.76rem; color: #64748b; margin-top: 1px; }
+    .lr-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .lr-bay-badge {
+      font-size: 0.76rem; font-weight: 700; color: #334155;
+      background: #f1f5f9; border-radius: 6px; padding: 3px 9px;
+      white-space: nowrap;
+    }
+    .lr-excess { font-size: 0.73rem; color: #64748b; font-style: italic; white-space: nowrap; }
+
+    /* Variant override sub-rows */
+    .lr-overrides { margin-left: 56px; display: flex; flex-direction: column; gap: 3px; }
+    .lr-ov-row {
+      display: flex; align-items: center; gap: 7px;
+      padding: 4px 10px;
+      background: #f8fafc; border: 1px solid #e9eef4; border-radius: 6px;
+      font-size: 0.76rem;
+    }
+    .lr-ov-tag {
+      font-size: 0.63rem; font-weight: 700; color: #7c3aed;
+      background: #ede9fe; border-radius: 4px; padding: 1px 5px;
+      flex-shrink: 0;
+    }
+    .lr-ov-name { color: #334155; font-weight: 500; flex: 1; }
+    .lr-ov-loc { font-weight: 700; color: #4f46e5; flex-shrink: 0; }
+
+    /* No-location items */
+    .lr-noloc-item {
+      display: flex; align-items: center; gap: 10px;
+      background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
+      padding: 7px 12px; margin-bottom: 4px;
+    }
+    .lr-noloc-title { flex: 1; font-size: 0.88rem; font-weight: 600; color: #1a1a2e; }
+    .lr-noloc-count { font-size: 0.75rem; color: #94a3b8; white-space: nowrap; }
+    .lr-noloc-link {
+      font-size: 0.76rem; color: #4f46e5; text-decoration: none; font-weight: 600;
+      white-space: nowrap;
+    }
+    .lr-noloc-link:hover { text-decoration: underline; }
+
+    .lr-empty { text-align: center; padding: 48px 24px; color: #94a3b8; font-size: 0.95rem; }
+    .lr-loading { text-align: center; padding: 48px; color: #64748b; }
+  </style>
+</head>
+<body>
+<header></header>
+<main style="max-width:920px;margin:0 auto;padding:24px 16px">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px">
+    <div>
+      <h1 style="font-size:1.45rem;font-weight:800;color:#1a1a2e;margin:0">Location Report</h1>
+      <p style="font-size:0.83rem;color:#64748b;margin:3px 0 0">Browse stock by aisle, bay, or find items missing a location</p>
+    </div>
+    <a href="/locations.html" style="font-size:0.83rem;color:#4f46e5;text-decoration:none;font-weight:600">&#8592; Manage Locations</a>
+  </div>
+
+  <div id="lr-summary" class="lr-summary" style="display:none"></div>
+
+  <div class="lr-tabs">
+    <button class="lr-tab active" data-tab="by-aisle">By Aisle <span class="lr-badge" id="b-aisle">—</span></button>
+    <button class="lr-tab" data-tab="by-bay">By Aisle &amp; Bay <span class="lr-badge" id="b-bay">—</span></button>
+    <button class="lr-tab" data-tab="no-loc">No Location <span class="lr-badge" id="b-noloc">—</span></button>
+  </div>
+
+  <div id="lr-loading" class="lr-loading">Loading locations…</div>
+  <div id="tab-by-aisle" class="lr-panel"></div>
+  <div id="tab-by-bay"   class="lr-panel" style="display:none"></div>
+  <div id="tab-no-loc"   class="lr-panel" style="display:none"></div>
+
+</main>
+<script src="nav.js"></script>
+<script src="location-report.js"></script>
+</body>
+</html>
