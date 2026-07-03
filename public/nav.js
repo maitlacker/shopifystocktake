@@ -11,6 +11,7 @@
       children: [
         { label: 'Stocktake',               href: '/stocktake.html' },
         { label: 'Order Picking',           href: '/picking.html' },
+        { label: 'Smart Pick',              href: '/smart-pick.html' },
         { label: 'Discrepancy Report',      href: '/discrepancies.html' },
         { label: 'Draft & Archived Stock',  href: '/draft-report.html' },
         { label: 'History',                 href: '/history.html' },

@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Smart Pick — TSS WMS</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    /* ── Layout ───────────────────────────────────────────── */
+    body { background: #f1f5f9; }
+    .sp-wrap { max-width: 680px; margin: 0 auto; padding: 20px 14px 60px; }
+
+    /* ── Setup card ───────────────────────────────────────── */
+    .sp-setup-card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 28px 24px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+    }
+    .sp-setup-card h1 {
+      font-size: 1.5rem; font-weight: 800; color: #1a1a2e; margin: 0 0 4px;
+    }
+    .sp-setup-card p { font-size: 0.85rem; color: #64748b; margin: 0 0 24px; }
+    .sp-fields { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+    .sp-field { display: flex; flex-direction: column; gap: 5px; }
+    .sp-field label { font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .05em; }
+    .sp-field input {
+      padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 10px;
+      font-size: 1rem; font-weight: 600; color: #1a1a2e; width: 130px;
+      outline: none; transition: border-color .15s;
+    }
+    .sp-field input:focus { border-color: #6366f1; }
+    .sp-field.initials input { width: 80px; text-transform: uppercase; }
+    .sp-hint { font-size: 0.78rem; color: #94a3b8; margin-bottom: 18px; }
+    .sp-btn-primary {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 8px; padding: 13px 28px;
+      background: linear-gradient(135deg, #4f46e5, #6366f1);
+      color: #fff; border: none; border-radius: 12px;
+      font-size: 1rem; font-weight: 700; cursor: pointer; width: 100%;
+      transition: opacity .15s, transform .1s;
+    }
+    .sp-btn-primary:hover { opacity: .92; }
+    .sp-btn-primary:active { transform: scale(.98); }
+    .sp-btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* ── Loading ──────────────────────────────────────────── */
+    .sp-loading { text-align: center; padding: 48px 24px; color: #64748b; }
+    .sp-spinner {
+      width: 36px; height: 36px; border: 3px solid #e2e8f0;
+      border-top-color: #6366f1; border-radius: 50%;
+      animation: spin .7s linear infinite; margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Plan overview ────────────────────────────────────── */
+    .sp-plan-card {
+      background: #fff; border-radius: 16px;
+      padding: 22px 20px; box-shadow: 0 1px 4px rgba(0,0,0,.08);
+      margin-bottom: 14px;
+    }
+    .sp-plan-title {
+      font-size: 1.25rem; font-weight: 800; color: #1a1a2e; margin: 0 0 4px;
+    }
+    .sp-plan-subtitle { font-size: 0.83rem; color: #64748b; margin: 0 0 18px; }
+    .sp-stats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+    .sp-stat {
+      background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
+      padding: 10px 14px; min-width: 100px;
+    }
+    .sp-stat strong { display: block; font-size: 1.3rem; font-weight: 800; color: #1a1a2e; }
+    .sp-stat span { font-size: 0.75rem; color: #64748b; }
+
+    .sp-bags-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 8px; margin-bottom: 16px;
+    }
+    .sp-bag-card {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; border-radius: 10px;
+      border: 2px solid; background: #fff;
+    }
+    .sp-bag-num {
+      width: 32px; height: 32px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-weight: 800; font-size: 0.95rem; flex-shrink: 0;
+    }
+    .sp-bag-info { flex: 1; min-width: 0; }
+    .sp-bag-order { font-size: 0.82rem; font-weight: 700; color: #334155; }
+    .sp-bag-count { font-size: 0.73rem; color: #64748b; margin-top: 1px; }
+    .sp-bag-note { font-size: 0.7rem; color: #f59e0b; font-style: italic; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .sp-warn-box {
+      background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px;
+      padding: 10px 14px; font-size: 0.82rem; color: #92400e; margin-bottom: 14px;
+    }
+    .sp-route-preview {
+      font-size: 0.78rem; color: #64748b; margin-bottom: 18px;
+      line-height: 1.7;
+    }
+    .sp-route-aisle {
+      display: inline-block; padding: 2px 8px; border-radius: 5px;
+      color: #fff; font-weight: 700; font-size: 0.72rem; margin: 2px 1px;
+    }
+
+    /* ── Progress bar ─────────────────────────────────────── */
+    .sp-progress-wrap {
+      position: sticky; top: 0; z-index: 10;
+      background: #1e293b; padding: 10px 16px;
+      border-radius: 0 0 12px 12px; margin: -20px -14px 18px;
+    }
+    .sp-progress-row {
+      display: flex; align-items: center; gap: 12px;
+      font-size: 0.82rem; font-weight: 600; color: #94a3b8;
+    }
+    .sp-progress-bar-wrap {
+      flex: 1; height: 6px; background: #334155; border-radius: 3px;
+    }
+    .sp-progress-bar {
+      height: 6px; background: #22c55e; border-radius: 3px;
+      transition: width .3s ease;
+    }
+    .sp-progress-bar.complete { background: #22c55e; }
+
+    /* ── Stop card ────────────────────────────────────────── */
+    .sp-stop {
+      margin-bottom: 10px; border-radius: 12px; overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,.07);
+      transition: opacity .25s;
+    }
+    .sp-stop.done { opacity: .4; }
+    .sp-stop-hdr {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; color: #fff; cursor: pointer;
+      user-select: none; -webkit-user-select: none;
+    }
+    .sp-stop-num {
+      font-size: 0.72rem; font-weight: 700; opacity: .8;
+      text-transform: uppercase; letter-spacing: .05em;
+    }
+    .sp-stop-loc { font-size: 1.05rem; font-weight: 800; }
+    .sp-stop-progress { margin-left: auto; font-size: 0.75rem; font-weight: 600; opacity: .85; }
+    .sp-stop-tick { margin-left: 4px; font-size: 1rem; }
+
+    .sp-stop-items { background: #fff; }
+    .sp-stop.done .sp-stop-items { display: none; }
+
+    .sp-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 14px; border-top: 1px solid #f1f5f9;
+      cursor: pointer; user-select: none; -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      transition: background .15s, opacity .25s;
+    }
+    .sp-item:first-child { border-top: none; }
+    .sp-item.picked { opacity: .35; background: #f8fafc; }
+    .sp-item.tap-flash { background: #ede9fe; }
+
+    .sp-item-bag {
+      width: 34px; height: 34px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-weight: 800; font-size: 0.9rem;
+      flex-shrink: 0;
+    }
+    .sp-item-thumb {
+      width: 44px; height: 44px; border-radius: 7px;
+      object-fit: cover; background: #f1f5f9; flex-shrink: 0;
+    }
+    .sp-item-thumb-ph {
+      width: 44px; height: 44px; border-radius: 7px;
+      background: #f1f5f9; display: flex; align-items: center;
+      justify-content: center; color: #cbd5e1; font-size: 1.1rem; flex-shrink: 0;
+    }
+    .sp-item-info { flex: 1; min-width: 0; }
+    .sp-item-title {
+      font-size: 0.88rem; font-weight: 600; color: #1a1a2e;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .sp-item-sub { font-size: 0.75rem; color: #64748b; margin-top: 1px; }
+    .sp-item-order { font-size: 0.72rem; color: #94a3b8; }
+    .sp-item-qty {
+      flex-shrink: 0; min-width: 32px; height: 32px;
+      background: #f1f5f9; border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 1rem; color: #1a1a2e;
+    }
+    .sp-item-qty.multi { background: #fee2e2; color: #b91c1c; }
+
+    /* ── Unlocated section ────────────────────────────────── */
+    .sp-unlocated-hdr {
+      padding: 10px 14px; background: #f59e0b; color: #fff;
+      font-weight: 700; font-size: 0.88rem; border-radius: 12px 12px 0 0;
+    }
+
+    /* ── Complete ─────────────────────────────────────────── */
+    .sp-complete-card {
+      background: #f0fdf4; border: 2px solid #bbf7d0; border-radius: 16px;
+      padding: 32px 24px; text-align: center; margin-top: 16px;
+    }
+    .sp-complete-icon { font-size: 2.5rem; margin-bottom: 10px; }
+    .sp-complete-title { font-size: 1.3rem; font-weight: 800; color: #15803d; margin-bottom: 6px; }
+    .sp-complete-sub { font-size: 0.85rem; color: #166534; margin-bottom: 20px; }
+    .sp-btn-secondary {
+      padding: 11px 24px; border: 2px solid #e2e8f0; background: #fff;
+      border-radius: 10px; font-size: 0.9rem; font-weight: 700; color: #334155;
+      cursor: pointer; transition: background .15s;
+    }
+    .sp-btn-secondary:hover { background: #f8fafc; }
+
+    /* ── Responsive tweaks ────────────────────────────────── */
+    @media (max-width: 500px) {
+      .sp-field input { width: 110px; }
+      .sp-bags-grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+<header></header>
+<div class="sp-wrap">
+
+  <!-- ── Setup view ── -->
+  <div id="view-setup">
+    <div class="sp-setup-card">
+      <h1>&#128230; Smart Pick</h1>
+      <p>Optimised batch picking for up to 8 orders — one pass through the warehouse.</p>
+
+      <div class="sp-fields">
+        <div class="sp-field initials">
+          <label>Your Initials</label>
+          <input id="sp-initials" type="text" maxlength="3" placeholder="DM" autocomplete="off">
+        </div>
+        <div class="sp-field">
+          <label>Start Order #</label>
+          <input id="sp-start" type="number" placeholder="286988" autocomplete="off">
+        </div>
+        <div class="sp-field">
+          <label>End Order #</label>
+          <input id="sp-end" type="number" placeholder="287088" autocomplete="off">
+        </div>
+      </div>
+      <p class="sp-hint">The first 8 unfulfilled orders in that range will be batched together.</p>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="btn-add50"  class="sp-btn-secondary" onclick="addToEnd(50)">+50</button>
+        <button id="btn-add100" class="sp-btn-secondary" onclick="addToEnd(100)">+100</button>
+        <button id="btn-generate" class="sp-btn-primary" onclick="generatePlan()">Generate Pick Plan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Loading view ── -->
+  <div id="view-loading" style="display:none">
+    <div class="sp-loading">
+      <div class="sp-spinner"></div>
+      Fetching orders &amp; building optimal route…
+    </div>
+  </div>
+
+  <!-- ── Plan overview view ── -->
+  <div id="view-plan" style="display:none">
+    <div class="sp-plan-card">
+      <p class="sp-plan-title" id="plan-title">Pick Plan</p>
+      <p class="sp-plan-subtitle" id="plan-subtitle"></p>
+      <div class="sp-stats" id="plan-stats"></div>
+      <div class="sp-bags-grid" id="plan-bags"></div>
+      <div id="plan-warn" style="display:none" class="sp-warn-box"></div>
+      <div class="sp-route-preview" id="plan-route"></div>
+      <button class="sp-btn-primary" onclick="startPicking()">&#9654; Start Picking</button>
+    </div>
+    <p style="text-align:center;margin-top:12px">
+      <button class="sp-btn-secondary" onclick="showSetup()">&#8592; Change Orders</button>
+    </p>
+  </div>
+
+  <!-- ── Picking view ── -->
+  <div id="view-picking" style="display:none">
+    <div class="sp-progress-wrap">
+      <div class="sp-progress-row">
+        <span id="sp-prog-text">0 of 0 picked</span>
+        <div class="sp-progress-bar-wrap">
+          <div class="sp-progress-bar" id="sp-prog-bar" style="width:0%"></div>
+        </div>
+        <span id="sp-stop-text">Stop 0/0</span>
+      </div>
+    </div>
+    <div id="sp-pick-list"></div>
+    <div id="sp-complete-msg" class="sp-complete-card" style="display:none">
+      <div class="sp-complete-icon">&#10004;</div>
+      <div class="sp-complete-title">Batch Complete!</div>
+      <div class="sp-complete-sub" id="sp-complete-sub"></div>
+      <button class="sp-btn-primary" onclick="showSetup()" style="margin-top:8px">Pick Next Batch</button>
+    </div>
+  </div>
+
+</div>
+<script src="nav.js"></script>
+<script src="smart-pick.js"></script>
+</body>
+</html>

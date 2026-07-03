@@ -1033,6 +1033,184 @@ app.post('/api/picking/item-state', async (req, res) => {
   }
 });
 
+// ── Smart Pick ────────────────────────────────────────────────────
+
+// POST /api/smart-pick/plan
+// Accepts { orderStart, orderEnd } — finds up to 8 unfulfilled orders in range,
+// joins items with stock_locations, returns serpentine-routed pick plan.
+app.post('/api/smart-pick/plan', requireAuth, async (req, res) => {
+  const MAX_ORDERS = 8;
+  const { orderStart, orderEnd } = req.body;
+  const start = parseInt(orderStart);
+  const end   = parseInt(orderEnd);
+
+  if (!start || !end || isNaN(start) || isNaN(end) || start > end) {
+    return res.status(400).json({ error: 'Valid orderStart and orderEnd required' });
+  }
+
+  try {
+    // Ensure products cache
+    if (!productsCache.length) {
+      productsCache = await fetchAllProducts();
+      lastFetched   = new Date();
+    }
+
+    // Build variant → product and variant → image maps
+    const variantProductMap = {};
+    const variantImageMap   = {};
+    for (const p of productsCache) {
+      const productImg = p.images?.[0]?.src || null;
+      for (const v of p.variants) {
+        const vid = String(v.id);
+        variantProductMap[vid] = String(p.id);
+        variantImageMap[vid]   = p.images?.find(img => img.id === v.image_id)?.src || productImg;
+      }
+    }
+
+    // Load all location rows from DB
+    const { rows: locRows } = await pool.query(
+      'SELECT product_id, variant_id, aisle, bay FROM stock_locations'
+    );
+    const productLocMap = {};
+    const variantLocMap = {};
+    for (const row of locRows) {
+      if (!row.variant_id) {
+        productLocMap[row.product_id] = { aisle: row.aisle, bay: row.bay };
+      } else {
+        variantLocMap[row.variant_id] = { aisle: row.aisle, bay: row.bay };
+      }
+    }
+
+    // Fetch orders from Shopify (newest → oldest); collect unfulfilled in range, up to MAX_ORDERS
+    const collectedOrders = [];
+    let url  = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json` +
+               `?status=any&limit=250&fields=id,name,order_number,line_items,note`;
+    let done = false;
+
+    while (url && !done) {
+      const r = await fetch(url, { headers: shopifyHeaders() });
+      if (!r.ok) {
+        const body = await r.text();
+        throw new Error(`Shopify API error ${r.status}: ${body.slice(0, 200)}`);
+      }
+      const data = await r.json();
+
+      for (const order of data.orders) {
+        if (order.order_number < start) { done = true; break; }
+        if (order.order_number > end)   continue;
+
+        const pickableItems = (order.line_items || []).filter(item =>
+          item.fulfillment_status !== 'fulfilled' &&
+          (item.fulfillable_quantity ?? item.quantity) > 0 &&
+          (item.sku || '').toLowerCase() !== 'x-redo'
+        );
+        if (pickableItems.length > 0) collectedOrders.push(order);
+        if (collectedOrders.length >= MAX_ORDERS) { done = true; break; }
+      }
+
+      if (!done) {
+        const link = r.headers.get('link');
+        url = null;
+        if (link) {
+          const m = link.match(/<([^>]+)>;\s*rel="next"/);
+          if (m) url = m[1];
+        }
+      }
+    }
+
+    // Sort ascending (oldest order first = bag 1) and assign bag numbers
+    collectedOrders.sort((a, b) => a.order_number - b.order_number);
+    const bags = collectedOrders.map((order, idx) => ({
+      bagNum:      idx + 1,
+      orderNumber: order.order_number,
+      orderName:   order.name,
+      note:        order.note || null,
+    }));
+
+    if (!bags.length) {
+      return res.json({ bags: [], stops: [], unlocatedItems: [], stats: { orderCount: 0, totalItems: 0, locatedItems: 0, unlocatedItems: 0, stopCount: 0, aisleCount: 0 } });
+    }
+
+    // Build per-order item lists
+    const bagMap = {};
+    for (const bag of bags) bagMap[bag.orderNumber] = bag;
+
+    const locatedItems   = [];
+    const unlocatedItems = [];
+
+    for (const order of collectedOrders) {
+      const bag = bagMap[order.order_number];
+      for (const item of (order.line_items || [])) {
+        if ((item.sku || '').toLowerCase() === 'x-redo') continue;
+        if (item.fulfillment_status === 'fulfilled')     continue;
+        const qty = item.fulfillable_quantity ?? item.quantity;
+        if (qty <= 0) continue;
+
+        const vid  = String(item.variant_id);
+        const pid  = variantProductMap[vid] || String(item.product_id);
+        const loc  = variantLocMap[vid] || productLocMap[pid];
+        const base = {
+          bagNum:       bag.bagNum,
+          orderNumber:  order.order_number,
+          orderName:    order.name,
+          variantId:    vid,
+          productId:    pid,
+          title:        item.title,
+          variantTitle: (item.variant_title && item.variant_title !== 'Default Title') ? item.variant_title : null,
+          sku:          item.sku || '',
+          qty,
+          image:        variantImageMap[vid] || null,
+        };
+
+        if (loc?.aisle != null) {
+          locatedItems.push({ ...base, aisle: loc.aisle, bay: loc.bay });
+        } else {
+          unlocatedItems.push(base);
+        }
+      }
+    }
+
+    // Serpentine sort: aisle asc; odd aisles bay asc, even aisles bay desc
+    locatedItems.sort((a, b) => {
+      if (a.aisle !== b.aisle) return a.aisle - b.aisle;
+      const bayA = a.aisle % 2 === 0 ? -(a.bay ?? 0) : (a.bay ?? 0);
+      const bayB = b.aisle % 2 === 0 ? -(b.bay ?? 0) : (b.bay ?? 0);
+      return bayA - bayB;
+    });
+
+    // Group into stops (consecutive items at the same aisle + bay)
+    const stops = [];
+    for (const item of locatedItems) {
+      const last = stops[stops.length - 1];
+      if (last && last.aisle === item.aisle && last.bay === item.bay) {
+        last.items.push(item);
+      } else {
+        stops.push({ stopNum: stops.length + 1, aisle: item.aisle, bay: item.bay, items: [item] });
+      }
+    }
+
+    // Sort unlocated by order number
+    unlocatedItems.sort((a, b) => a.orderNumber - b.orderNumber);
+
+    res.json({
+      bags,
+      stops,
+      unlocatedItems,
+      stats: {
+        orderCount:    bags.length,
+        totalItems:    locatedItems.length + unlocatedItems.length,
+        locatedItems:  locatedItems.length,
+        unlocatedItems: unlocatedItems.length,
+        stopCount:     stops.length,
+        aisleCount:    new Set(locatedItems.map(i => i.aisle)).size,
+      },
+    });
+  } catch (err) {
+    console.error('[smart-pick] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Restock Planner ───────────────────────────────────────────────
 
 // GET /api/restock/settings
