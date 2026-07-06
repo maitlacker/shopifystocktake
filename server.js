@@ -5504,7 +5504,7 @@ app.delete('/api/creative/jobs/:id', requireAuth, async (req, res) => {
 // Aggregates monthly Shopify revenue, Meta spend, and Xero P&L + computes auto growth rate
 app.get('/api/forecast/data', requireAuth, async (req, res) => {
   try {
-    const [shopifyRes, metaRes, xeroRes, settingsRes, budgetsRes] = await Promise.all([
+    const [shopifyRes, metaRes, xeroRes, settingsRes, budgetsRes, stockRes] = await Promise.all([
       pool.query(`
         SELECT
           EXTRACT(YEAR  FROM date)::INT AS year,
@@ -5550,9 +5550,15 @@ app.get('/api/forecast/data', requireAuth, async (req, res) => {
                meta_planned::FLOAT,
                google_planned::FLOAT,
                opex_planned::FLOAT,
+               purchasing_planned::FLOAT,
                notes
         FROM forecast_monthly_budgets
         ORDER BY year, month
+      `).catch(() => ({ rows: [] })),
+      pool.query(`
+        SELECT total_rrp::FLOAT, total_cost::FLOAT, date AS snapshot_date
+        FROM stock_value_history
+        ORDER BY date DESC LIMIT 1
       `).catch(() => ({ rows: [] })),
     ]);
 
@@ -5587,6 +5593,7 @@ app.get('/api/forecast/data', requireAuth, async (req, res) => {
       settings,
       yearTotals,
       autoGrowthRate: parseFloat(autoGrowthRate.toFixed(4)),
+      stockLatest:    stockRes.rows[0] || null,
     });
   } catch (err) {
     console.error('[forecast] data error:', err.message);
@@ -5626,20 +5633,21 @@ app.post('/api/forecast/settings', requireAuth, async (req, res) => {
 
 // POST /api/forecast/monthly-budget
 app.post('/api/forecast/monthly-budget', requireAuth, async (req, res) => {
-  const { year, month, meta_planned, google_planned, opex_planned, notes } = req.body;
+  const { year, month, meta_planned, google_planned, opex_planned, purchasing_planned, notes } = req.body;
   if (!year || !month) return res.status(400).json({ error: 'year and month required' });
   try {
     await pool.query(
       `INSERT INTO forecast_monthly_budgets
-         (year, month, meta_planned, google_planned, opex_planned, notes, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,NOW())
+         (year, month, meta_planned, google_planned, opex_planned, purchasing_planned, notes, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
        ON CONFLICT (year, month) DO UPDATE SET
-         meta_planned   = EXCLUDED.meta_planned,
-         google_planned = EXCLUDED.google_planned,
-         opex_planned   = EXCLUDED.opex_planned,
-         notes          = EXCLUDED.notes,
-         updated_at     = NOW()`,
-      [year, month, meta_planned ?? null, google_planned ?? null, opex_planned ?? null, notes ?? null]
+         meta_planned        = EXCLUDED.meta_planned,
+         google_planned      = EXCLUDED.google_planned,
+         opex_planned        = EXCLUDED.opex_planned,
+         purchasing_planned  = EXCLUDED.purchasing_planned,
+         notes               = EXCLUDED.notes,
+         updated_at          = NOW()`,
+      [year, month, meta_planned ?? null, google_planned ?? null, opex_planned ?? null, purchasing_planned ?? null, notes ?? null]
     );
     res.json({ ok: true });
   } catch (err) {

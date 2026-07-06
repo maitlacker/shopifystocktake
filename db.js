@@ -717,13 +717,15 @@ async function initDb() {
       id             SERIAL PRIMARY KEY,
       year           INT  NOT NULL,
       month          INT  NOT NULL,
-      meta_planned   DECIMAL(12,2),
-      google_planned DECIMAL(12,2),
-      opex_planned   DECIMAL(12,2),
+      meta_planned        DECIMAL(12,2),
+      google_planned      DECIMAL(12,2),
+      opex_planned        DECIMAL(12,2),
+      purchasing_planned  DECIMAL(12,2),
       notes          TEXT,
       updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE(year, month)
     );
+    ALTER TABLE forecast_monthly_budgets ADD COLUMN IF NOT EXISTS purchasing_planned DECIMAL(12,2);
   `);
 }
 

@@ -8,7 +8,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <style>
     body { background: #f8fafc; }
-    .fc-wrap { max-width: 1200px; margin: 0 auto; padding: 24px 16px 80px; }
+    .fc-wrap { max-width: 1260px; margin: 0 auto; padding: 24px 16px 80px; }
 
     /* ── Page header ──────────────────────────────────── */
     .fc-page-hdr {
@@ -26,33 +26,40 @@
       box-shadow: 0 1px 3px rgba(0,0,0,.07); margin-bottom: 20px;
     }
     .fc-control { display: flex; flex-direction: column; gap: 5px; }
-    .fc-control label { font-size: 0.72rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .05em; }
+    .fc-control label {
+      font-size: 0.7rem; font-weight: 700; color: #64748b;
+      text-transform: uppercase; letter-spacing: .05em; white-space: nowrap;
+    }
     .fc-control-row { display: flex; align-items: center; gap: 4px; }
-    .fc-control-row input[type="number"],
-    .fc-control-row select {
-      height: 36px; border: 1.5px solid #e2e8f0; border-radius: 8px;
-      padding: 0 10px; font-size: 0.9rem; font-weight: 600; color: #1e293b;
+    .fc-control-row input[type="number"] {
+      height: 34px; border: 1.5px solid #e2e8f0; border-radius: 8px;
+      padding: 0 8px; font-size: 0.88rem; font-weight: 600; color: #1e293b;
       background: #f8fafc; width: 80px;
     }
-    .fc-control-row select { width: auto; padding: 0 28px 0 10px; }
+    .fc-control-row select {
+      height: 34px; border: 1.5px solid #e2e8f0; border-radius: 8px;
+      padding: 0 24px 0 8px; font-size: 0.88rem; font-weight: 600; color: #1e293b;
+      background: #f8fafc;
+    }
     .fc-control-row input:focus, .fc-control-row select:focus {
       outline: none; border-color: #6366f1; background: #fff;
     }
-    .fc-control-row span { font-size: 0.85rem; color: #64748b; }
+    .fc-control-row span { font-size: 0.82rem; color: #64748b; }
     .fc-auto-btn {
-      font-size: 0.72rem; font-weight: 700; color: #6366f1; background: #ede9fe;
-      border: none; border-radius: 6px; padding: 4px 8px; cursor: pointer;
-      transition: background .15s;
+      font-size: 0.7rem; font-weight: 700; color: #6366f1; background: #ede9fe;
+      border: none; border-radius: 5px; padding: 3px 7px; cursor: pointer; transition: background .15s;
     }
     .fc-auto-btn:hover { background: #ddd6fe; }
-    .fc-controls-sep { width: 1px; background: #e2e8f0; height: 36px; align-self: flex-end; }
+    .fc-controls-sep { width: 1px; background: #e2e8f0; height: 34px; align-self: flex-end; }
+    .fc-control-narrow input[type="number"] { width: 70px; }
+    .fc-control-wide   input[type="number"] { width: 96px; }
 
     /* ── Buttons ─────────────────────────────────────── */
     .fc-btn {
-      height: 36px; border: none; border-radius: 8px; font-size: 0.82rem;
-      font-weight: 700; padding: 0 16px; cursor: pointer; transition: all .15s;
+      height: 34px; border: none; border-radius: 8px; font-size: 0.82rem;
+      font-weight: 700; padding: 0 14px; cursor: pointer; transition: all .15s;
     }
-    .fc-btn-primary { background: #6366f1; color: #fff; }
+    .fc-btn-primary   { background: #6366f1; color: #fff; }
     .fc-btn-primary:hover { background: #4f46e5; }
     .fc-btn-secondary { background: #f1f5f9; color: #475569; border: 1.5px solid #e2e8f0; }
     .fc-btn-secondary:hover { background: #e2e8f0; }
@@ -68,19 +75,26 @@
 
     /* ── Summary cards ───────────────────────────────── */
     .fc-cards {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
       gap: 12px; margin-bottom: 20px;
     }
     .fc-card {
-      background: #fff; border-radius: 12px; padding: 18px 20px;
+      background: #fff; border-radius: 12px; padding: 16px 18px;
       box-shadow: 0 1px 3px rgba(0,0,0,.07);
     }
-    .fc-card-val { font-size: 1.6rem; font-weight: 800; color: #1e293b; line-height: 1; font-variant-numeric: tabular-nums; }
-    .fc-card-lbl { font-size: 0.72rem; color: #64748b; margin-top: 5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
-    .fc-card-sub { font-size: 0.75rem; color: #94a3b8; margin-top: 2px; }
-    .fc-card.fc-pos .fc-card-val { color: #16a34a; }
+    .fc-card-val { font-size: 1.5rem; font-weight: 800; color: #1e293b; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .fc-card-lbl { font-size: 0.7rem; color: #64748b; margin-top: 5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+    .fc-card-sub { font-size: 0.73rem; color: #94a3b8; margin-top: 2px; }
+    .fc-card.fc-pos  .fc-card-val { color: #16a34a; }
     .fc-card.fc-warn .fc-card-val { color: #d97706; }
+    .fc-card.fc-neg  .fc-card-val { color: #dc2626; }
     .fc-card.fc-growth .fc-card-val { color: #6366f1; }
+
+    /* Stock progress bar */
+    .fc-progress-wrap { margin-top: 8px; }
+    .fc-progress-track { height: 6px; background: #e2e8f0; border-radius: 99px; }
+    .fc-progress-fill  { height: 6px; border-radius: 99px; transition: width .4s; }
+    .fc-progress-label { font-size: 0.7rem; color: #64748b; margin-top: 4px; display: flex; justify-content: space-between; }
 
     /* ── Sections ────────────────────────────────────── */
     .fc-section {
@@ -89,41 +103,54 @@
     }
     .fc-section-hdr { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
     .fc-section-hdr h2 { font-size: 0.95rem; font-weight: 800; color: #1e293b; margin: 0; }
-    .fc-section-sub { font-size: 0.78rem; color: #94a3b8; }
+    .fc-section-sub    { font-size: 0.78rem; color: #94a3b8; }
 
     /* ── Chart ───────────────────────────────────────── */
     .fc-chart-wrap { position: relative; height: 280px; }
 
     /* ── P&L Table ───────────────────────────────────── */
     .fc-table-wrap { overflow-x: auto; border-radius: 10px; }
-    .fc-table { width: 100%; border-collapse: collapse; font-size: 0.83rem; min-width: 700px; }
+    .fc-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; min-width: 900px; }
     .fc-table thead tr { background: #f8fafc; }
     .fc-table th {
-      padding: 10px 14px; text-align: right; white-space: nowrap;
-      font-size: 0.7rem; font-weight: 700; color: #64748b;
+      padding: 9px 12px; text-align: right; white-space: nowrap;
+      font-size: 0.68rem; font-weight: 700; color: #64748b;
       text-transform: uppercase; letter-spacing: .05em;
       border-bottom: 1.5px solid #e2e8f0;
     }
     .fc-table th:first-child { text-align: left; }
     .fc-table td {
-      padding: 10px 14px; border-bottom: 1px solid #f1f5f9;
+      padding: 9px 12px; border-bottom: 1px solid #f1f5f9;
       text-align: right; font-variant-numeric: tabular-nums; color: #334155;
     }
     .fc-table td:first-child { text-align: left; }
     .fc-table tr:last-child td { border-bottom: none; }
 
+    /* Column dividers between P&L and Cash sections */
+    .fc-col-divider { border-left: 2px solid #e2e8f0; }
+
     /* Row types */
-    .fc-row-past   td { background: #f8fafc; color: #64748b; }
+    .fc-row-past    td { background: #f8fafc; color: #6b7280; }
     .fc-row-current td { background: #fefce8; }
     .fc-row-future  td { background: #fff; }
-    .fc-row-total   td {
-      background: #1e293b; color: #fff; font-weight: 700;
-      border-bottom: none;
-    }
-    .fc-row-total .fc-gp    { color: #86efac; }
-    .fc-row-total .fc-pos   { color: #86efac; }
-    .fc-row-total .fc-warn  { color: #fcd34d; }
-    .fc-row-total .fc-neg   { color: #fca5a5; }
+    .fc-row-total   td { background: #1e293b; color: #fff; font-weight: 700; border-bottom: none; }
+    .fc-row-total .fc-gp   { color: #86efac; }
+    .fc-row-total .fc-pos  { color: #86efac; }
+    .fc-row-total .fc-warn { color: #fcd34d; }
+    .fc-row-total .fc-neg  { color: #fca5a5; }
+    .fc-row-total .fc-purchasing { color: #94a3b8; }
+
+    /* Sale month rows */
+    .fc-row-eofy td        { background: #fffbeb; border-bottom-color: #fde68a; }
+    .fc-row-bf   td        { background: #1e293b; color: #e2e8f0; border-bottom-color: #374151; }
+    .fc-row-bf   td:first-child { color: #f8fafc; }
+    .fc-row-bf .fc-gp      { color: #6ee7b7; }
+    .fc-row-bf .fc-pos     { color: #6ee7b7; }
+    .fc-row-bf .fc-warn    { color: #fcd34d; }
+    .fc-row-bf .fc-neg     { color: #fca5a5; }
+    .fc-row-bf .fc-forecast-val { color: #a5b4fc; }
+    .fc-row-bf .fc-purchasing   { color: #94a3b8; }
+    .fc-row-bf .fc-editable:hover { background: rgba(255,255,255,.08); }
 
     /* Cell types */
     .fc-forecast-val { color: #818cf8; font-style: italic; }
@@ -131,57 +158,55 @@
     .fc-pos   { color: #15803d; font-weight: 700; }
     .fc-warn  { color: #d97706; font-weight: 700; }
     .fc-neg   { color: #dc2626; font-weight: 700; }
+    .fc-purchasing { color: #7c3aed; font-weight: 600; }
 
     /* Month column */
-    .fc-col-month { font-weight: 700; color: #1e293b; white-space: nowrap; }
+    .fc-col-month { font-weight: 700; color: #1e293b; white-space: nowrap; min-width: 90px; }
     .fc-row-past .fc-col-month { color: #94a3b8; }
-    .fc-now-badge {
-      font-size: 0.6rem; font-weight: 800; background: #fbbf24; color: #78350f;
-      padding: 1px 5px; border-radius: 4px; margin-left: 6px; vertical-align: middle;
-    }
-    .fc-fc-badge {
-      font-size: 0.6rem; font-weight: 800; background: #ede9fe; color: #6366f1;
-      padding: 1px 5px; border-radius: 4px; margin-left: 6px; vertical-align: middle;
-    }
+    .fc-now-badge  { font-size: 0.58rem; font-weight: 800; background: #fbbf24; color: #78350f; padding: 1px 5px; border-radius: 4px; margin-left: 5px; vertical-align: middle; }
+    .fc-fc-badge   { font-size: 0.58rem; font-weight: 800; background: #ede9fe; color: #6366f1; padding: 1px 5px; border-radius: 4px; margin-left: 5px; vertical-align: middle; }
+    .fc-sale-badge { font-size: 0.58rem; font-weight: 800; padding: 1px 5px; border-radius: 4px; margin-left: 5px; vertical-align: middle; }
+    .fc-sale-badge.eofy { background: #fde68a; color: #92400e; }
+    .fc-sale-badge.bf   { background: #374151; color: #e5e7eb; }
+    .fc-buy-badge  { font-size: 0.58rem; font-weight: 800; background: #ede9fe; color: #7c3aed; padding: 1px 5px; border-radius: 4px; margin-left: 5px; vertical-align: middle; }
 
-    /* Editable cells (future months) */
-    .fc-editable {
-      cursor: pointer; position: relative;
-    }
+    /* EBITDA vs target sub-line */
+    .fc-vs-target { font-size: 0.65rem; display: block; margin-top: 1px; font-weight: 600; }
+    .fc-vs-target.pos  { color: #16a34a; }
+    .fc-vs-target.warn { color: #d97706; }
+    .fc-vs-target.neg  { color: #dc2626; }
+
+    /* Editable cells */
+    .fc-editable { cursor: pointer; }
     .fc-editable:hover { background: #f0f9ff; }
-    .fc-editable::after {
-      content: '✎'; font-size: 0.65rem; color: #94a3b8;
-      margin-left: 4px; opacity: 0;
-    }
+    .fc-editable::after { content: '✎'; font-size: 0.62rem; color: #94a3b8; margin-left: 3px; opacity: 0; }
     .fc-editable:hover::after { opacity: 1; }
     .fc-cell-input {
-      width: 100%; max-width: 100px; border: 1.5px solid #6366f1;
-      border-radius: 5px; padding: 3px 7px; font-size: 0.82rem;
-      text-align: right; font-variant-numeric: tabular-nums;
+      width: 90px; border: 1.5px solid #6366f1; border-radius: 5px;
+      padding: 3px 7px; font-size: 0.82rem; text-align: right; font-variant-numeric: tabular-nums;
     }
 
-    /* ── Data coverage notice ────────────────────────── */
+    /* ── Notices & Insights ──────────────────────────── */
     .fc-notice {
       background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px;
       padding: 12px 16px; font-size: 0.82rem; color: #1d4ed8;
       margin-bottom: 18px; display: flex; align-items: center; gap: 10px;
     }
     .fc-notice-icon { font-size: 1.1rem; flex-shrink: 0; }
-
-    /* ── Insights panel ─────────────────────────────── */
     .fc-insights {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
       gap: 10px; margin-bottom: 20px;
     }
     .fc-insight-card {
       background: #fff; border-radius: 12px; padding: 14px 16px;
-      box-shadow: 0 1px 3px rgba(0,0,0,.07);
-      border-left: 3px solid #6366f1;
+      box-shadow: 0 1px 3px rgba(0,0,0,.07); border-left: 3px solid #6366f1;
     }
     .fc-insight-card.warn { border-left-color: #d97706; }
     .fc-insight-card.good { border-left-color: #16a34a; }
-    .fc-insight-title { font-size: 0.78rem; font-weight: 700; color: #1e293b; margin-bottom: 3px; }
-    .fc-insight-body  { font-size: 0.75rem; color: #64748b; line-height: 1.4; }
+    .fc-insight-card.alert { border-left-color: #dc2626; }
+    .fc-insight-title { font-size: 0.78rem; font-weight: 800; color: #1e293b; margin-bottom: 4px; }
+    .fc-insight-body  { font-size: 0.74rem; color: #64748b; line-height: 1.45; }
+    .fc-insight-body strong { color: #334155; }
 
     @media (max-width: 640px) {
       .fc-controls { padding: 14px; gap: 10px; }
@@ -197,7 +222,7 @@
   <div class="fc-page-hdr">
     <div>
       <h1>Forecasting &amp; Budget</h1>
-      <p>Data-driven revenue forecast and P&amp;L planning</p>
+      <p>Data-driven revenue forecast, P&amp;L planning &amp; stock build tracker</p>
     </div>
     <div class="fc-hdr-actions">
       <button class="fc-btn fc-btn-secondary" id="fc-backfill-btn">&#8635; Sync History</button>
@@ -215,10 +240,39 @@
       </div>
     </div>
     <div class="fc-control">
-      <label>Gross Margin</label>
+      <label>Normal Margin</label>
       <div class="fc-control-row">
         <input type="number" id="fc-margin" step="1" min="0" max="100" value="70">
         <span>%</span>
+      </div>
+    </div>
+    <div class="fc-control fc-control-narrow">
+      <label>EOFY Margin</label>
+      <div class="fc-control-row">
+        <input type="number" id="fc-margin-eofy" step="1" min="0" max="100" value="45">
+        <span>%</span>
+      </div>
+    </div>
+    <div class="fc-control fc-control-narrow">
+      <label>BF Margin</label>
+      <div class="fc-control-row">
+        <input type="number" id="fc-margin-bf" step="1" min="0" max="100" value="38">
+        <span>%</span>
+      </div>
+    </div>
+    <div class="fc-controls-sep"></div>
+    <div class="fc-control fc-control-wide">
+      <label>Monthly Profit Target</label>
+      <div class="fc-control-row">
+        <span>$</span>
+        <input type="number" id="fc-profit-target" step="5000" min="0" value="50000">
+      </div>
+    </div>
+    <div class="fc-control fc-control-wide">
+      <label>Stock Target RRP</label>
+      <div class="fc-control-row">
+        <span>$</span>
+        <input type="number" id="fc-stock-target" step="100000" min="0" value="3000000">
       </div>
     </div>
     <div class="fc-controls-sep"></div>
@@ -257,18 +311,18 @@
     <div class="fc-section">
       <div class="fc-section-hdr">
         <h2>Seasonal Revenue Pattern</h2>
-        <span class="fc-section-sub">Monthly revenue by year — click legend to toggle years</span>
+        <span class="fc-section-sub">Monthly revenue by year — sale months (June, Nov) shown with markers</span>
       </div>
       <div class="fc-chart-wrap">
         <canvas id="fc-chart"></canvas>
       </div>
     </div>
 
-    <!-- Monthly P&L table -->
+    <!-- Monthly P&L + Cash table -->
     <div class="fc-section">
       <div class="fc-section-hdr">
         <h2 id="fc-pl-title">Budget — 2026</h2>
-        <span class="fc-section-sub">Click cells in future rows to enter planned Meta Spend or Opex</span>
+        <span class="fc-section-sub">EOFY = June sale &nbsp;|&nbsp; BF = Black Friday (Nov) &nbsp;|&nbsp; BUY = active stock build window &nbsp;|&nbsp; ✎ = click to edit</span>
       </div>
       <div class="fc-table-wrap">
         <table class="fc-table">
@@ -276,12 +330,14 @@
             <tr>
               <th style="text-align:left">Month</th>
               <th>Revenue</th>
-              <th title="Click future cells to edit planned Meta spend">Meta Spend ✎</th>
+              <th>Meta ✎</th>
               <th>COGS</th>
               <th>Gross Profit</th>
-              <th title="Click future cells to edit planned opex">Opex ✎</th>
+              <th>Opex ✎</th>
               <th>EBITDA</th>
-              <th>EBITDA %</th>
+              <th>EBITDA%</th>
+              <th class="fc-col-divider fc-purchasing" title="Monthly stock purchasing (replenishment + build)">Purchasing ✎</th>
+              <th>Net Cash</th>
             </tr>
           </thead>
           <tbody id="fc-tbody"></tbody>
