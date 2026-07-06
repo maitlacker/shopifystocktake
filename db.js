@@ -705,6 +705,25 @@ async function initDb() {
 
     ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS lead_time_sea INT;
     ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS lead_time_air INT;
+
+    -- ── Forecast & Budget ─────────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS forecast_settings (
+      key        TEXT PRIMARY KEY,
+      value      TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS forecast_monthly_budgets (
+      id             SERIAL PRIMARY KEY,
+      year           INT  NOT NULL,
+      month          INT  NOT NULL,
+      meta_planned   DECIMAL(12,2),
+      google_planned DECIMAL(12,2),
+      opex_planned   DECIMAL(12,2),
+      notes          TEXT,
+      updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(year, month)
+    );
   `);
 }
 

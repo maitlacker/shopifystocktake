@@ -73,6 +73,7 @@
       label: 'Admin',
       restrict: ADMIN_ONLY,
       children: [
+        { label: 'Forecasting',    href: '/forecast.html' },
         { label: 'BI Dashboard',   href: '/bi-dashboard.html' },
         { label: 'Weekly Pulse',   href: '/weekly-pulse.html' },
         { label: 'Packing Report', href: '/packing-report.html' },

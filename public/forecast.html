@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Forecasting &amp; Budget — TSS WMS</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    body { background: #f8fafc; }
+    .fc-wrap { max-width: 1200px; margin: 0 auto; padding: 24px 16px 80px; }
+
+    /* ── Page header ──────────────────────────────────── */
+    .fc-page-hdr {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 16px; margin-bottom: 20px; flex-wrap: wrap;
+    }
+    .fc-page-hdr h1 { font-size: 1.45rem; font-weight: 800; color: #1e293b; margin: 0 0 3px; }
+    .fc-page-hdr p  { font-size: 0.85rem; color: #64748b; margin: 0; }
+    .fc-hdr-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+    /* ── Controls bar ─────────────────────────────────── */
+    .fc-controls {
+      display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;
+      background: #fff; border-radius: 14px; padding: 16px 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.07); margin-bottom: 20px;
+    }
+    .fc-control { display: flex; flex-direction: column; gap: 5px; }
+    .fc-control label { font-size: 0.72rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .05em; }
+    .fc-control-row { display: flex; align-items: center; gap: 4px; }
+    .fc-control-row input[type="number"],
+    .fc-control-row select {
+      height: 36px; border: 1.5px solid #e2e8f0; border-radius: 8px;
+      padding: 0 10px; font-size: 0.9rem; font-weight: 600; color: #1e293b;
+      background: #f8fafc; width: 80px;
+    }
+    .fc-control-row select { width: auto; padding: 0 28px 0 10px; }
+    .fc-control-row input:focus, .fc-control-row select:focus {
+      outline: none; border-color: #6366f1; background: #fff;
+    }
+    .fc-control-row span { font-size: 0.85rem; color: #64748b; }
+    .fc-auto-btn {
+      font-size: 0.72rem; font-weight: 700; color: #6366f1; background: #ede9fe;
+      border: none; border-radius: 6px; padding: 4px 8px; cursor: pointer;
+      transition: background .15s;
+    }
+    .fc-auto-btn:hover { background: #ddd6fe; }
+    .fc-controls-sep { width: 1px; background: #e2e8f0; height: 36px; align-self: flex-end; }
+
+    /* ── Buttons ─────────────────────────────────────── */
+    .fc-btn {
+      height: 36px; border: none; border-radius: 8px; font-size: 0.82rem;
+      font-weight: 700; padding: 0 16px; cursor: pointer; transition: all .15s;
+    }
+    .fc-btn-primary { background: #6366f1; color: #fff; }
+    .fc-btn-primary:hover { background: #4f46e5; }
+    .fc-btn-secondary { background: #f1f5f9; color: #475569; border: 1.5px solid #e2e8f0; }
+    .fc-btn-secondary:hover { background: #e2e8f0; }
+
+    /* ── Loading ─────────────────────────────────────── */
+    .fc-loading { text-align: center; padding: 60px 24px; color: #64748b; }
+    .fc-spinner {
+      width: 32px; height: 32px; border: 3px solid #e2e8f0;
+      border-top-color: #6366f1; border-radius: 50%;
+      animation: fc-spin .7s linear infinite; margin: 0 auto 12px;
+    }
+    @keyframes fc-spin { to { transform: rotate(360deg); } }
+
+    /* ── Summary cards ───────────────────────────────── */
+    .fc-cards {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 12px; margin-bottom: 20px;
+    }
+    .fc-card {
+      background: #fff; border-radius: 12px; padding: 18px 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.07);
+    }
+    .fc-card-val { font-size: 1.6rem; font-weight: 800; color: #1e293b; line-height: 1; font-variant-numeric: tabular-nums; }
+    .fc-card-lbl { font-size: 0.72rem; color: #64748b; margin-top: 5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+    .fc-card-sub { font-size: 0.75rem; color: #94a3b8; margin-top: 2px; }
+    .fc-card.fc-pos .fc-card-val { color: #16a34a; }
+    .fc-card.fc-warn .fc-card-val { color: #d97706; }
+    .fc-card.fc-growth .fc-card-val { color: #6366f1; }
+
+    /* ── Sections ────────────────────────────────────── */
+    .fc-section {
+      background: #fff; border-radius: 14px; padding: 20px 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.07); margin-bottom: 20px;
+    }
+    .fc-section-hdr { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+    .fc-section-hdr h2 { font-size: 0.95rem; font-weight: 800; color: #1e293b; margin: 0; }
+    .fc-section-sub { font-size: 0.78rem; color: #94a3b8; }
+
+    /* ── Chart ───────────────────────────────────────── */
+    .fc-chart-wrap { position: relative; height: 280px; }
+
+    /* ── P&L Table ───────────────────────────────────── */
+    .fc-table-wrap { overflow-x: auto; border-radius: 10px; }
+    .fc-table { width: 100%; border-collapse: collapse; font-size: 0.83rem; min-width: 700px; }
+    .fc-table thead tr { background: #f8fafc; }
+    .fc-table th {
+      padding: 10px 14px; text-align: right; white-space: nowrap;
+      font-size: 0.7rem; font-weight: 700; color: #64748b;
+      text-transform: uppercase; letter-spacing: .05em;
+      border-bottom: 1.5px solid #e2e8f0;
+    }
+    .fc-table th:first-child { text-align: left; }
+    .fc-table td {
+      padding: 10px 14px; border-bottom: 1px solid #f1f5f9;
+      text-align: right; font-variant-numeric: tabular-nums; color: #334155;
+    }
+    .fc-table td:first-child { text-align: left; }
+    .fc-table tr:last-child td { border-bottom: none; }
+
+    /* Row types */
+    .fc-row-past   td { background: #f8fafc; color: #64748b; }
+    .fc-row-current td { background: #fefce8; }
+    .fc-row-future  td { background: #fff; }
+    .fc-row-total   td {
+      background: #1e293b; color: #fff; font-weight: 700;
+      border-bottom: none;
+    }
+    .fc-row-total .fc-gp    { color: #86efac; }
+    .fc-row-total .fc-pos   { color: #86efac; }
+    .fc-row-total .fc-warn  { color: #fcd34d; }
+    .fc-row-total .fc-neg   { color: #fca5a5; }
+
+    /* Cell types */
+    .fc-forecast-val { color: #818cf8; font-style: italic; }
+    .fc-gp    { color: #15803d; font-weight: 700; }
+    .fc-pos   { color: #15803d; font-weight: 700; }
+    .fc-warn  { color: #d97706; font-weight: 700; }
+    .fc-neg   { color: #dc2626; font-weight: 700; }
+
+    /* Month column */
+    .fc-col-month { font-weight: 700; color: #1e293b; white-space: nowrap; }
+    .fc-row-past .fc-col-month { color: #94a3b8; }
+    .fc-now-badge {
+      font-size: 0.6rem; font-weight: 800; background: #fbbf24; color: #78350f;
+      padding: 1px 5px; border-radius: 4px; margin-left: 6px; vertical-align: middle;
+    }
+    .fc-fc-badge {
+      font-size: 0.6rem; font-weight: 800; background: #ede9fe; color: #6366f1;
+      padding: 1px 5px; border-radius: 4px; margin-left: 6px; vertical-align: middle;
+    }
+
+    /* Editable cells (future months) */
+    .fc-editable {
+      cursor: pointer; position: relative;
+    }
+    .fc-editable:hover { background: #f0f9ff; }
+    .fc-editable::after {
+      content: '✎'; font-size: 0.65rem; color: #94a3b8;
+      margin-left: 4px; opacity: 0;
+    }
+    .fc-editable:hover::after { opacity: 1; }
+    .fc-cell-input {
+      width: 100%; max-width: 100px; border: 1.5px solid #6366f1;
+      border-radius: 5px; padding: 3px 7px; font-size: 0.82rem;
+      text-align: right; font-variant-numeric: tabular-nums;
+    }
+
+    /* ── Data coverage notice ────────────────────────── */
+    .fc-notice {
+      background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px;
+      padding: 12px 16px; font-size: 0.82rem; color: #1d4ed8;
+      margin-bottom: 18px; display: flex; align-items: center; gap: 10px;
+    }
+    .fc-notice-icon { font-size: 1.1rem; flex-shrink: 0; }
+
+    /* ── Insights panel ─────────────────────────────── */
+    .fc-insights {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 10px; margin-bottom: 20px;
+    }
+    .fc-insight-card {
+      background: #fff; border-radius: 12px; padding: 14px 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.07);
+      border-left: 3px solid #6366f1;
+    }
+    .fc-insight-card.warn { border-left-color: #d97706; }
+    .fc-insight-card.good { border-left-color: #16a34a; }
+    .fc-insight-title { font-size: 0.78rem; font-weight: 700; color: #1e293b; margin-bottom: 3px; }
+    .fc-insight-body  { font-size: 0.75rem; color: #64748b; line-height: 1.4; }
+
+    @media (max-width: 640px) {
+      .fc-controls { padding: 14px; gap: 10px; }
+      .fc-section  { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+<header></header>
+<div class="fc-wrap">
+
+  <!-- Page header -->
+  <div class="fc-page-hdr">
+    <div>
+      <h1>Forecasting &amp; Budget</h1>
+      <p>Data-driven revenue forecast and P&amp;L planning</p>
+    </div>
+    <div class="fc-hdr-actions">
+      <button class="fc-btn fc-btn-secondary" id="fc-backfill-btn">&#8635; Sync History</button>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="fc-controls">
+    <div class="fc-control">
+      <label>YoY Growth</label>
+      <div class="fc-control-row">
+        <input type="number" id="fc-growth" step="0.1" min="-50" max="200" value="15">
+        <span>%</span>
+        <button class="fc-auto-btn" id="fc-growth-auto" title="Reset to auto-calculated rate">auto</button>
+      </div>
+    </div>
+    <div class="fc-control">
+      <label>Gross Margin</label>
+      <div class="fc-control-row">
+        <input type="number" id="fc-margin" step="1" min="0" max="100" value="70">
+        <span>%</span>
+      </div>
+    </div>
+    <div class="fc-controls-sep"></div>
+    <div class="fc-control">
+      <label>Forecast Year</label>
+      <div class="fc-control-row">
+        <select id="fc-year"></select>
+      </div>
+    </div>
+    <div style="margin-left:auto; display:flex; gap:8px; align-items:flex-end">
+      <button class="fc-btn fc-btn-primary" id="fc-save-settings">Save Settings</button>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div id="fc-loading" class="fc-loading">
+    <div class="fc-spinner"></div>
+    Loading forecast data…
+  </div>
+
+  <div id="fc-content" style="display:none">
+
+    <!-- Data coverage notice -->
+    <div id="fc-notice" class="fc-notice" style="display:none">
+      <span class="fc-notice-icon">&#8505;&#65039;</span>
+      <span id="fc-notice-text"></span>
+    </div>
+
+    <!-- Summary cards -->
+    <div class="fc-cards" id="fc-cards"></div>
+
+    <!-- Insights -->
+    <div class="fc-insights" id="fc-insights"></div>
+
+    <!-- Seasonal chart -->
+    <div class="fc-section">
+      <div class="fc-section-hdr">
+        <h2>Seasonal Revenue Pattern</h2>
+        <span class="fc-section-sub">Monthly revenue by year — click legend to toggle years</span>
+      </div>
+      <div class="fc-chart-wrap">
+        <canvas id="fc-chart"></canvas>
+      </div>
+    </div>
+
+    <!-- Monthly P&L table -->
+    <div class="fc-section">
+      <div class="fc-section-hdr">
+        <h2 id="fc-pl-title">Budget — 2026</h2>
+        <span class="fc-section-sub">Click cells in future rows to enter planned Meta Spend or Opex</span>
+      </div>
+      <div class="fc-table-wrap">
+        <table class="fc-table">
+          <thead>
+            <tr>
+              <th style="text-align:left">Month</th>
+              <th>Revenue</th>
+              <th title="Click future cells to edit planned Meta spend">Meta Spend ✎</th>
+              <th>COGS</th>
+              <th>Gross Profit</th>
+              <th title="Click future cells to edit planned opex">Opex ✎</th>
+              <th>EBITDA</th>
+              <th>EBITDA %</th>
+            </tr>
+          </thead>
+          <tbody id="fc-tbody"></tbody>
+          <tfoot id="fc-tfoot"></tfoot>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="nav.js"></script>
+<script src="forecast.js"></script>
+</body>
+</html>

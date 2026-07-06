@@ -5498,6 +5498,173 @@ app.delete('/api/creative/jobs/:id', requireAuth, async (req, res) => {
   }
 });
 
+// ── Forecast & Budget ─────────────────────────────────────────────
+
+// GET /api/forecast/data
+// Aggregates monthly Shopify revenue, Meta spend, and Xero P&L + computes auto growth rate
+app.get('/api/forecast/data', requireAuth, async (req, res) => {
+  try {
+    const [shopifyRes, metaRes, xeroRes, settingsRes, budgetsRes] = await Promise.all([
+      pool.query(`
+        SELECT
+          EXTRACT(YEAR  FROM date)::INT AS year,
+          EXTRACT(MONTH FROM date)::INT AS month,
+          ROUND(SUM(revenue)::NUMERIC, 2)  AS revenue,
+          SUM(orders)::INT                  AS orders,
+          COUNT(date)::INT                  AS days_with_data,
+          EXTRACT(DAY FROM (DATE_TRUNC('month', date)
+            + INTERVAL '1 month' - INTERVAL '1 day'))::INT AS days_in_month
+        FROM shopify_daily
+        GROUP BY 1, 2
+        ORDER BY 1, 2
+      `),
+      pool.query(`
+        SELECT
+          EXTRACT(YEAR  FROM date)::INT AS year,
+          EXTRACT(MONTH FROM date)::INT AS month,
+          ROUND(SUM(spend)::NUMERIC, 2)          AS spend,
+          ROUND(SUM(purchase_value)::NUMERIC, 2) AS purchase_value,
+          CASE WHEN SUM(spend) > 0
+               THEN ROUND((SUM(purchase_value)/SUM(spend))::NUMERIC, 2)
+               ELSE 0 END                         AS roas
+        FROM meta_ads_daily
+        GROUP BY 1, 2
+        ORDER BY 1, 2
+      `).catch(() => ({ rows: [] })),
+      pool.query(`
+        SELECT
+          EXTRACT(YEAR  FROM period_start::DATE)::INT AS year,
+          EXTRACT(MONTH FROM period_start::DATE)::INT AS month,
+          ROUND(revenue::NUMERIC, 2)      AS revenue,
+          ROUND(cogs::NUMERIC, 2)         AS cogs,
+          ROUND(gross_profit::NUMERIC, 2) AS gross_profit,
+          ROUND(expenses::NUMERIC, 2)     AS expenses,
+          ROUND(net_profit::NUMERIC, 2)   AS net_profit
+        FROM xero_financials
+        WHERE report_type = 'ProfitAndLoss'
+        ORDER BY period_start
+      `).catch(() => ({ rows: [] })),
+      pool.query(`SELECT key, value FROM forecast_settings`).catch(() => ({ rows: [] })),
+      pool.query(`
+        SELECT year, month,
+               meta_planned::FLOAT,
+               google_planned::FLOAT,
+               opex_planned::FLOAT,
+               notes
+        FROM forecast_monthly_budgets
+        ORDER BY year, month
+      `).catch(() => ({ rows: [] })),
+    ]);
+
+    const settings = {};
+    settingsRes.rows.forEach(r => {
+      try { settings[r.key] = JSON.parse(r.value); } catch { settings[r.key] = r.value; }
+    });
+
+    // Compute CAGR from complete calendar years in shopify_daily
+    const yearTotals = {};
+    shopifyRes.rows.forEach(r => {
+      if (r.days_with_data >= 20) {
+        yearTotals[r.year] = (yearTotals[r.year] || 0) + parseFloat(r.revenue);
+      }
+    });
+    const sortedYears = Object.keys(yearTotals).map(Number).sort();
+    let autoGrowthRate = 0.15;
+    if (sortedYears.length >= 2) {
+      const first = sortedYears[0];
+      const last  = sortedYears[sortedYears.length - 1];
+      const n     = last - first;
+      if (n > 0 && yearTotals[first] > 0) {
+        autoGrowthRate = Math.pow(yearTotals[last] / yearTotals[first], 1 / n) - 1;
+      }
+    }
+
+    res.json({
+      shopifyMonthly: shopifyRes.rows,
+      metaMonthly:    metaRes.rows,
+      xeroMonthly:    xeroRes.rows,
+      budgets:        budgetsRes.rows,
+      settings,
+      yearTotals,
+      autoGrowthRate: parseFloat(autoGrowthRate.toFixed(4)),
+    });
+  } catch (err) {
+    console.error('[forecast] data error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/forecast/settings
+app.get('/api/forecast/settings', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`SELECT key, value FROM forecast_settings ORDER BY key`);
+    const settings = {};
+    rows.forEach(r => {
+      try { settings[r.key] = JSON.parse(r.value); } catch { settings[r.key] = r.value; }
+    });
+    res.json(settings);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/forecast/settings
+app.post('/api/forecast/settings', requireAuth, async (req, res) => {
+  try {
+    for (const [key, value] of Object.entries(req.body)) {
+      await pool.query(
+        `INSERT INTO forecast_settings (key, value, updated_at) VALUES ($1,$2,NOW())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+        [key, JSON.stringify(value)]
+      );
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/forecast/monthly-budget
+app.post('/api/forecast/monthly-budget', requireAuth, async (req, res) => {
+  const { year, month, meta_planned, google_planned, opex_planned, notes } = req.body;
+  if (!year || !month) return res.status(400).json({ error: 'year and month required' });
+  try {
+    await pool.query(
+      `INSERT INTO forecast_monthly_budgets
+         (year, month, meta_planned, google_planned, opex_planned, notes, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,NOW())
+       ON CONFLICT (year, month) DO UPDATE SET
+         meta_planned   = EXCLUDED.meta_planned,
+         google_planned = EXCLUDED.google_planned,
+         opex_planned   = EXCLUDED.opex_planned,
+         notes          = EXCLUDED.notes,
+         updated_at     = NOW()`,
+      [year, month, meta_planned ?? null, google_planned ?? null, opex_planned ?? null, notes ?? null]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/forecast/backfill
+// Triggers historical Shopify revenue sync in the background (returns immediately)
+app.post('/api/forecast/backfill', requireAuth, async (req, res) => {
+  const yearsBack = Math.min(parseInt(req.body.years || 5), 7);
+  const endDate   = new Date().toISOString().slice(0, 10);
+  const startYear = new Date().getFullYear() - yearsBack;
+  const startDate = `${startYear}-01-01`;
+  // Fire and forget
+  shopifyAnalytics.syncDateRange(startDate, endDate).catch(err => {
+    console.error('[forecast] backfill error:', err.message);
+  });
+  res.json({
+    message: `Syncing ${yearsBack} years of history (${startDate} → ${endDate}) in the background. This takes a few minutes — refresh the page when done.`,
+    startDate,
+    endDate,
+  });
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
