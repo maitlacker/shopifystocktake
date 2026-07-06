@@ -1211,6 +1211,125 @@ app.post('/api/smart-pick/plan', requireAuth, async (req, res) => {
   }
 });
 
+// ── Packing Portal ────────────────────────────────────────────────
+
+// GET /api/packing/orders — orders grouped by order number with customer name, for packing portal
+app.get('/api/packing/orders', async (req, res) => {
+  const start = parseInt(req.query.start);
+  const end   = parseInt(req.query.end);
+
+  if (!start || !end || isNaN(start) || isNaN(end) || start > end) {
+    return res.status(400).json({ error: 'Valid start and end order numbers required' });
+  }
+  if (end - start > 500) {
+    return res.status(400).json({ error: 'Range too large — max 500 orders at once' });
+  }
+
+  try {
+    if (!productsCache.length) {
+      productsCache = await fetchAllProducts();
+      lastFetched   = new Date();
+    }
+
+    const variantImageMap = {};
+    const variantStockMap = {};
+    for (const p of productsCache) {
+      const productImg = p.images?.[0]?.src || null;
+      for (const v of p.variants) {
+        const variantImg = p.images?.find(img => img.id === v.image_id)?.src || productImg;
+        variantImageMap[String(v.id)] = variantImg;
+        variantStockMap[String(v.id)] = v.inventory_quantity ?? null;
+      }
+    }
+
+    const orders = [];
+    let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json` +
+      `?status=any&limit=250&fields=id,name,order_number,line_items,note,note_attributes,customer,shipping_address`;
+    let done = false;
+
+    while (url && !done) {
+      const r = await fetch(url, { headers: shopifyHeaders() });
+      if (!r.ok) {
+        const body = await r.text();
+        throw new Error(`Shopify API error ${r.status}: ${body.slice(0, 200)}`);
+      }
+      const data = await r.json();
+
+      for (const order of data.orders) {
+        if (order.order_number < start) { done = true; break; }
+        if (order.order_number > end) continue;
+
+        // Prefer shipping address name (who it's going to), fall back to customer name
+        const sa = order.shipping_address;
+        const cu = order.customer;
+        const customerName = sa
+          ? [sa.first_name, sa.last_name].filter(Boolean).join(' ')
+          : (cu ? [cu.first_name, cu.last_name].filter(Boolean).join(' ') : null);
+
+        const items        = [];
+        const removedItems = [];
+
+        for (const item of (order.line_items || [])) {
+          if ((item.sku || '').toLowerCase() === 'x-redo') continue;
+          if (item.fulfillment_status === 'fulfilled') continue;
+
+          const fulfillableQty = item.fulfillable_quantity ?? item.quantity;
+          if (fulfillableQty <= 0 && item.quantity > 0) {
+            removedItems.push({
+              title:        item.title,
+              variantTitle: (item.variant_title && item.variant_title !== 'Default Title') ? item.variant_title : null,
+              sku:          item.sku || '',
+            });
+            continue;
+          }
+
+          items.push({
+            variantId:    item.variant_id,
+            productId:    item.product_id,
+            title:        item.title,
+            variantTitle: (item.variant_title && item.variant_title !== 'Default Title') ? item.variant_title : null,
+            sku:          item.sku || '',
+            qty:          fulfillableQty,
+            originalQty:  item.quantity,
+            modified:     fulfillableQty < item.quantity,
+            image:        variantImageMap[String(item.variant_id)] || null,
+            stock:        variantStockMap[String(item.variant_id)] ?? null,
+          });
+        }
+
+        if (items.length > 0 || removedItems.length > 0) {
+          const totalItems = items.reduce((s, i) => s + i.qty, 0);
+          orders.push({
+            orderNumber:    order.order_number,
+            orderName:      order.name,
+            customerName:   customerName || null,
+            note:           order.note || null,
+            noteAttributes: (order.note_attributes || []).filter(a => a.value),
+            totalItems,
+            items,
+            removedItems,
+          });
+        }
+      }
+
+      if (!done) {
+        const link = r.headers.get('link');
+        url = null;
+        if (link) {
+          const m = link.match(/<([^>]+)>;\s*rel="next"/);
+          if (m) url = m[1];
+        }
+      }
+    }
+
+    orders.sort((a, b) => a.orderNumber - b.orderNumber);
+    res.json({ orders, orderCount: orders.length });
+  } catch (err) {
+    console.error('[packing] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Restock Planner ───────────────────────────────────────────────
 
 // GET /api/restock/settings
