@@ -7,7 +7,7 @@
 
   const NAV_ITEMS = [
     {
-      label: 'Stocktake',
+      label: 'Warehouse',
       children: [
         { label: 'Stocktake',               href: '/stocktake.html' },
         { label: 'Order Picking',           href: '/picking.html' },
