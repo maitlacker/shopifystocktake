@@ -399,6 +399,27 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_picking_item_states_job
       ON picking_item_states(job_id);
 
+    -- ── Packing Audit ────────────────────────────────────────────────
+
+    CREATE TABLE IF NOT EXISTS packing_audit (
+      id               SERIAL PRIMARY KEY,
+      order_number     INT NOT NULL,
+      order_name       TEXT NOT NULL,
+      initials         TEXT,
+      customer_name    TEXT,
+      total_items      INT,
+      range_start      INT,
+      range_end        INT,
+      started_at       TIMESTAMPTZ NOT NULL,
+      packed_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      pack_taps        INT NOT NULL DEFAULT 0,
+      nav_events       INT NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_packing_audit_packed_at
+      ON packing_audit(packed_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_packing_audit_initials
+      ON packing_audit(initials, packed_at DESC);
+
     -- ── Restock Planner ──────────────────────────────────────────────
 
     -- Global defaults (singleton row, id=1 always)

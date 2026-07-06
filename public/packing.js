@@ -15,6 +15,13 @@ let packedSet  = new Set();  // set of packed orderNumbers
 let packKey    = '';
 let packTimer  = null;
 let packPrimed = false;
+let sessionInitials = '';    // captured at load time
+let rangeStartNum   = null;
+let rangeEndNum     = null;
+
+// ── Audit tracking ─────────────────────────────────────────────────
+// Per order-number: { startedAt, packTaps, navEvents }
+const auditMap = new Map();
 
 // ── View helpers ───────────────────────────────────────────────────
 function showView(id) {
@@ -51,6 +58,10 @@ async function loadOrders() {
     orders  = data.orders;
     packKey = `pack_${start}_${end}`;
     packedSet = new Set();
+    auditMap.clear();
+    sessionInitials = (document.getElementById('pk-initials').value || '').trim().toUpperCase();
+    rangeStartNum   = parseInt(start);
+    rangeEndNum     = parseInt(end);
 
     // Restore any previously packed orders from this session
     try {
@@ -75,6 +86,11 @@ function renderOrder(idx) {
   const order    = orders[idx];
   if (!order) return;
   const isPacked = packedSet.has(order.orderNumber);
+
+  // Start the clock for this order if not yet seen
+  if (!auditMap.has(order.orderNumber)) {
+    auditMap.set(order.orderNumber, { startedAt: new Date(), packTaps: 0, navEvents: 0 });
+  }
 
   // Header
   document.getElementById('pk-order-num').textContent    = order.orderName;
@@ -209,6 +225,10 @@ function onPackBtn() {
 
   if (isPacked) return; // already packed — button is inert
 
+  // Count every tap on the pack button for this order
+  const audit = auditMap.get(order.orderNumber);
+  if (audit) audit.packTaps++;
+
   if (packPrimed) {
     // Second tap within window — confirm
     clearTimeout(packTimer);
@@ -238,8 +258,32 @@ function clearPackPrime() {
   if (btn) btn.classList.remove('primed');
 }
 
+// ── Save audit record ──────────────────────────────────────────────
+function saveAudit(order) {
+  const audit   = auditMap.get(order.orderNumber) || {};
+  const packedAt = new Date();
+  fetch('/api/packing/audit', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      orderNumber:  order.orderNumber,
+      orderName:    order.orderName,
+      initials:     sessionInitials || null,
+      customerName: order.customerName || null,
+      totalItems:   order.totalItems,
+      rangeStart:   rangeStartNum,
+      rangeEnd:     rangeEndNum,
+      startedAt:    audit.startedAt ? audit.startedAt.toISOString() : packedAt.toISOString(),
+      packedAt:     packedAt.toISOString(),
+      packTaps:     audit.packTaps  || 0,
+      navEvents:    audit.navEvents || 0,
+    }),
+  }).catch(() => {}); // fire-and-forget; don't block the UI
+}
+
 // ── Confirm pack ───────────────────────────────────────────────────
 function confirmPack(order) {
+  saveAudit(order);
   packedSet.add(order.orderNumber);
   savePacked();
 
@@ -273,6 +317,13 @@ function showDone() {
 function goTo(idx) {
   if (idx < 0 || idx >= orders.length) return;
   clearPackPrime();
+
+  // Count this navigation away from the current order
+  const curOrder = orders[currentIdx];
+  if (curOrder && !packedSet.has(curOrder.orderNumber)) {
+    const audit = auditMap.get(curOrder.orderNumber);
+    if (audit) audit.navEvents++;
+  }
 
   const body = document.getElementById('pk-body');
   body.style.transition = 'none';

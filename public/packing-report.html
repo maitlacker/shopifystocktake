@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Packing Report — TSS WMS</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body { background: #f1f5f9; }
+    .pr-wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 60px; }
+
+    /* ── Page header ─────────────────────────────────────── */
+    .pr-page-hdr { margin-bottom: 20px; }
+    .pr-page-hdr h1 { font-size: 1.45rem; font-weight: 800; color: #1a1a2e; margin: 0 0 4px; }
+    .pr-page-hdr p  { font-size: 0.85rem; color: #64748b; margin: 0; }
+
+    /* ── Period tabs ─────────────────────────────────────── */
+    .pr-tabs {
+      display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;
+    }
+    .pr-tab {
+      padding: 8px 18px; border: 2px solid #e2e8f0; border-radius: 10px;
+      background: #fff; font-size: 0.85rem; font-weight: 700; color: #64748b;
+      cursor: pointer; transition: all .15s;
+    }
+    .pr-tab:hover   { border-color: #94a3b8; color: #334155; }
+    .pr-tab.active  {
+      border-color: #6366f1; background: #6366f1; color: #fff;
+    }
+
+    /* ── Summary cards ───────────────────────────────────── */
+    .pr-stats {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 12px; margin-bottom: 24px;
+    }
+    .pr-stat-card {
+      background: #fff; border-radius: 12px; padding: 16px 18px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.07);
+    }
+    .pr-stat-val  { font-size: 1.7rem; font-weight: 800; color: #1a1a2e; line-height: 1; }
+    .pr-stat-lbl  { font-size: 0.75rem; color: #64748b; margin-top: 4px; }
+
+    /* ── Per-person table ────────────────────────────────── */
+    .pr-section-title {
+      font-size: 0.8rem; font-weight: 700; color: #64748b; text-transform: uppercase;
+      letter-spacing: .06em; margin: 0 0 10px;
+    }
+    .pr-person-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 10px; margin-bottom: 28px;
+    }
+    .pr-person-card {
+      background: #fff; border-radius: 12px; padding: 14px 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.07);
+      display: flex; align-items: center; gap: 14px;
+    }
+    .pr-person-avatar {
+      width: 40px; height: 40px; border-radius: 10px;
+      background: #6366f1; color: #fff; font-size: 1rem; font-weight: 800;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .pr-person-info { flex: 1; min-width: 0; }
+    .pr-person-name { font-size: 0.95rem; font-weight: 700; color: #1a1a2e; }
+    .pr-person-stats { font-size: 0.75rem; color: #64748b; margin-top: 2px; }
+
+    /* ── Detail table ────────────────────────────────────── */
+    .pr-table-wrap { background: #fff; border-radius: 14px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+    .pr-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .pr-table thead tr { background: #f8fafc; }
+    .pr-table th {
+      padding: 11px 14px; text-align: left;
+      font-size: 0.72rem; font-weight: 700; color: #64748b;
+      text-transform: uppercase; letter-spacing: .05em;
+      border-bottom: 1px solid #e2e8f0; white-space: nowrap;
+    }
+    .pr-table td {
+      padding: 10px 14px; border-bottom: 1px solid #f1f5f9;
+      color: #334155;
+    }
+    .pr-table tr:last-child td { border-bottom: none; }
+    .pr-table tr:hover td { background: #f8fafc; }
+    .pr-table .col-order { font-weight: 700; color: #1a1a2e; }
+    .pr-table .col-time  {
+      font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
+    }
+    .pr-table .col-time.slow { color: #dc2626; }
+    .pr-table .col-time.fast { color: #16a34a; }
+    .pr-table .col-initials {
+      font-weight: 800; font-size: 0.82rem; color: #6366f1;
+      background: #ede9fe; padding: 3px 9px; border-radius: 6px;
+      display: inline-block;
+    }
+    .pr-table .col-taps { color: #94a3b8; font-size: 0.82rem; }
+
+    .pr-empty {
+      text-align: center; padding: 48px 24px; color: #94a3b8; font-size: 0.9rem;
+    }
+    .pr-loading {
+      text-align: center; padding: 48px 24px; color: #64748b;
+    }
+    .pr-spinner {
+      width: 32px; height: 32px; border: 3px solid #e2e8f0;
+      border-top-color: #6366f1; border-radius: 50%;
+      animation: spin .7s linear infinite; margin: 0 auto 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 600px) {
+      .pr-table th:nth-child(5),
+      .pr-table td:nth-child(5) { display: none; } /* hide nav events on small screens */
+    }
+  </style>
+</head>
+<body>
+<header></header>
+<div class="pr-wrap">
+
+  <div class="pr-page-hdr">
+    <h1>&#128230; Packing Report</h1>
+    <p>Audit of all packing activity — time per order, who packed, and interaction detail.</p>
+  </div>
+
+  <!-- Period filter -->
+  <div class="pr-tabs">
+    <button class="pr-tab active" data-days="1">Today</button>
+    <button class="pr-tab" data-days="7">Last 7 Days</button>
+    <button class="pr-tab" data-days="30">Last 30 Days</button>
+  </div>
+
+  <!-- Loading -->
+  <div id="pr-loading" class="pr-loading">
+    <div class="pr-spinner"></div>
+    Loading packing data…
+  </div>
+
+  <div id="pr-content" style="display:none">
+
+    <!-- Summary cards -->
+    <div class="pr-stats">
+      <div class="pr-stat-card">
+        <div class="pr-stat-val" id="st-orders">—</div>
+        <div class="pr-stat-lbl">Orders Packed</div>
+      </div>
+      <div class="pr-stat-card">
+        <div class="pr-stat-val" id="st-items">—</div>
+        <div class="pr-stat-lbl">Items Packed</div>
+      </div>
+      <div class="pr-stat-card">
+        <div class="pr-stat-val" id="st-avg-time">—</div>
+        <div class="pr-stat-lbl">Avg Time / Order</div>
+      </div>
+      <div class="pr-stat-card">
+        <div class="pr-stat-val" id="st-sec-per-item">—</div>
+        <div class="pr-stat-lbl">Avg Sec / Item</div>
+      </div>
+      <div class="pr-stat-card">
+        <div class="pr-stat-val" id="st-packers">—</div>
+        <div class="pr-stat-lbl">Packers Active</div>
+      </div>
+    </div>
+
+    <!-- Per-person breakdown -->
+    <p class="pr-section-title">By Person</p>
+    <div id="pr-people" class="pr-person-grid"></div>
+
+    <!-- Detail table -->
+    <p class="pr-section-title">Full Audit Log</p>
+    <div class="pr-table-wrap">
+      <table class="pr-table">
+        <thead>
+          <tr>
+            <th>Order</th>
+            <th>Customer</th>
+            <th>Items</th>
+            <th>Packer</th>
+            <th>Time on Order</th>
+            <th>Pack Taps</th>
+            <th>Nav Events</th>
+            <th>Packed At</th>
+          </tr>
+        </thead>
+        <tbody id="pr-tbody"></tbody>
+      </table>
+      <div id="pr-empty" class="pr-empty" style="display:none">No packing records in this period.</div>
+    </div>
+
+  </div>
+
+</div>
+<script src="nav.js"></script>
+<script src="packing-report.js"></script>
+</body>
+</html>

@@ -32,6 +32,7 @@
         { label: 'Sales Reconciliation', href: '/reconcile.html' },
         { label: 'GST Gap Report',       href: '/gst-gap.html' },
         { label: 'Picking Performance',   href: '/picking-report.html' },
+        { label: 'Packing Report',        href: '/packing-report.html', restrict: ['accounts@theselfstyler.com'] },
       ],
     },
     {

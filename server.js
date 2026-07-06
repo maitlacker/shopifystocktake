@@ -1330,6 +1330,72 @@ app.get('/api/packing/orders', async (req, res) => {
   }
 });
 
+// POST /api/packing/audit — record a completed pack event
+app.post('/api/packing/audit', async (req, res) => {
+  const { orderNumber, orderName, initials, customerName, totalItems,
+          rangeStart, rangeEnd, startedAt, packedAt, packTaps, navEvents } = req.body;
+
+  if (!orderNumber || !orderName) {
+    return res.status(400).json({ error: 'orderNumber and orderName required' });
+  }
+
+  try {
+    await pool.query(`
+      INSERT INTO packing_audit
+        (order_number, order_name, initials, customer_name, total_items,
+         range_start, range_end, started_at, packed_at, pack_taps, nav_events)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    `, [
+      orderNumber,
+      orderName,
+      initials    || null,
+      customerName || null,
+      totalItems  || 0,
+      rangeStart  || null,
+      rangeEnd    || null,
+      startedAt   ? new Date(startedAt) : new Date(),
+      packedAt    ? new Date(packedAt)  : new Date(),
+      packTaps    || 0,
+      navEvents   || 0,
+    ]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[packing/audit] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/packing/report — audit report data
+app.get('/api/packing/report', async (req, res) => {
+  const days = Math.max(1, Math.min(365, parseInt(req.query.days) || 7));
+
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        id,
+        order_number,
+        order_name,
+        initials,
+        customer_name,
+        total_items,
+        range_start,
+        range_end,
+        started_at,
+        packed_at,
+        GREATEST(0, EXTRACT(EPOCH FROM (packed_at - started_at))::int) AS time_seconds,
+        pack_taps,
+        nav_events
+      FROM packing_audit
+      WHERE packed_at >= NOW() - ($1 || ' days')::interval
+      ORDER BY packed_at DESC
+    `, [days]);
+    res.json(rows);
+  } catch (err) {
+    console.error('[packing/report] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Restock Planner ───────────────────────────────────────────────
 
 // GET /api/restock/settings
