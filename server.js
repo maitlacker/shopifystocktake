@@ -5512,7 +5512,7 @@ app.get('/api/forecast/data', requireAuth, async (req, res) => {
           ROUND(SUM(revenue)::NUMERIC, 2)  AS revenue,
           SUM(orders)::INT                  AS orders,
           COUNT(date)::INT                  AS days_with_data,
-          EXTRACT(DAY FROM (DATE_TRUNC('month', date)
+          EXTRACT(DAY FROM (DATE_TRUNC('month', MIN(date))
             + INTERVAL '1 month' - INTERVAL '1 day'))::INT AS days_in_month
         FROM shopify_daily
         GROUP BY 1, 2
