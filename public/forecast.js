@@ -120,15 +120,29 @@ function forecastRevenue(year, month) {
 }
 
 // ── Revenue resolver ─────────────────────────────────────────────────
-// Returns { value, type: 'actual'|'xero'|'forecast' }
+// Returns { value, type: 'shopify'|'xero'|'forecast' }
+// Priority for PAST months: Xero first (ex-GST, refunds netted, closed books)
+//                            then Shopify (inc-GST, no refund deductions)
+// Priority for CURRENT/FUTURE: Shopify first (real-time), then Xero, then forecast
 function getRevenue(year, month) {
-  const sm = shopifyMap[`${year}-${month}`];
-  if (sm && sm.days_with_data / sm.days_in_month >= 0.9)
-    return { value: parseFloat(sm.revenue), type: 'actual' };
+  const now    = new Date();
+  const curY   = now.getFullYear();
+  const curM   = now.getMonth() + 1;
+  const isPast = year < curY || (year === curY && month < curM);
 
+  const sm = shopifyMap[`${year}-${month}`];
   const xr = xeroMap[`${year}-${month}`];
-  if (xr && xr.revenue > 0)
-    return { value: xr.revenue, type: 'xero' };
+  const shopifyComplete = sm && sm.days_with_data / sm.days_in_month >= 0.9;
+
+  if (isPast) {
+    // Closed month: prefer Xero (accurate ex-GST P&L), fall back to Shopify, then forecast
+    if (xr && xr.revenue > 0)          return { value: parseFloat(xr.revenue), type: 'xero' };
+    if (shopifyComplete)                return { value: parseFloat(sm.revenue), type: 'shopify' };
+  } else {
+    // Current / future: prefer Shopify live data, then Xero, then forecast
+    if (shopifyComplete)                return { value: parseFloat(sm.revenue), type: 'shopify' };
+    if (xr && xr.revenue > 0)          return { value: parseFloat(xr.revenue), type: 'xero' };
+  }
 
   return { value: forecastRevenue(year, month), type: 'forecast' };
 }
@@ -291,8 +305,9 @@ function renderNotice() {
   if (!rows.length) { el.style.display = 'none'; return; }
   const earliest = rows[0];
   document.getElementById('fc-notice-text').innerHTML =
-    `Shopify data from ${MONTH_NAMES[earliest.month - 1]} ${earliest.year}. ` +
-    `Forecast values shown in <em style="color:#818cf8">purple italic</em>.`;
+    `Revenue source priority — past months: <strong>Xero first</strong> (ex-GST, refunds netted) then Shopify. ` +
+    `Current/future: Shopify first, then Xero, then <em style="color:#818cf8">forecast</em>. ` +
+    `Each cell shows its source badge. Shopify data from ${MONTH_NAMES[earliest.month - 1]} ${earliest.year}.`;
   el.style.display = '';
 }
 
@@ -578,6 +593,13 @@ function renderTable() {
     const fcBadge   = !isCurrent && revType === 'forecast' ? `<span class="fc-fc-badge">FC</span>` : '';
     const saleBadge = sale ? `<span class="fc-sale-badge ${sale.badge}">${sale.badge === 'bf' ? 'BF' : 'EOFY'}</span>` : '';
 
+    // Revenue source badge (shown on all rows so the data origin is always transparent)
+    const srcBadge = revType === 'shopify'
+      ? `<span class="fc-src-badge shopify" title="Shopify live data (inc. GST, refunds not deducted)">S</span>`
+      : revType === 'xero'
+      ? `<span class="fc-src-badge xero" title="Xero P&amp;L (ex-GST, refunds netted)">X</span>`
+      : `<span class="fc-src-badge forecast" title="Forecast (no actuals available)">FC</span>`;
+
     // EBITDA colouring + vs-target annotation
     let ebitdaCls = '';
     let vsTarget  = '';
@@ -610,7 +632,7 @@ function renderTable() {
 
     rows.push(`<tr class="${rowCls}">
       <td class="fc-col-month">${MONTH_FULL[m - 1]}${nowBadge}${fcBadge}${saleBadge}</td>
-      <td class="${revType === 'forecast' ? 'fc-forecast-val' : ''}">${fmt(rev)}</td>
+      <td class="${revType === 'forecast' ? 'fc-forecast-val' : ''}">${fmt(rev)}<br>${srcBadge}</td>
       ${editTd('meta_planned', metaVal || null)}
       <td>${fmt(cogs)}</td>
       <td class="fc-gp">${fmt(gp)}</td>
