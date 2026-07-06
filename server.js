@@ -5654,10 +5654,14 @@ app.post('/api/forecast/backfill', requireAuth, async (req, res) => {
   const endDate   = new Date().toISOString().slice(0, 10);
   const startYear = new Date().getFullYear() - yearsBack;
   const startDate = `${startYear}-01-01`;
-  // Fire and forget
-  shopifyAnalytics.syncDateRange(startDate, endDate).catch(err => {
-    console.error('[forecast] backfill error:', err.message);
-  });
+  // Fire and forget — wrapped so a failure cannot crash the process
+  try {
+    shopifyAnalytics.syncDateRange(startDate, endDate).catch(err => {
+      console.error('[forecast] backfill error:', err.message);
+    });
+  } catch (err) {
+    console.error('[forecast] backfill launch error:', err.message);
+  }
   res.json({
     message: `Syncing ${yearsBack} years of history (${startDate} → ${endDate}) in the background. This takes a few minutes — refresh the page when done.`,
     startDate,

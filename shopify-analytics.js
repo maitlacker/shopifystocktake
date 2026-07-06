@@ -179,4 +179,4 @@ function startCron() {
   console.log(`[shopify-analytics] Daily sync cron scheduled: ${DAILY_CRON}`);
 }
 
-module.exports = { runSync, getStatus, startCron };
+module.exports = { runSync, syncDateRange, getStatus, startCron };
