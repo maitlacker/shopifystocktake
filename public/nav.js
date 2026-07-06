@@ -2,8 +2,8 @@
 (function () {
   const path = window.location.pathname;
 
-  // Emails allowed to see restricted nav items (BI Dashboard)
-  const BI_ALLOWED = ['accounts@theselfstyler.com', 'bianca@theselfstyler.com'];
+  // Admin group is shown only to users on this list
+  const ADMIN_ONLY = ['accounts@theselfstyler.com', 'bianca@theselfstyler.com'];
 
   const NAV_ITEMS = [
     {
@@ -21,18 +21,15 @@
     {
       label: 'Reports',
       children: [
-        { label: 'BI Dashboard',          href: '/bi-dashboard.html', restrict: BI_ALLOWED },
-        { label: 'Weekly Pulse',          href: '/weekly-pulse.html', restrict: BI_ALLOWED },
         { label: 'Sales Velocity',        href: '/velocity.html' },
         { label: 'Total Stock Value',     href: '/total-stock.html' },
         { label: 'Restock Planner',       href: '/restock.html' },
         { label: 'Shopify Daily Report',  href: '/shopify-report.html' },
         { label: 'Google Ads',            href: '/google-ads.html' },
         { label: 'Ads Asset Sync',        href: '/ads-assets.html' },
-        { label: 'Sales Reconciliation', href: '/reconcile.html' },
-        { label: 'GST Gap Report',       href: '/gst-gap.html' },
+        { label: 'Sales Reconciliation',  href: '/reconcile.html' },
+        { label: 'GST Gap Report',        href: '/gst-gap.html' },
         { label: 'Picking Performance',   href: '/picking-report.html' },
-        { label: 'Packing Report',        href: '/packing-report.html', restrict: ['accounts@theselfstyler.com'] },
       ],
     },
     {
@@ -41,12 +38,6 @@
         { label: 'Scan Label',       href: '/label-scanner.html' },
         { label: 'Reference Images', href: '/label-reference.html' },
         { label: 'Scan History',     href: '/scan-history.html' },
-      ],
-    },
-    {
-      label: 'Syncing',
-      children: [
-        { label: 'Manage Syncs', href: '/syncing.html' },
       ],
     },
     {
@@ -65,7 +56,6 @@
       children: [
         { label: 'Leave Calendar', href: '/leave-calendar.html' },
         { label: 'Leave Request',  href: '/leave-request.html' },
-        { label: 'Leave Admin',    href: '/leave-admin.html', restrict: ['accounts@theselfstyler.com'] },
       ],
     },
     {
@@ -79,6 +69,17 @@
         { label: 'Creative Review',  href: '/creative-review.html' },
       ],
     },
+    {
+      label: 'Admin',
+      restrict: ADMIN_ONLY,
+      children: [
+        { label: 'BI Dashboard',   href: '/bi-dashboard.html' },
+        { label: 'Weekly Pulse',   href: '/weekly-pulse.html' },
+        { label: 'Packing Report', href: '/packing-report.html' },
+        { label: 'Leave Admin',    href: '/leave-admin.html' },
+        { label: 'Manage Syncs',   href: '/syncing.html' },
+      ],
+    },
   ];
 
   function isGroupActive(children) {
@@ -89,20 +90,23 @@
     return path.endsWith(href);
   }
 
-  const dropdownsHtml = NAV_ITEMS.map((group) => `
-    <div class="nav-dropdown${isGroupActive(group.children) ? ' nav-dropdown--active' : ''}">
+  const dropdownsHtml = NAV_ITEMS.map((group) => {
+    const groupAttr = group.restrict
+      ? ` style="display:none" data-restrict-group="${group.restrict.join(',')}"` : '';
+    return `
+    <div class="nav-dropdown${isGroupActive(group.children) ? ' nav-dropdown--active' : ''}"${groupAttr}>
       <button class="nav-btn" aria-haspopup="true" aria-expanded="false">
         ${group.label}<span class="nav-caret">&#9660;</span>
       </button>
       <div class="nav-dropdown-menu">
         ${group.children.map((c) => {
-          const restricted  = c.restrict ? ` style="display:none" data-restrict="${c.restrict.join(',')}"` : '';
-          const activeCls   = isItemActive(c.href) ? ' nav-dropdown-item--active' : '';
+          const restricted = c.restrict ? ` style="display:none" data-restrict="${c.restrict.join(',')}"` : '';
+          const activeCls  = isItemActive(c.href) ? ' nav-dropdown-item--active' : '';
           return `<a href="${c.href}" class="nav-dropdown-item${activeCls}"${restricted}>${c.label}</a>`;
         }).join('')}
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 
   const header = document.querySelector('header');
   if (header) {
@@ -123,7 +127,7 @@
     `;
   }
 
-  // Fetch logged-in user
+  // Fetch logged-in user, then reveal restricted groups and items
   fetch('/api/me')
     .then((r) => {
       if (r.status === 401) { window.location.href = '/login'; return null; }
@@ -132,7 +136,13 @@
     .then((user) => {
       if (!user) return;
 
-      // Reveal restricted nav items if this user is on the allow-list
+      // Reveal restricted nav groups (entire dropdown)
+      document.querySelectorAll('[data-restrict-group]').forEach((el) => {
+        const allowed = el.dataset.restrictGroup.split(',');
+        if (allowed.includes(user.email)) el.style.display = '';
+      });
+
+      // Reveal restricted nav items (individual links within a group)
       document.querySelectorAll('[data-restrict]').forEach((el) => {
         const allowed = el.dataset.restrict.split(',');
         if (allowed.includes(user.email)) el.style.display = '';
