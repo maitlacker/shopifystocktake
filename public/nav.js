@@ -108,7 +108,10 @@
   if (header) {
     header.innerHTML = `
       <div class="header-inner">
-        <a href="/" class="site-title">The Self Styler WMS</a>
+        <a href="/" class="site-logo">
+          <span class="logo-wordmark">The Self Styler</span>
+          <span class="logo-sub">WMS</span>
+        </a>
         <nav class="main-nav">${dropdownsHtml}</nav>
         <div class="nav-user">
           <span id="nav-user-name" class="nav-user-name"></span>
