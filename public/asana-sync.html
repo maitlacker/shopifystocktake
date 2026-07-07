@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Asana Sync — TSS WMS</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body { background: #f8fafc; }
+    .as-wrap { max-width: 1320px; margin: 0 auto; padding: 24px 16px 80px; }
+
+    /* ── Header ── */
+    .as-hdr { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+    .as-hdr h1 { font-size: 1.4rem; font-weight: 800; color: #1e293b; margin: 0 0 3px; }
+    .as-hdr p  { font-size: 0.84rem; color: #64748b; margin: 0; }
+
+    /* ── Cards ── */
+    .as-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap: 12px; margin-bottom: 20px; }
+    .as-card  { background: #fff; border-radius: 12px; padding: 16px 18px; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+    .as-card-val { font-size: 1.2rem; font-weight: 800; color: #1e293b; }
+    .as-card-lbl { font-size: 0.7rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .05em; margin-top: 4px; }
+    .as-card-sub { font-size: 0.75rem; color: #94a3b8; margin-top: 2px; }
+    .as-card.ok  .as-card-val { color: #16a34a; }
+    .as-card.err .as-card-val { color: #dc2626; }
+
+    /* ── Toolbar ── */
+    .as-toolbar { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; background: #fff; border-radius: 14px; padding: 14px 18px; box-shadow: 0 1px 3px rgba(0,0,0,.07); margin-bottom: 18px; }
+    .as-ctrl    { display: flex; flex-direction: column; gap: 5px; }
+    .as-ctrl label { font-size: 0.68rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .05em; }
+    .as-ctrl select, .as-ctrl input {
+      height: 34px; border: 1.5px solid #e2e8f0; border-radius: 8px;
+      padding: 0 10px; font-size: 0.86rem; font-weight: 600; color: #1e293b;
+      background: #f8fafc; min-width: 220px;
+    }
+    .as-ctrl select:focus, .as-ctrl input:focus { outline: none; border-color: #6366f1; }
+    .as-btn {
+      height: 34px; border: none; border-radius: 8px; font-size: 0.82rem; font-weight: 700;
+      padding: 0 16px; cursor: pointer; transition: all .15s;
+    }
+    .as-btn-primary   { background: #6366f1; color: #fff; }
+    .as-btn-primary:hover { background: #4f46e5; }
+    .as-btn-secondary { background: #f1f5f9; color: #475569; border: 1.5px solid #e2e8f0; }
+    .as-btn-secondary:hover { background: #e2e8f0; }
+    .as-btn:disabled  { opacity: .5; cursor: default; }
+
+    /* ── Section ── */
+    .as-section { background: #fff; border-radius: 14px; padding: 20px 22px; box-shadow: 0 1px 3px rgba(0,0,0,.07); margin-bottom: 18px; }
+    .as-section-hdr { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+    .as-section-hdr h2 { font-size: 0.95rem; font-weight: 800; color: #1e293b; margin: 0; }
+    .as-section-sub    { font-size: 0.78rem; color: #94a3b8; }
+    .as-badge { font-size: 0.65rem; font-weight: 800; background: #ede9fe; color: #6366f1; padding: 2px 7px; border-radius: 6px; }
+
+    /* ── Notice ── */
+    .as-notice { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 12px 16px; font-size: 0.82rem; color: #1d4ed8; margin-bottom: 16px; display: flex; gap: 10px; align-items: flex-start; }
+    .as-notice.warn { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+    .as-notice.err  { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+
+    /* ── Table ── */
+    .as-table-wrap { overflow-x: auto; border-radius: 10px; }
+    .as-table { width: 100%; border-collapse: collapse; font-size: 0.81rem; min-width: 700px; }
+    .as-table thead tr { background: #f8fafc; }
+    .as-table th {
+      padding: 8px 12px; text-align: left; white-space: nowrap;
+      font-size: 0.67rem; font-weight: 700; color: #64748b;
+      text-transform: uppercase; letter-spacing: .05em;
+      border-bottom: 1.5px solid #e2e8f0;
+    }
+    .as-table td { padding: 9px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: top; color: #334155; }
+    .as-table tr:last-child td { border-bottom: none; }
+    .as-table tr:hover td { background: #f8fafc; }
+
+    /* Task name cell */
+    .as-task-name { font-weight: 700; color: #1e293b; }
+    .as-task-sub  { font-size: 0.72rem; color: #64748b; margin-top: 3px; }
+
+    /* Expand row */
+    .as-expand-btn {
+      background: none; border: 1px solid #e2e8f0; border-radius: 5px;
+      padding: 2px 8px; font-size: 0.7rem; cursor: pointer; color: #64748b; white-space: nowrap;
+    }
+    .as-expand-btn:hover { background: #f1f5f9; }
+    .as-expand-row td { background: #f8fafc; padding: 0; }
+    .as-expand-inner { padding: 14px 18px 18px; }
+
+    /* Custom fields grid */
+    .as-cf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap: 8px; margin-top: 8px; }
+    .as-cf-item { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; }
+    .as-cf-name { font-size: 0.67rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 3px; }
+    .as-cf-val  { font-size: 0.84rem; font-weight: 600; color: #1e293b; }
+    .as-cf-val.empty { color: #cbd5e1; font-style: italic; font-weight: 400; }
+
+    /* Tags / chips */
+    .as-chip { display: inline-block; font-size: 0.65rem; font-weight: 700; padding: 2px 7px; border-radius: 99px; background: #e0e7ff; color: #3730a3; margin: 1px 2px; }
+    .as-chip.done { background: #dcfce7; color: #166534; }
+    .as-chip.open { background: #f1f5f9; color: #475569; }
+    .as-chip.over { background: #fee2e2; color: #991b1b; }
+
+    /* Subtasks */
+    .as-subtask-list { margin-top: 10px; }
+    .as-subtask-hdr  { font-size: 0.68rem; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+    .as-subtask-row  { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; border-bottom: 1px solid #f1f5f9; font-size: 0.8rem; }
+    .as-subtask-row:last-child { border-bottom: none; }
+    .as-subtask-name { flex: 1; font-weight: 600; color: #1e293b; }
+    .as-subtask-name.done { text-decoration: line-through; color: #94a3b8; }
+
+    /* Notes */
+    .as-notes-lbl { font-size: 0.68rem; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: .05em; margin: 10px 0 4px; }
+    .as-notes-body { font-size: 0.8rem; color: #475569; white-space: pre-wrap; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px; max-height: 140px; overflow-y: auto; }
+
+    /* Loading spinner */
+    .as-spinner { width: 28px; height: 28px; border: 3px solid #e2e8f0; border-top-color: #6366f1; border-radius: 50%; animation: spin .7s linear infinite; margin: 0 auto; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .as-loading { text-align: center; padding: 40px; color: #64748b; }
+
+    /* Field schema panel */
+    .as-schema-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px,1fr)); gap: 8px; }
+    .as-schema-item { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; }
+    .as-schema-name { font-weight: 700; color: #1e293b; font-size: 0.82rem; }
+    .as-schema-type { font-size: 0.68rem; color: #64748b; background: #e2e8f0; border-radius: 4px; padding: 1px 5px; margin-left: 5px; }
+    .as-schema-opts { font-size: 0.72rem; color: #94a3b8; margin-top: 3px; }
+
+    /* Search */
+    .as-search-wrap { position: relative; }
+    .as-search-wrap input { padding-left: 30px; width: 220px; }
+    .as-search-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 0.9rem; pointer-events: none; }
+  </style>
+</head>
+<body>
+<header></header>
+<div class="as-wrap">
+
+  <!-- Page header -->
+  <div class="as-hdr">
+    <div>
+      <h1>Asana Sync</h1>
+      <p>Read-only connection to Asana — explore project data before mapping to WMS Production Orders</p>
+    </div>
+    <button class="as-btn as-btn-primary" id="as-refresh-btn" style="display:none">&#8635; Refresh Tasks</button>
+  </div>
+
+  <!-- Connection notice -->
+  <div id="as-connect-notice" style="display:none"></div>
+
+  <!-- Connection cards -->
+  <div class="as-cards" id="as-cards"></div>
+
+  <!-- Toolbar -->
+  <div class="as-toolbar" id="as-toolbar" style="display:none">
+    <div class="as-ctrl">
+      <label>Workspace</label>
+      <select id="as-workspace-sel"></select>
+    </div>
+    <div class="as-ctrl">
+      <label>Project</label>
+      <select id="as-project-sel"><option value="">— select a project —</option></select>
+    </div>
+    <button class="as-btn as-btn-primary" id="as-load-tasks-btn" disabled>Load Tasks</button>
+    <div class="as-ctrl as-search-wrap" id="as-search-wrap" style="display:none">
+      <label>Filter tasks</label>
+      <span class="as-search-icon">&#128269;</span>
+      <input type="text" id="as-search" placeholder="Search name, fields…">
+    </div>
+    <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:0.8rem;color:#64748b;cursor:pointer">
+      <input type="checkbox" id="as-hide-done"> Hide completed
+    </label>
+  </div>
+
+  <!-- Custom field schema -->
+  <div class="as-section" id="as-schema-section" style="display:none">
+    <div class="as-section-hdr">
+      <h2>Custom Field Schema</h2>
+      <span class="as-section-sub">All custom fields defined on this project — useful for planning the WMS mapping</span>
+    </div>
+    <div class="as-schema-grid" id="as-schema-grid"></div>
+  </div>
+
+  <!-- Tasks -->
+  <div class="as-section" id="as-tasks-section" style="display:none">
+    <div class="as-section-hdr">
+      <h2>Tasks</h2>
+      <span class="as-badge" id="as-task-count">0</span>
+      <span class="as-section-sub" id="as-task-sub"></span>
+    </div>
+    <div id="as-tasks-loading" class="as-loading" style="display:none">
+      <div class="as-spinner"></div>
+      <p style="margin-top:12px">Fetching tasks from Asana…</p>
+    </div>
+    <div class="as-table-wrap">
+      <table class="as-table" id="as-tasks-table">
+        <thead>
+          <tr>
+            <th style="width:28px"></th>
+            <th>Task name</th>
+            <th>Section</th>
+            <th>Status</th>
+            <th>Due</th>
+            <th>Assignee</th>
+            <th>Subtasks</th>
+            <th>Custom fields (preview)</th>
+          </tr>
+        </thead>
+        <tbody id="as-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+<script src="nav.js"></script>
+<script src="asana-sync.js"></script>
+</body>
+</html>

@@ -5677,6 +5677,68 @@ app.post('/api/forecast/backfill', requireAuth, async (req, res) => {
   });
 });
 
+// ── Asana Integration ─────────────────────────────────────────────
+
+const asana = require('./asana');
+
+// GET /api/asana/me — verify token + return user/workspaces
+app.get('/api/asana/me', requireAuth, async (req, res) => {
+  if (!process.env.ASANA_ACCESS_TOKEN) {
+    return res.status(400).json({ error: 'ASANA_ACCESS_TOKEN env var not set' });
+  }
+  try {
+    const me = await asana.getMe();
+    res.json(me);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// GET /api/asana/projects?workspace=<gid>
+app.get('/api/asana/projects', requireAuth, async (req, res) => {
+  if (!process.env.ASANA_ACCESS_TOKEN) {
+    return res.status(400).json({ error: 'ASANA_ACCESS_TOKEN env var not set' });
+  }
+  const { workspace } = req.query;
+  if (!workspace) return res.status(400).json({ error: 'workspace query param required' });
+  try {
+    const projects = await asana.getProjects(workspace);
+    res.json(projects);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// GET /api/asana/tasks?project=<gid>
+app.get('/api/asana/tasks', requireAuth, async (req, res) => {
+  if (!process.env.ASANA_ACCESS_TOKEN) {
+    return res.status(400).json({ error: 'ASANA_ACCESS_TOKEN env var not set' });
+  }
+  const { project } = req.query;
+  if (!project) return res.status(400).json({ error: 'project query param required' });
+  try {
+    const data = await asana.getProjectTasks(project);
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// GET /api/asana/subtasks?task=<gid>
+app.get('/api/asana/subtasks', requireAuth, async (req, res) => {
+  if (!process.env.ASANA_ACCESS_TOKEN) {
+    return res.status(400).json({ error: 'ASANA_ACCESS_TOKEN env var not set' });
+  }
+  const { task } = req.query;
+  if (!task) return res.status(400).json({ error: 'task query param required' });
+  try {
+    const subtasks = await asana.getSubtasks(task);
+    res.json(subtasks);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
