@@ -5739,6 +5739,30 @@ app.get('/api/asana/subtasks', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/asana/mapping — load saved field mapping config
+app.get('/api/asana/mapping', requireAuth, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT config FROM asana_po_mapping WHERE id = 1');
+    res.json(r.rows.length ? r.rows[0].config : {});
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/asana/mapping — save field mapping config
+app.post('/api/asana/mapping', requireAuth, async (req, res) => {
+  try {
+    await pool.query(`
+      INSERT INTO asana_po_mapping (id, config)
+      VALUES (1, $1)
+      ON CONFLICT (id) DO UPDATE SET config = $1, updated_at = NOW()
+    `, [JSON.stringify(req.body)]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 

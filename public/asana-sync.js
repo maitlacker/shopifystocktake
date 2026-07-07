@@ -7,6 +7,7 @@ let customFields    = [];
 let selectedProject = null;
 let expandedRows    = new Set();
 let subtaskCache    = {};
+let savedMapping    = {};
 
 // ── Helpers ───────────────────────────────────────────────────────────
 function escHtml(s) {
@@ -182,6 +183,8 @@ async function loadTasks() {
 
     renderSchema();
     renderTasks();
+    await loadMapping();
+    renderMapping();
   } catch (err) {
     document.getElementById('as-tasks-loading').style.display = 'none';
     document.getElementById('as-tbody').innerHTML =
@@ -372,6 +375,290 @@ async function renderExpandRow(task, expandRow) {
     ${subtaskHtml}
     ${notesHtml}
   `;
+}
+
+// ── Field Mapping ─────────────────────────────────────────────────────
+
+const PO_HEADER_FIELDS = [
+  { key: 'po_number',     label: 'PO Number',          req: 'required',       desc: 'Unique identifier for this order' },
+  { key: 'supplier_name', label: 'Supplier Name',       req: 'required',       desc: 'Manufacturer / supplier name' },
+  { key: 'order_date',    label: 'Order Date',          req: 'default:today',  desc: 'Date the order was placed' },
+  { key: 'delivery_date', label: 'Delivery Date',       req: 'optional',       desc: 'Expected arrival date' },
+  { key: 'freight_mode',  label: 'Freight Mode',        req: 'default:sea',    desc: '"sea" or "air"' },
+  { key: 'currency',      label: 'Currency',            req: 'default:AUD',    desc: 'Currency code — AUD, USD, CNY…' },
+  { key: 'exchange_rate', label: 'Exchange Rate',       req: 'default:1.0',    desc: 'Multiplier to AUD (e.g. 0.63)' },
+  { key: 'shipping_cost', label: 'Freight Cost',        req: 'default:0',      desc: 'Total freight cost in AUD' },
+  { key: 'include_gst',   label: 'Prices incl. GST?',  req: 'default:false',  desc: 'true or false — are unit prices GST-inclusive?' },
+  { key: 'notes',         label: 'Notes',               req: 'optional',       desc: 'PO notes / comments' },
+];
+
+const PO_LINE_FIELDS = [
+  { key: 'product_name', label: 'Product Name',  req: 'required',         desc: 'Full product / style name' },
+  { key: 'product_code', label: 'Product Code',  req: 'optional',         desc: 'SKU or internal product code' },
+  { key: 'line_type',    label: 'Line Type',     req: 'default:restock',  desc: '"restock" (replenishment) or "new" (new style)' },
+  { key: 'unit_price',   label: 'Unit Price',    req: 'default:0',        desc: 'Cost per unit in the PO currency' },
+  { key: 'quantities',   label: 'Quantities',    req: 'required',         desc: 'Text parsed to size JSON — e.g. "S:10, M:20, L:15"' },
+  { key: 'total_qty',    label: 'Total Qty',     req: 'default:computed', desc: 'Auto-summed from quantities if not mapped' },
+];
+
+async function loadMapping() {
+  try {
+    const res = await fetch('/api/asana/mapping');
+    if (res.ok) savedMapping = await res.json();
+  } catch {}
+}
+
+function buildSourceOptions(selectedVal) {
+  const stdOptions = [
+    { val: 'std_name',     label: 'Asana: Task name' },
+    { val: 'std_notes',    label: 'Asana: Task notes' },
+    { val: 'std_due_on',   label: 'Asana: Due date' },
+    { val: 'std_start_on', label: 'Asana: Start date' },
+    { val: 'std_section',  label: 'Asana: Section name' },
+    { val: 'std_assignee', label: 'Asana: Assignee name' },
+    { val: 'std_gid',      label: 'Asana: Task GID' },
+  ];
+
+  const cfOptions = customFields.map(cfs => {
+    const cf = cfs.custom_field || cfs;
+    const typeLabel = cf.type ? ` (${cf.type})` : '';
+    return { val: `cf_${cf.gid}`, label: `Custom: ${cf.name}${typeLabel}`, gid: cf.gid };
+  });
+
+  const sel = v => v === selectedVal ? ' selected' : '';
+
+  let html = `<option value=""${sel('')}>— not mapped / use default —</option>`;
+  html += `<option value="fixed"${sel('fixed')}>Fixed value…</option>`;
+  html += `<optgroup label="Standard Asana fields">`;
+  html += stdOptions.map(o => `<option value="${o.val}"${sel(o.val)}>${escHtml(o.label)}</option>`).join('');
+  html += `</optgroup>`;
+  if (cfOptions.length) {
+    html += `<optgroup label="Custom fields">`;
+    html += cfOptions.map(o => `<option value="${o.val}"${sel(o.val)}>${escHtml(o.label)}</option>`).join('');
+    html += `</optgroup>`;
+  }
+  return html;
+}
+
+function reqBadgeHtml(req) {
+  if (req === 'required') return `<span class="map-req-star">&#9733; Required</span>`;
+  if (req === 'optional')  return `<span class="map-req-opt">optional</span>`;
+  const dflt = req.replace('default:', '');
+  return `<span class="map-req-dflt">default: ${escHtml(dflt)}</span>`;
+}
+
+function fieldRowHtml(f, sectionKey) {
+  const saved    = (savedMapping[sectionKey] || {})[f.key] || {};
+  let sourceVal  = '';
+  if (saved.source === 'fixed')    sourceVal = 'fixed';
+  else if (saved.source === 'standard') sourceVal = `std_${saved.std_field}`;
+  else if (saved.source === 'custom')   sourceVal = `cf_${saved.cf_gid}`;
+
+  const fixedVal     = saved.fixed_value || '';
+  const fixedDisplay = saved.source === 'fixed' ? '' : 'display:none';
+
+  return `
+    <tr>
+      <td>
+        <div class="map-field-name">${escHtml(f.key)}</div>
+        <div class="map-field-desc">${escHtml(f.desc)}</div>
+      </td>
+      <td style="white-space:nowrap">${reqBadgeHtml(f.req)}</td>
+      <td>
+        <div class="map-source-wrap">
+          <select class="map-source-sel" data-field="${escHtml(f.key)}" data-section="${escHtml(sectionKey)}">
+            ${buildSourceOptions(sourceVal)}
+          </select>
+          <input type="text" class="map-fixed-val" placeholder="value…" value="${escHtml(fixedVal)}"
+            data-field="${escHtml(f.key)}" data-section="${escHtml(sectionKey)}"
+            style="${fixedDisplay}">
+        </div>
+      </td>
+    </tr>`;
+}
+
+function renderMapping() {
+  const section = document.getElementById('as-mapping-section');
+  const body    = document.getElementById('as-mapping-body');
+  const structure = savedMapping.structure || 'task_per_po';
+
+  const lineNote = structure === 'task_per_po'
+    ? '<span style="font-size:0.68rem;font-weight:400;color:#94a3b8;margin-left:6px">mapped from subtasks</span>'
+    : '<span style="font-size:0.68rem;font-weight:400;color:#94a3b8;margin-left:6px">mapped from task</span>';
+
+  body.innerHTML = `
+    <div class="map-structure">
+      <span class="map-struct-lbl">Structure</span>
+      <label>
+        <input type="radio" name="map-structure" value="task_per_po" ${structure === 'task_per_po' ? 'checked' : ''}>
+        One Asana task = one production order &nbsp;<small style="color:#94a3b8">(line items come from subtasks)</small>
+      </label>
+      <label>
+        <input type="radio" name="map-structure" value="task_per_line" ${structure === 'task_per_line' ? 'checked' : ''}>
+        One Asana task = one line item &nbsp;<small style="color:#94a3b8">(PO header comes from task custom fields)</small>
+      </label>
+    </div>
+
+    <div class="map-sub-hdr">Order header fields</div>
+    <div class="as-table-wrap">
+      <table class="map-table">
+        <thead><tr><th>WMS field</th><th>Required?</th><th>Asana source</th></tr></thead>
+        <tbody>${PO_HEADER_FIELDS.map(f => fieldRowHtml(f, 'po_fields')).join('')}</tbody>
+      </table>
+    </div>
+
+    <div class="map-sub-hdr">Line item fields ${lineNote}</div>
+    <div class="as-table-wrap">
+      <table class="map-table">
+        <thead><tr><th>WMS field</th><th>Required?</th><th>Asana source</th></tr></thead>
+        <tbody>${PO_LINE_FIELDS.map(f => fieldRowHtml(f, 'line_fields')).join('')}</tbody>
+      </table>
+    </div>
+
+    <div id="as-map-preview-wrap"></div>
+
+    <div class="map-actions">
+      <span id="as-map-saved-msg" class="map-saved-ok" style="display:none">&#10003; Mapping saved</span>
+      <button class="as-btn as-btn-secondary" id="as-map-preview-btn">Preview from first task</button>
+      <button class="as-btn as-btn-primary" id="as-map-save-btn">Save mapping</button>
+    </div>
+  `;
+
+  section.style.display = '';
+
+  // Toggle fixed input visibility on source change
+  body.querySelectorAll('.map-source-sel').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const wrap = sel.closest('.map-source-wrap');
+      const input = wrap.querySelector('.map-fixed-val');
+      if (input) input.style.display = sel.value === 'fixed' ? '' : 'none';
+    });
+  });
+
+  // Structure change → re-render with current selections persisted
+  body.querySelectorAll('input[name="map-structure"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      savedMapping = collectMapping();
+      renderMapping();
+    });
+  });
+
+  document.getElementById('as-map-save-btn').addEventListener('click', saveMapping);
+  document.getElementById('as-map-preview-btn').addEventListener('click', previewMapping);
+}
+
+function collectMapping() {
+  const structure = document.querySelector('input[name="map-structure"]:checked')?.value || 'task_per_po';
+  const result = { structure, po_fields: {}, line_fields: {} };
+
+  document.querySelectorAll('.map-source-sel').forEach(sel => {
+    const field   = sel.dataset.field;
+    const section = sel.dataset.section;
+    const val     = sel.value;
+    if (!val || !field || !section) return;
+
+    const wrap     = sel.closest('.map-source-wrap');
+    const fixedInp = wrap ? wrap.querySelector('.map-fixed-val') : null;
+
+    if (val === 'fixed') {
+      result[section][field] = { source: 'fixed', fixed_value: fixedInp?.value || '' };
+    } else if (val.startsWith('std_')) {
+      result[section][field] = { source: 'standard', std_field: val.slice(4) };
+    } else if (val.startsWith('cf_')) {
+      const cfGid = val.slice(3);
+      const cfDef = customFields.find(cfs => (cfs.custom_field || cfs).gid === cfGid);
+      const cfName = cfDef ? (cfDef.custom_field || cfDef).name : cfGid;
+      result[section][field] = { source: 'custom', cf_gid: cfGid, cf_name: cfName };
+    }
+  });
+
+  return result;
+}
+
+async function saveMapping() {
+  const config = collectMapping();
+  const btn    = document.getElementById('as-map-save-btn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  try {
+    const res = await fetch('/api/asana/mapping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || 'Save failed');
+    savedMapping = config;
+
+    const msg = document.getElementById('as-map-saved-msg');
+    msg.style.display = '';
+    setTimeout(() => { msg.style.display = 'none'; }, 3000);
+  } catch (err) {
+    alert('Save failed: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save mapping';
+  }
+}
+
+function resolveFieldValue(fieldDef, task) {
+  if (!fieldDef) return null;
+  const { source, std_field, cf_gid, fixed_value } = fieldDef;
+  if (source === 'fixed') return fixed_value;
+  if (source === 'standard') {
+    if (std_field === 'name')     return task.name;
+    if (std_field === 'notes')    return task.notes ? (task.notes.slice(0, 80) + (task.notes.length > 80 ? '…' : '')) : null;
+    if (std_field === 'due_on')   return task.due_on;
+    if (std_field === 'start_on') return task.start_on;
+    if (std_field === 'section')  return task.memberships?.[0]?.section?.name;
+    if (std_field === 'assignee') return task.assignee?.name;
+    if (std_field === 'gid')      return task.gid;
+  }
+  if (source === 'custom') {
+    const cf = (task.custom_fields || []).find(c => c.gid === cf_gid);
+    return cf ? cfValue(cf) : null;
+  }
+  return null;
+}
+
+function previewMapping() {
+  const config  = collectMapping();
+  const wrap    = document.getElementById('as-map-preview-wrap');
+
+  const task = allTasks.find(t => !t.completed) || allTasks[0];
+  if (!task) {
+    wrap.innerHTML = '<p style="color:#94a3b8;font-size:0.8rem;margin-top:12px">No tasks loaded — load tasks first to preview.</p>';
+    return;
+  }
+
+  // Line items come from first subtask when task_per_po
+  const isPerPo  = config.structure === 'task_per_po';
+  const lineTask = isPerPo ? (subtaskCache[task.gid]?.[0] || null) : task;
+  const lineNote = isPerPo
+    ? (lineTask ? `from subtask: "${escHtml(lineTask.name)}"` : 'no subtasks loaded — expand task first to load subtasks')
+    : `from task: "${escHtml(task.name)}"`;
+
+  function previewRows(fields, sectionKey, srcTask) {
+    if (!srcTask) return `<div class="map-pv-grid" style="color:#94a3b8;font-size:0.78rem;padding:6px 0">Subtask not loaded — click ▶ Details on a task to cache its subtasks.</div>`;
+    const fieldMap = config[sectionKey] || {};
+    return `<div class="map-pv-grid">` +
+      fields.map(f => {
+        const val = resolveFieldValue(fieldMap[f.key], srcTask);
+        return `<div class="map-pv-key">${escHtml(f.key)}</div>
+                <div class="map-pv-val ${val ? '' : 'empty'}">${val ? escHtml(String(val)) : 'not mapped'}</div>`;
+      }).join('') +
+    `</div>`;
+  }
+
+  wrap.innerHTML = `
+    <div class="map-preview-box" style="margin-top:16px">
+      <h4>Preview — order header &nbsp;<span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:0.75rem;color:#64748b">from task: "${escHtml(task.name)}"</span></h4>
+      ${previewRows(PO_HEADER_FIELDS, 'po_fields', task)}
+      <div style="font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin:14px 0 6px">
+        Line item &nbsp;<span style="font-weight:400;text-transform:none;letter-spacing:0;color:#94a3b8">${lineNote}</span>
+      </div>
+      ${previewRows(PO_LINE_FIELDS, 'line_fields', lineTask)}
+    </div>`;
 }
 
 // ── Event wiring ──────────────────────────────────────────────────────

@@ -123,6 +123,36 @@
     .as-search-wrap { position: relative; }
     .as-search-wrap input { padding-left: 30px; width: 220px; }
     .as-search-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 0.9rem; pointer-events: none; }
+
+    /* ── Field mapping ── */
+    .map-structure { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; padding: 12px 16px; background: #f8fafc; border-radius: 10px; border: 1px solid #e2e8f0; }
+    .map-structure .map-struct-lbl { font-size: 0.68rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .05em; }
+    .map-structure label { display: flex; align-items: center; gap: 6px; font-size: 0.84rem; font-weight: 600; color: #1e293b; cursor: pointer; }
+    .map-sub-hdr { font-size: 0.72rem; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: .05em; margin: 18px 0 10px; display: flex; align-items: center; gap: 10px; }
+    .map-sub-hdr::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
+    .map-table { width: 100%; border-collapse: collapse; }
+    .map-table th { font-size: 0.65rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: .05em; padding: 6px 10px; text-align: left; border-bottom: 1.5px solid #e2e8f0; }
+    .map-table td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    .map-table tr:last-child td { border-bottom: none; }
+    .map-field-name { font-weight: 700; color: #1e293b; font-size: 0.84rem; font-family: monospace; }
+    .map-field-desc { font-size: 0.7rem; color: #94a3b8; margin-top: 2px; max-width: 260px; }
+    .map-req-star { font-size: 0.65rem; font-weight: 800; background: #fef2f2; color: #dc2626; padding: 2px 7px; border-radius: 6px; white-space: nowrap; }
+    .map-req-dflt { font-size: 0.65rem; font-weight: 700; color: #64748b; background: #f1f5f9; padding: 2px 7px; border-radius: 6px; white-space: nowrap; font-family: monospace; }
+    .map-req-opt  { font-size: 0.65rem; color: #94a3b8; }
+    .map-source-wrap { display: flex; gap: 6px; align-items: center; }
+    .map-source-sel { height: 30px; border: 1.5px solid #e2e8f0; border-radius: 6px; padding: 0 8px; font-size: 0.8rem; color: #1e293b; background: #f8fafc; min-width: 230px; }
+    .map-source-sel:focus { outline: none; border-color: #6366f1; }
+    .map-fixed-val { height: 30px; border: 1.5px solid #e2e8f0; border-radius: 6px; padding: 0 8px; font-size: 0.8rem; color: #1e293b; background: #fff; width: 130px; }
+    .map-fixed-val:focus { outline: none; border-color: #6366f1; }
+    .map-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
+    .map-saved-ok { color: #16a34a; font-size: 0.8rem; font-weight: 700; margin-right: auto; }
+    .map-preview-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 18px; margin-top: 16px; }
+    .map-preview-box h4 { font-size: 0.75rem; font-weight: 800; color: #1e293b; margin: 0 0 10px; text-transform: uppercase; letter-spacing: .05em; }
+    .map-pv-grid { display: grid; grid-template-columns: 180px 1fr; gap: 3px 12px; }
+    .map-pv-row { display: contents; }
+    .map-pv-key { font-size: 0.72rem; font-family: monospace; color: #94a3b8; padding: 3px 0; border-bottom: 1px solid #f1f5f9; }
+    .map-pv-val { font-size: 0.78rem; font-weight: 600; color: #1e293b; padding: 3px 0; border-bottom: 1px solid #f1f5f9; }
+    .map-pv-val.empty { color: #cbd5e1; font-style: italic; font-weight: 400; }
   </style>
 </head>
 <body>
@@ -202,6 +232,15 @@
         <tbody id="as-tbody"></tbody>
       </table>
     </div>
+  </div>
+
+  <!-- Field mapping -->
+  <div class="as-section" id="as-mapping-section" style="display:none">
+    <div class="as-section-hdr">
+      <h2>PO Field Mapping</h2>
+      <span class="as-section-sub">Map Asana fields to WMS Production Order fields — save to use when creating POs</span>
+    </div>
+    <div id="as-mapping-body"></div>
   </div>
 
 </div>

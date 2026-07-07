@@ -726,6 +726,12 @@ async function initDb() {
       UNIQUE(year, month)
     );
     ALTER TABLE forecast_monthly_budgets ADD COLUMN IF NOT EXISTS purchasing_planned DECIMAL(12,2);
+
+    CREATE TABLE IF NOT EXISTS asana_po_mapping (
+      id         INTEGER PRIMARY KEY DEFAULT 1,
+      config     JSONB NOT NULL DEFAULT '{}',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 }
 
