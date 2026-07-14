@@ -2,6 +2,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const express      = require('express');
 const fetch        = require('node-fetch');
 const path         = require('path');
+const PDFDocument  = require('pdfkit');
 const session      = require('express-session');
 const PgSession    = require('connect-pg-simple')(session);
 
@@ -1866,6 +1867,244 @@ app.delete('/api/production-orders/:id', async (req, res) => {
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// GET /api/production-orders/:id/pdf — download PO as PDF
+app.get('/api/production-orders/:id/pdf', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  try {
+    const { rows: [po] } = await pool.query('SELECT * FROM production_orders WHERE id=$1', [id]);
+    if (!po) return res.status(404).json({ error: 'Not found' });
+    const { rows: lines } = await pool.query(
+      'SELECT * FROM production_order_lines WHERE order_id=$1 ORDER BY line_number ASC', [id]);
+
+    const safe = (po.po_number || String(id)).replace(/[^a-zA-Z0-9\-_]/g, '_');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="PO-${safe}.pdf"`);
+
+    const doc = new PDFDocument({ margin: 50, size: 'A4', autoFirstPage: true });
+    doc.pipe(res);
+    buildPOPdf(doc, po, lines);
+    doc.end();
+  } catch (err) {
+    console.error('PDF error:', err.message);
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+  }
+});
+
+function buildPOPdf(doc, po, lines) {
+  const W     = doc.page.width;   // 595
+  const M     = 50;
+  const FULL  = W - 2 * M;       // 495
+  const BRAND = '#6366f1';
+  const INK   = '#1e293b';
+  const MUTED = '#64748b';
+  const LIGHT = '#f8fafc';
+  const RULE  = '#e2e8f0';
+
+  function pdfDate(d) {
+    if (!d) return '—';
+    return new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+  function fmtNum(n, dp = 2) { return (parseFloat(n) || 0).toFixed(dp); }
+  function fmtAud(n) {
+    return '$' + (parseFloat(n) || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  let y = M;
+
+  // ── Header ────────────────────────────────────────────────────────
+  doc.font('Helvetica-Bold').fontSize(22).fillColor(INK)
+     .text('The Self Styler', M, y, { lineBreak: false });
+
+  doc.font('Helvetica-Bold').fontSize(16).fillColor(BRAND)
+     .text('PURCHASE ORDER', M, y, { width: FULL, align: 'right', lineBreak: false });
+
+  y += 26;
+  doc.font('Helvetica').fontSize(8.5).fillColor(MUTED)
+     .text('theselfstyler.com.au', M, y, { lineBreak: false });
+
+  doc.font('Helvetica-Bold').fontSize(11).fillColor(INK)
+     .text(po.po_number || `#${po.id}`, M, y, { width: FULL, align: 'right', lineBreak: false });
+
+  y += 13;
+  const statusPalette = { draft: '#64748b', confirmed: '#1d4ed8', received: '#166534', cancelled: '#b91c1c' };
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(statusPalette[po.status] || '#64748b')
+     .text((po.status || 'draft').toUpperCase(), M, y, { width: FULL, align: 'right', lineBreak: false });
+
+  y += 22;
+  doc.moveTo(M, y).lineTo(W - M, y).lineWidth(1).strokeColor(RULE).stroke();
+  y += 16;
+
+  // ── Info columns ─────────────────────────────────────────────────
+  const COL2 = M + Math.round(FULL * 0.52);
+
+  doc.font('Helvetica-Bold').fontSize(7.5).fillColor(MUTED)
+     .text('SUPPLIER', M, y, { lineBreak: false });
+  doc.font('Helvetica-Bold').fontSize(7.5).fillColor(MUTED)
+     .text('ORDER DETAILS', COL2, y, { lineBreak: false });
+  y += 13;
+
+  doc.font('Helvetica-Bold').fontSize(11).fillColor(INK)
+     .text(po.supplier_name || '—', M, y, { width: COL2 - M - 10, lineBreak: false });
+
+  const detailRows = [
+    ['Order Date',    pdfDate(po.order_date)],
+    ['Delivery Date', pdfDate(po.delivery_date)],
+    ['Freight',       (po.freight_mode || 'sea').toUpperCase()],
+    ['Currency',      po.currency || 'AUD'],
+  ];
+  if (po.currency && po.currency !== 'AUD') {
+    detailRows.push(['Exchange Rate', `1 ${po.currency} = ${fmtNum(po.exchange_rate, 4)} AUD`]);
+  }
+
+  let dy = y;
+  detailRows.forEach(([lbl, val]) => {
+    doc.font('Helvetica').fontSize(8.5).fillColor(MUTED)
+       .text(lbl + ':', COL2, dy, { width: 90, lineBreak: false });
+    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(INK)
+       .text(val, COL2 + 92, dy, { width: W - M - COL2 - 92, lineBreak: false });
+    dy += 13;
+  });
+
+  y = Math.max(y + 22, dy) + 12;
+
+  doc.moveTo(M, y).lineTo(W - M, y).lineWidth(0.5).strokeColor(RULE).stroke();
+  y += 14;
+
+  // ── Table ─────────────────────────────────────────────────────────
+  // Columns: # | Product | Code | Sizes | Qty | Unit | Total  (sum = 495)
+  const COLS = [22, 128, 58, 112, 30, 70, 75];
+  const curr = po.currency || 'AUD';
+  const HDRS = ['#', 'Product Name', 'Code', 'Quantities', 'Qty', `Unit (${curr})`, `Total (${curr})`];
+  const ALGN = ['center', 'left', 'left', 'left', 'right', 'right', 'right'];
+  const PAD  = 5;
+  const HDR_H = 20;
+  const ROW_H = 20;
+
+  doc.rect(M, y, FULL, HDR_H).fill(BRAND);
+  let cx = M;
+  COLS.forEach((cw, i) => {
+    doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#ffffff')
+       .text(HDRS[i], cx + PAD, y + 6, { width: cw - PAD * 2, align: ALGN[i], lineBreak: false });
+    cx += cw;
+  });
+  y += HDR_H;
+
+  let subtotalForeign = 0;
+
+  lines.forEach((line, idx) => {
+    const qtyObj = typeof line.quantities === 'object' && line.quantities !== null
+      ? line.quantities
+      : (typeof line.quantities === 'string' ? JSON.parse(line.quantities || '{}') : {});
+
+    const sizeParts = Object.entries(qtyObj)
+      .filter(([, v]) => parseInt(v) > 0)
+      .map(([k, v]) => `${k}:${v}`)
+      .join('  ');
+
+    const totalQty = line.total_qty
+      || Object.values(qtyObj).reduce((s, v) => s + (parseInt(v) || 0), 0);
+    const unitPrice = parseFloat(line.unit_price) || 0;
+    const lineTotal = totalQty * unitPrice;
+    subtotalForeign += lineTotal;
+
+    if (idx % 2 === 1) {
+      doc.rect(M, y, FULL, ROW_H).fill(LIGHT);
+    }
+
+    const cells = [
+      String(line.line_number || idx + 1),
+      line.product_name || '',
+      line.product_code || '',
+      sizeParts || '—',
+      String(totalQty || 0),
+      fmtNum(unitPrice),
+      fmtNum(lineTotal),
+    ];
+
+    cx = M;
+    cells.forEach((text, i) => {
+      doc.font('Helvetica').fontSize(8.5).fillColor(INK)
+         .text(text, cx + PAD, y + 6, { width: COLS[i] - PAD * 2, align: ALGN[i], lineBreak: false });
+      cx += COLS[i];
+    });
+
+    y += ROW_H;
+    doc.moveTo(M, y).lineTo(W - M, y).lineWidth(0.25).strokeColor(RULE).stroke();
+
+    // Basic page overflow guard
+    if (y > doc.page.height - 200) {
+      doc.addPage();
+      y = M;
+    }
+  });
+
+  // ── Totals ────────────────────────────────────────────────────────
+  y += 20;
+  const TOT_X    = M + Math.round(FULL * 0.57);
+  const TOT_FULL = W - M - TOT_X;
+  const LBL_W    = Math.round(TOT_FULL * 0.52);
+  const VAL_X    = TOT_X + LBL_W;
+  const VAL_W    = TOT_FULL - LBL_W;
+
+  function totLine(lbl, val, bold = false, color = null) {
+    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(9)
+       .fillColor(color || MUTED)
+       .text(lbl, TOT_X, y, { width: LBL_W, lineBreak: false });
+    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(9)
+       .fillColor(color || (bold ? INK : MUTED))
+       .text(val, VAL_X, y, { width: VAL_W, align: 'right', lineBreak: false });
+    y += 15;
+  }
+
+  const exRate  = parseFloat(po.exchange_rate) || 1;
+  const freight = parseFloat(po.shipping_cost) || 0;
+  const isForeign = curr !== 'AUD';
+  const subtotalAud = subtotalForeign * exRate;
+  const beforeGst   = subtotalAud + freight;
+  const gst         = po.include_gst ? beforeGst * 0.1 : 0;
+  const grandTotal  = beforeGst + gst;
+
+  if (isForeign) {
+    totLine(`Subtotal (${curr})`, fmtNum(subtotalForeign));
+    totLine(`Rate ×${fmtNum(exRate, 4)}`, '');
+    totLine('Subtotal AUD', fmtAud(subtotalAud));
+  } else {
+    totLine('Subtotal AUD', fmtAud(subtotalAud));
+  }
+  totLine('Freight', fmtAud(freight));
+  if (po.include_gst) totLine('GST (10%)', fmtAud(gst));
+
+  doc.moveTo(TOT_X, y - 2).lineTo(W - M, y - 2).lineWidth(1.5).strokeColor(INK).stroke();
+  y += 5;
+
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(MUTED)
+     .text('GRAND TOTAL AUD', TOT_X, y, { width: LBL_W, lineBreak: false });
+  doc.font('Helvetica-Bold').fontSize(12).fillColor(BRAND)
+     .text(fmtAud(grandTotal), VAL_X, y - 2, { width: VAL_W, align: 'right', lineBreak: false });
+  y += 22;
+
+  // ── Notes ─────────────────────────────────────────────────────────
+  if (po.notes && po.notes.trim()) {
+    y += 8;
+    doc.moveTo(M, y).lineTo(W - M, y).lineWidth(0.5).strokeColor(RULE).stroke();
+    y += 12;
+    doc.font('Helvetica-Bold').fontSize(7.5).fillColor(MUTED).text('NOTES', M, y, { lineBreak: false });
+    y += 13;
+    doc.font('Helvetica').fontSize(9).fillColor(INK).text(po.notes.trim(), M, y, { width: FULL });
+    y = doc.y + 8;
+  }
+
+  // ── Footer ────────────────────────────────────────────────────────
+  const footerY = doc.page.height - 32;
+  doc.moveTo(M, footerY - 8).lineTo(W - M, footerY - 8).lineWidth(0.3).strokeColor(RULE).stroke();
+  doc.font('Helvetica').fontSize(7).fillColor(MUTED)
+     .text(
+       `The Self Styler WMS  •  Generated ${new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}`,
+       M, footerY, { width: FULL, align: 'center', lineBreak: false }
+     );
+}
 
 // ── Product routes ─────────────────────────────────────────────────
 app.get('/api/products/refresh', async (req, res) => {

@@ -67,6 +67,9 @@ async function loadPO(id) {
     renderLines();
     recalcTotals();
     // Show extra action buttons for existing POs
+    const pdfBtn = document.getElementById('btn-pdf');
+    pdfBtn.href = `/api/production-orders/${id}/pdf`;
+    pdfBtn.style.display = '';
     document.getElementById('btn-delete').style.display = '';
     if (currentPO.status === 'draft') {
       document.getElementById('btn-confirm-po').style.display = '';
