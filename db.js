@@ -732,6 +732,14 @@ async function initDb() {
       config     JSONB NOT NULL DEFAULT '{}',
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS sellthrough_alerts_log (
+      product_id        TEXT NOT NULL PRIMARY KEY,
+      product_title     TEXT NOT NULL DEFAULT '',
+      tier              TEXT NOT NULL,
+      sell_through_pct  NUMERIC(5,2),
+      alerted_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 }
 

@@ -22,6 +22,7 @@
       label: 'Reports',
       children: [
         { label: 'Sales Velocity',        href: '/velocity.html' },
+        { label: 'Sell-Through',          href: '/sell-through.html' },
         { label: 'Total Stock Value',     href: '/total-stock.html' },
         { label: 'Restock Planner',       href: '/restock.html' },
         { label: 'Shopify Daily Report',  href: '/shopify-report.html' },

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sell-Through Report — The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .st-page-hdr { margin-bottom: 20px; }
+    .st-page-hdr h1 { font-size: 1.4rem; font-weight: 700; color: #1e293b; margin: 0 0 4px; }
+    .st-page-hdr p  { font-size: 0.85rem; color: #64748b; margin: 0; }
+
+    /* Controls */
+    .st-controls { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+                   padding: 16px 20px; display: flex; gap: 20px; align-items: flex-end;
+                   flex-wrap: wrap; margin-bottom: 20px; }
+    .st-ctrl { display: flex; flex-direction: column; gap: 4px; }
+    .st-ctrl label { font-size: 0.7rem; font-weight: 700; color: #64748b;
+                     text-transform: uppercase; letter-spacing: 0.06em; }
+    .st-ctrl input { padding: 7px 10px; border: 1.5px solid #e2e8f0; border-radius: 7px;
+                     font-size: 0.88rem; color: #1e293b; background: #fff; }
+    .st-ctrl input:focus { outline: none; border-color: #6366f1; }
+    .st-meta { font-size: 0.75rem; color: #94a3b8; align-self: center; }
+
+    /* Summary tiles */
+    .st-summary { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 18px; }
+    .st-tile { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+               padding: 16px 18px; cursor: pointer; transition: box-shadow 0.15s, border-color 0.15s; }
+    .st-tile:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.07); }
+    .st-tile.active { border-color: currentColor; }
+    .st-tile-count { font-size: 2.1rem; font-weight: 800; line-height: 1; }
+    .st-tile-label { font-size: 0.8rem; font-weight: 700; margin-top: 4px; }
+    .st-tile-sub   { font-size: 0.68rem; color: #94a3b8; margin-top: 2px; }
+    .st-tile.critical .st-tile-count, .st-tile.critical .st-tile-label { color: #dc2626; }
+    .st-tile.action.st-tile-count,   .st-tile.action .st-tile-label   { color: #ea580c; }
+    .st-tile.action .st-tile-count                                     { color: #ea580c; }
+    .st-tile.monitor .st-tile-count, .st-tile.monitor .st-tile-label  { color: #b45309; }
+    .st-tile.healthy .st-tile-count, .st-tile.healthy .st-tile-label  { color: #16a34a; }
+
+    /* Filter tabs */
+    .st-tabs { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .st-tab  { padding: 6px 16px; border-radius: 20px; border: 1.5px solid #e2e8f0;
+               background: #fff; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+               color: #64748b; transition: all 0.15s; }
+    .st-tab:hover  { border-color: #94a3b8; color: #1e293b; }
+    .st-tab.active { background: #1e293b; color: #fff; border-color: #1e293b; }
+
+    /* Product card */
+    .st-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+               padding: 16px 18px; margin-bottom: 10px;
+               border-left: 4px solid transparent; }
+    .st-card.critical { border-left-color: #dc2626; }
+    .st-card.action   { border-left-color: #f97316; }
+    .st-card.monitor  { border-left-color: #eab308; }
+    .st-card.healthy  { border-left-color: #22c55e; }
+
+    .st-card-top  { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 14px; }
+    .st-card-img  { width: 46px; height: 46px; object-fit: cover; border-radius: 6px;
+                    background: #f1f5f9; flex-shrink: 0; }
+    .st-card-img-ph { width: 46px; height: 46px; border-radius: 6px; background: #f1f5f9;
+                      display: flex; align-items: center; justify-content: center;
+                      font-size: 1.2rem; flex-shrink: 0; }
+    .st-card-info { flex: 1; min-width: 0; }
+    .st-card-title { font-weight: 700; color: #1e293b; font-size: 0.94rem;
+                     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .st-card-type  { font-size: 0.73rem; color: #94a3b8; margin-top: 1px; }
+    .st-card-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+
+    /* Tier badge */
+    .st-badge { display: inline-block; padding: 2px 10px; border-radius: 20px;
+                font-size: 0.69rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+    .st-badge.critical { background: #fee2e2; color: #b91c1c; }
+    .st-badge.action   { background: #ffedd5; color: #c2410c; }
+    .st-badge.monitor  { background: #fef9c3; color: #92400e; }
+    .st-badge.healthy  { background: #dcfce7; color: #15803d; }
+
+    /* Flag chip */
+    .st-flag { display: inline-block; padding: 2px 8px; border-radius: 12px;
+               font-size: 0.66rem; font-weight: 600; background: #f1f5f9; color: #475569; }
+
+    /* Stats row */
+    .st-stats { display: flex; border-top: 1px solid #f1f5f9; padding-top: 12px; gap: 0; }
+    .st-stat  { flex: 1; text-align: center; padding: 0 6px; border-right: 1px solid #f1f5f9; }
+    .st-stat:last-child { border-right: none; }
+    .st-stat-val { font-size: 1.1rem; font-weight: 800; color: #1e293b; line-height: 1.2; }
+    .st-stat-val.critical { color: #dc2626; }
+    .st-stat-val.action   { color: #ea580c; }
+    .st-stat-val.monitor  { color: #b45309; }
+    .st-stat-val.healthy  { color: #16a34a; }
+    .st-stat-lbl { font-size: 0.6rem; font-weight: 700; color: #94a3b8;
+                   text-transform: uppercase; letter-spacing: 0.05em; margin-top: 3px; }
+
+    /* Sell-through progress bar (inside stats cell) */
+    .st-bar { height: 4px; border-radius: 2px; background: #f1f5f9; margin-top: 5px; }
+    .st-bar-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
+    .critical .st-bar-fill { background: #dc2626; }
+    .action .st-bar-fill   { background: #f97316; }
+    .monitor .st-bar-fill  { background: #eab308; }
+    .healthy .st-bar-fill  { background: #22c55e; }
+
+    /* Variant expand */
+    .st-expand-btn { background: none; border: 1.5px solid #e2e8f0; border-radius: 6px;
+                     font-size: 0.75rem; font-weight: 600; color: #64748b; padding: 5px 12px;
+                     cursor: pointer; margin-top: 12px; transition: border-color 0.15s, color 0.15s; }
+    .st-expand-btn:hover { border-color: #94a3b8; color: #1e293b; }
+
+    /* Variant table */
+    .st-var-wrap { margin-top: 10px; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0; }
+    .st-var-wrap table { width: 100%; border-collapse: collapse; font-size: 0.81rem; }
+    .st-var-wrap th { background: #f8fafc; padding: 7px 12px; text-align: left;
+                      font-weight: 700; color: #64748b; font-size: 0.67rem;
+                      text-transform: uppercase; letter-spacing: 0.04em; }
+    .st-var-wrap td { padding: 7px 12px; border-top: 1px solid #f1f5f9; color: #334155; }
+    .st-var-wrap tr:hover td { background: #fafafa; }
+    .vbar { height: 5px; border-radius: 3px; background: #e2e8f0; margin-top: 3px; overflow: hidden; }
+    .vbar-fill { height: 100%; border-radius: 3px; }
+
+    /* Empty / loading */
+    .st-empty { text-align: center; padding: 50px; color: #94a3b8; font-size: 0.9rem; }
+
+    @media (max-width: 700px) {
+      .st-summary { grid-template-columns: 1fr 1fr; }
+      .st-stats   { flex-wrap: wrap; }
+      .st-stat    { flex: 0 0 calc(50% - 1px); border-right: none; border-bottom: 1px solid #f1f5f9; }
+    }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main class="container" style="padding: 24px 20px">
+
+    <div class="st-page-hdr">
+      <h1>Sell-Through Report</h1>
+      <p>What percentage of starting stock has sold — identify products needing promotions or markdowns.</p>
+    </div>
+
+    <!-- Controls -->
+    <div class="st-controls">
+      <div class="st-ctrl">
+        <label>Season Start</label>
+        <input type="date" id="st-since" />
+      </div>
+      <div class="st-ctrl">
+        <label>Season End <span style="font-weight:400;color:#94a3b8">(optional)</span></label>
+        <input type="date" id="st-season-end" />
+      </div>
+      <div class="st-ctrl">
+        <label>Min Starting Stock</label>
+        <input type="number" id="st-min-stock" value="10" min="1" max="9999" style="width:70px" />
+      </div>
+      <button id="btn-run" class="btn btn-primary" onclick="runReport()">&#8635; Run Report</button>
+      <span id="st-meta" class="st-meta"></span>
+    </div>
+
+    <!-- Summary tiles -->
+    <div class="st-summary" id="st-summary" style="display:none">
+      <div class="st-tile critical" id="tile-critical" onclick="setFilter('critical')">
+        <div class="st-tile-count" id="sum-critical">0</div>
+        <div class="st-tile-label">🔴 Critical</div>
+        <div class="st-tile-sub">Below 30% — strong sale candidate</div>
+      </div>
+      <div class="st-tile action" id="tile-action" onclick="setFilter('action')">
+        <div class="st-tile-count" id="sum-action">0</div>
+        <div class="st-tile-label">🟠 Action</div>
+        <div class="st-tile-sub">30–50% — consider promotion</div>
+      </div>
+      <div class="st-tile monitor" id="tile-monitor" onclick="setFilter('monitor')">
+        <div class="st-tile-count" id="sum-monitor">0</div>
+        <div class="st-tile-label">🟡 Monitor</div>
+        <div class="st-tile-sub">50–80% — keep watching</div>
+      </div>
+      <div class="st-tile healthy" id="tile-healthy" onclick="setFilter('healthy')">
+        <div class="st-tile-count" id="sum-healthy">0</div>
+        <div class="st-tile-label">🟢 Healthy</div>
+        <div class="st-tile-sub">80%+ — hold full price</div>
+      </div>
+    </div>
+
+    <!-- Filter tabs -->
+    <div class="st-tabs" id="st-tabs" style="display:none">
+      <button class="st-tab active" data-filter="all"      onclick="setFilter('all')">All</button>
+      <button class="st-tab"        data-filter="critical" onclick="setFilter('critical')">🔴 Critical</button>
+      <button class="st-tab"        data-filter="action"   onclick="setFilter('action')">🟠 Action</button>
+      <button class="st-tab"        data-filter="monitor"  onclick="setFilter('monitor')">🟡 Monitor</button>
+      <button class="st-tab"        data-filter="healthy"  onclick="setFilter('healthy')">🟢 Healthy</button>
+    </div>
+
+    <!-- Product list -->
+    <div id="st-list"></div>
+
+  </main>
+  <script src="sell-through.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

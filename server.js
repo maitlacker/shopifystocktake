@@ -25,6 +25,7 @@ const adsAssetSync     = require('./google-ads-asset-sync');
 const arcadsSync       = require('./arcads-sync');
 const leaveSync        = require('./leave-sync');
 const mailer           = require('./email');
+const sellthroughAlerts = require('./sellthrough-alerts');
 
 const anthropicClient = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -2370,7 +2371,7 @@ app.get('/api/reports/draft-with-stock', async (req, res) => {
 // ── Sales Velocity ────────────────────────────────────────────────
 async function fetchOrdersSince(sinceDate) {
   const orders = [];
-  let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json?status=any&created_at_min=${sinceDate.toISOString()}&limit=250&fields=id,cancelled_at,line_items`;
+  let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json?status=any&created_at_min=${sinceDate.toISOString()}&limit=250&fields=id,cancelled_at,created_at,line_items`;
 
   while (url) {
     const r = await fetch(url, { headers: shopifyHeaders() });
@@ -2902,6 +2903,77 @@ app.get('/api/velocity/idea-factory/latest', requireAuth, async (req, res) => {
     res.json(rows.length > 0 ? rows[0] : null);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Sell-Through Report ────────────────────────────────────────────
+
+app.get('/api/sell-through', requireAuth, async (req, res) => {
+  try {
+    const sinceParam   = req.query.since;
+    const seasonStart  = sinceParam ? new Date(sinceParam) : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const seasonEnd    = req.query.season_end ? new Date(req.query.season_end) : null;
+    const minStarting  = parseInt(req.query.min_stock) || 10;
+
+    if (!productsCache || productsCache.length === 0) {
+      productsCache = await fetchAllProducts();
+      lastFetched = new Date();
+    }
+
+    const orders = await fetchOrdersSince(seasonStart);
+
+    const twoWeeksAgo      = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    const variantSales     = {};
+    const recentVariantSales = {};
+    for (const order of orders) {
+      if (order.cancelled_at) continue;
+      const isRecent = new Date(order.created_at) >= twoWeeksAgo;
+      for (const item of (order.line_items || [])) {
+        if (!item.variant_id) continue;
+        const k = String(item.variant_id);
+        variantSales[k]       = (variantSales[k] || 0) + item.quantity;
+        if (isRecent) recentVariantSales[k] = (recentVariantSales[k] || 0) + item.quantity;
+      }
+    }
+
+    const TIER_ORDER = { critical: 4, action: 3, monitor: 2, healthy: 1 };
+
+    const products = productsCache
+      .map(product => {
+        const r = sellthroughAlerts.calcSellThrough(product, variantSales, recentVariantSales, seasonStart, seasonEnd);
+        if (r.startingStock < minStarting)                       return null;
+        if (r.currentStock === 0 && r.unitsSold === 0)          return null;
+        return {
+          id:           product.id,
+          title:        product.title,
+          product_type: product.product_type || '',
+          tags:         product.tags || '',
+          image:        product.images && product.images[0] ? product.images[0].src : null,
+          ...r,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        const td = TIER_ORDER[b.tier] - TIER_ORDER[a.tier];
+        if (td !== 0) return td;
+        if (a.tier === 'healthy') return b.sell_through_pct - a.sell_through_pct;
+        return a.sell_through_pct - b.sell_through_pct;
+      });
+
+    const summary = { critical: 0, action: 0, monitor: 0, healthy: 0 };
+    products.forEach(p => summary[p.tier]++);
+
+    res.json({
+      season_start:   seasonStart.toISOString().split('T')[0],
+      season_end:     seasonEnd ? seasonEnd.toISOString().split('T')[0] : null,
+      generated_at:   new Date().toISOString(),
+      total_analysed: products.length,
+      summary,
+      products,
+    });
+  } catch (err) {
+    console.error('[sell-through]', err.message);
+    if (!res.headersSent) res.status(500).json({ error: err.message });
   }
 });
 
@@ -6085,6 +6157,7 @@ initDb()
     adsAssetSync.startCron();
     arcadsSync.startCron(pool);
     leaveSync.startCron(pool);
+    sellthroughAlerts.startCron(pool);
 
     // Auto-sync QLD public holidays for current + next year
     const _holidayYear = new Date().getFullYear();
