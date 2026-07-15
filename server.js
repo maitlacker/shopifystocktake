@@ -6157,7 +6157,10 @@ async function sleutherFindVariantBySku(sku) {
     headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN, 'Content-Type': 'application/json' },
     body: JSON.stringify({ query }),
   });
-  const json = await r.json();
+  if (!r.ok) { const t = await r.text(); throw new Error(`Shopify variant API ${r.status}: ${t.slice(0,200)}`); }
+  let json;
+  try { json = await r.json(); } catch (e) { throw new Error(`Shopify variant response not JSON: ${e.message}`); }
+  if (json.errors) throw new Error(`Shopify GraphQL: ${json.errors[0]?.message || JSON.stringify(json.errors)}`);
   const edges = (json.data?.productVariants?.edges) || [];
   const exact = edges.find(e => e.node.sku.toLowerCase() === sku.toLowerCase());
   return exact ? exact.node : (edges[0]?.node || null);
@@ -6182,7 +6185,10 @@ async function sleutherGetInventory(inventoryItemGid) {
     headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN, 'Content-Type': 'application/json' },
     body: JSON.stringify({ query }),
   });
-  const json = await r.json();
+  if (!r.ok) { const t = await r.text(); throw new Error(`Shopify inventory API ${r.status}: ${t.slice(0,200)}`); }
+  let json;
+  try { json = await r.json(); } catch (e) { throw new Error(`Shopify inventory response not JSON: ${e.message}`); }
+  if (json.errors) throw new Error(`Shopify GraphQL: ${json.errors[0]?.message || JSON.stringify(json.errors)}`);
   const item = json.data?.inventoryItem;
   if (!item) return null;
   const locations = (item.inventoryLevels?.edges || []).map(e => {
