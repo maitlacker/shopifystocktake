@@ -6139,6 +6139,271 @@ app.post('/api/asana/mapping', requireAuth, async (req, res) => {
   }
 });
 
+// ── Stock Sleuth ──────────────────────────────────────────────────────
+
+async function sleutherFindVariantBySku(sku) {
+  const safe = sku.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const query = `{
+    productVariants(first: 10, query: "sku:${safe}") {
+      edges { node {
+        id legacyResourceId sku title inventoryQuantity
+        inventoryItem { id legacyResourceId }
+        product { id legacyResourceId title images(first: 1) { nodes { url } } }
+      }}
+    }
+  }`;
+  const r = await fetch(`https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/graphql.json`, {
+    method: 'POST',
+    headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  });
+  const json = await r.json();
+  const edges = (json.data?.productVariants?.edges) || [];
+  const exact = edges.find(e => e.node.sku.toLowerCase() === sku.toLowerCase());
+  return exact ? exact.node : (edges[0]?.node || null);
+}
+
+async function sleutherGetInventory(inventoryItemGid) {
+  const query = `{
+    inventoryItem(id: "${inventoryItemGid}") {
+      id legacyResourceId sku tracked
+      inventoryLevels(first: 20) {
+        edges { node {
+          location { id name }
+          quantities(names: ["available","committed","on_hand","reserved","damaged","safety_stock","quality_control","incoming"]) {
+            name quantity
+          }
+        }}
+      }
+    }
+  }`;
+  const r = await fetch(`https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/graphql.json`, {
+    method: 'POST',
+    headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  });
+  const json = await r.json();
+  const item = json.data?.inventoryItem;
+  if (!item) return null;
+  const locations = (item.inventoryLevels?.edges || []).map(e => {
+    const q = {};
+    for (const { name, quantity } of (e.node.quantities || [])) q[name] = quantity;
+    return { name: e.node.location.name, quantities: q };
+  });
+  const totals = { available: 0, committed: 0, on_hand: 0, reserved: 0, damaged: 0, safety_stock: 0, quality_control: 0, incoming: 0 };
+  for (const loc of locations) {
+    for (const [k, v] of Object.entries(loc.quantities)) {
+      if (k in totals) totals[k] += (v || 0);
+    }
+  }
+  return { tracked: item.tracked, locations, totals };
+}
+
+async function sleutherFetchOrders(sinceDate) {
+  const orders = [];
+  let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json?status=any&created_at_min=${sinceDate.toISOString()}&limit=250&fields=id,name,email,created_at,financial_status,fulfillment_status,cancelled_at,cancel_reason,line_items,refunds`;
+  while (url) {
+    const r = await fetch(url, { headers: shopifyHeaders() });
+    if (!r.ok) { const t = await r.text(); throw new Error(`Shopify Orders ${r.status}: ${t}`); }
+    const data = await r.json();
+    orders.push(...data.orders);
+    const link = r.headers.get('link');
+    url = null;
+    if (link) { const m = link.match(/<([^>]+)>;\s*rel="next"/); if (m) url = m[1]; }
+  }
+  return orders;
+}
+
+app.get('/api/stock-sleuth', requireAuth, async (req, res) => {
+  try {
+    const sku = (req.query.sku || '').trim();
+    if (!sku) return res.status(400).json({ error: 'sku param is required' });
+
+    const windowDays = Math.min(parseInt(req.query.days) || 730, 730);
+    const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+
+    const variantNode = await sleutherFindVariantBySku(sku);
+    if (!variantNode) return res.status(404).json({ error: `No variant found for SKU "${sku}"` });
+
+    const variantId = String(variantNode.legacyResourceId);
+    const inventoryItemGid = variantNode.inventoryItem.id;
+
+    const [inventory, allOrders] = await Promise.all([
+      sleutherGetInventory(inventoryItemGid),
+      sleutherFetchOrders(since),
+    ]);
+
+    const matchedOrders = allOrders.filter(o =>
+      (o.line_items || []).some(li => String(li.variant_id) === variantId)
+    );
+
+    const events = [];
+
+    for (const order of matchedOrders) {
+      const lis = (order.line_items || []).filter(li => String(li.variant_id) === variantId);
+      const totalQty = lis.reduce((s, li) => s + (li.quantity || 0), 0);
+      if (!totalQty) continue;
+
+      if (order.cancelled_at) {
+        events.push({
+          type: 'cancellation',
+          date: order.cancelled_at,
+          order_id: order.id,
+          order_name: order.name,
+          email: order.email || '',
+          financial_status: order.financial_status,
+          fulfillment_status: order.fulfillment_status,
+          cancel_reason: order.cancel_reason || '',
+          qty: totalQty,
+          qty_delta: +totalQty,
+        });
+      } else {
+        events.push({
+          type: 'sale',
+          date: order.created_at,
+          order_id: order.id,
+          order_name: order.name,
+          email: order.email || '',
+          financial_status: order.financial_status,
+          fulfillment_status: order.fulfillment_status,
+          qty: totalQty,
+          qty_delta: -totalQty,
+        });
+      }
+
+      for (const refund of (order.refunds || [])) {
+        const rlis = (refund.refund_line_items || []).filter(rli => {
+          const li = (order.line_items || []).find(l => l.id === rli.line_item_id);
+          return li && String(li.variant_id) === variantId;
+        });
+        if (!rlis.length) continue;
+        const refundQty   = rlis.reduce((s, rli) => s + (rli.quantity || 0), 0);
+        const restockType = rlis[0].restock_type || 'unknown';
+        const restocked   = restockType !== 'no_restock';
+        events.push({
+          type: 'refund',
+          date: refund.created_at || order.created_at,
+          order_id: order.id,
+          order_name: order.name,
+          qty: refundQty,
+          qty_delta: restocked ? +refundQty : 0,
+          restock_type: restockType,
+          restocked,
+        });
+      }
+    }
+
+    events.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    const onHand     = inventory ? (inventory.totals.on_hand || 0) : 0;
+    const totalSold  = events.filter(e => e.type === 'sale').reduce((s, e) => s + e.qty, 0);
+    const totalRest  = events.filter(e => e.type === 'refund' && e.restocked).reduce((s, e) => s + e.qty, 0);
+    const inferredStart = onHand + totalSold - totalRest;
+
+    let running = inferredStart;
+    for (const ev of events) {
+      ev.running_before = running;
+      running += ev.qty_delta;
+    }
+    const inferredFinal = running;
+
+    const anomalies = [];
+
+    if (onHand < 0) {
+      anomalies.push({
+        severity: 'error',
+        type: 'negative_stock',
+        message: `Current on-hand stock is ${onHand}. This is only expected after a checkout race condition and should resolve once both orders are fulfilled.`,
+        date: null, orders: [],
+      });
+    }
+
+    const sales = events.filter(e => e.type === 'sale').sort((a, b) => new Date(a.date) - new Date(b.date));
+    for (let i = 0; i < sales.length - 1; i++) {
+      const gap = (new Date(sales[i + 1].date) - new Date(sales[i].date)) / 1000;
+      if (gap <= 60) {
+        anomalies.push({
+          severity: 'info',
+          type: 'race_condition',
+          message: `Orders ${sales[i].order_name} and ${sales[i + 1].order_name} were placed ${Math.round(gap)}s apart — likely a checkout race condition where two customers bought the last unit simultaneously.`,
+          date: sales[i].date,
+          orders: [sales[i].order_name, sales[i + 1].order_name],
+        });
+      }
+    }
+
+    for (const ev of events.filter(e => e.type === 'refund' && !e.restocked)) {
+      anomalies.push({
+        severity: 'warning',
+        type: 'refund_no_restock',
+        message: `${ev.qty} unit(s) on ${ev.order_name} were refunded with restock_type="${ev.restock_type}" — no inventory adjustment made. If the item was physically returned, the stock should be +1'd manually.`,
+        date: ev.date,
+        orders: [ev.order_name],
+      });
+    }
+
+    for (const ev of events.filter(e => e.type === 'cancellation' && ['paid', 'partially_refunded', 'partially_paid'].includes(e.financial_status))) {
+      const hasRestockRefund = events.some(e2 => e2.type === 'refund' && e2.order_id === ev.order_id && e2.restocked);
+      if (!hasRestockRefund) {
+        anomalies.push({
+          severity: 'warning',
+          type: 'paid_cancellation',
+          message: `Order ${ev.order_name} was cancelled after payment (${ev.financial_status}) with no corresponding restock refund found — stock may not have been returned.`,
+          date: ev.date,
+          orders: [ev.order_name],
+        });
+      }
+    }
+
+    const drift = inferredFinal - onHand;
+    if (Math.abs(drift) > 0) {
+      const sev = Math.abs(drift) >= 3 ? 'warning' : 'info';
+      anomalies.push({
+        severity: sev,
+        type: 'stock_drift',
+        message: `Order history implies ${inferredFinal} units now; Shopify shows ${onHand} on hand — ${drift > 0 ? '+' : ''}${drift} unexplained. This gap is likely REDO restocks or manual stocktake adjustments not captured in orders.`,
+        date: null, orders: [],
+      });
+    }
+
+    const minRunning = events.length ? events.reduce((m, e) => Math.min(m, e.running_before || 0), inferredStart) : inferredStart;
+    if (minRunning < -1) {
+      anomalies.push({
+        severity: 'error',
+        type: 'multi_negative',
+        message: `Order timeline shows stock reaching ${minRunning} — below the -1 expected from a single race condition. Orders may have been processed when stock was already at zero or negative.`,
+        date: null, orders: [],
+      });
+    }
+
+    res.json({
+      sku,
+      variant: {
+        id: variantId,
+        sku: variantNode.sku,
+        title: variantNode.title,
+        product_id: String(variantNode.product.legacyResourceId),
+        product_title: variantNode.product.title,
+        product_image: variantNode.product.images.nodes[0]?.url || null,
+      },
+      inventory: inventory || { tracked: false, locations: [], totals: {} },
+      events,
+      anomalies,
+      stats: {
+        orders_in_window: matchedOrders.length,
+        total_sold: totalSold,
+        total_refund_restocked: totalRest,
+        inferred_start: inferredStart,
+        window_days: windowDays,
+        window_since: since.toISOString(),
+      },
+    });
+  } catch (err) {
+    console.error('[stock-sleuth] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 

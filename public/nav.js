@@ -15,6 +15,7 @@
         { label: 'Order Packing',           href: '/packing.html' },
         { label: 'Discrepancy Report',      href: '/discrepancies.html' },
         { label: 'Draft & Archived Stock',  href: '/draft-report.html' },
+        { label: 'Stock Sleuth',            href: '/stock-sleuth.html' },
         { label: 'History',                 href: '/history.html' },
       ],
     },

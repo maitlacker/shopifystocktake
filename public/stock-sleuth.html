@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stock Sleuth — The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .sl-page-hdr { margin-bottom: 22px; }
+    .sl-page-hdr h1 { font-size: 1.4rem; font-weight: 700; color: #1e293b; margin: 0 0 4px; }
+    .sl-page-hdr p  { font-size: 0.85rem; color: #64748b; margin: 0; }
+
+    /* Search bar */
+    .sl-search { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+                 padding: 18px 20px; display: flex; gap: 12px; align-items: flex-end;
+                 margin-bottom: 20px; flex-wrap: wrap; }
+    .sl-search-field { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 200px; }
+    .sl-search-field label { font-size: 0.7rem; font-weight: 700; color: #64748b;
+                              text-transform: uppercase; letter-spacing: 0.06em; }
+    .sl-search-input { padding: 9px 14px; border: 1.5px solid #e2e8f0; border-radius: 8px;
+                       font-size: 1rem; color: #1e293b; background: #fff; width: 100%;
+                       font-family: monospace; letter-spacing: 0.03em; }
+    .sl-search-input:focus { outline: none; border-color: #6366f1; }
+    .sl-search-hint { font-size: 0.72rem; color: #94a3b8; }
+    .sl-window-field { display: flex; flex-direction: column; gap: 5px; }
+    .sl-window-field label { font-size: 0.7rem; font-weight: 700; color: #64748b;
+                              text-transform: uppercase; letter-spacing: 0.06em; }
+    .sl-window-select { padding: 9px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px;
+                        font-size: 0.88rem; color: #1e293b; background: #fff; }
+    .sl-window-select:focus { outline: none; border-color: #6366f1; }
+
+    /* Result sections */
+    .sl-section { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+                  padding: 18px 20px; margin-bottom: 16px; }
+    .sl-section-title { font-size: 0.78rem; font-weight: 800; color: #64748b;
+                        text-transform: uppercase; letter-spacing: 0.07em; margin: 0 0 14px; }
+
+    /* Variant header */
+    .sl-variant-hdr { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+    .sl-variant-img { width: 52px; height: 52px; object-fit: cover; border-radius: 8px;
+                      background: #f1f5f9; flex-shrink: 0; }
+    .sl-variant-img-ph { width: 52px; height: 52px; border-radius: 8px; background: #f1f5f9;
+                          display: flex; align-items: center; justify-content: center;
+                          font-size: 1.4rem; flex-shrink: 0; }
+    .sl-variant-name  { font-size: 1rem; font-weight: 700; color: #1e293b; }
+    .sl-variant-sub   { font-size: 0.8rem; color: #64748b; margin-top: 2px; }
+    .sl-variant-sku   { font-family: monospace; font-size: 0.8rem; background: #f1f5f9;
+                        color: #475569; padding: 2px 8px; border-radius: 4px;
+                        display: inline-block; margin-top: 4px; }
+
+    /* Inventory grid */
+    .sl-inv-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .sl-inv-cell { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+                   padding: 10px 12px; text-align: center; }
+    .sl-inv-cell.highlight { background: #fef3c7; border-color: #f59e0b; }
+    .sl-inv-cell.danger    { background: #fee2e2; border-color: #fca5a5; }
+    .sl-inv-cell.positive  { background: #dcfce7; border-color: #86efac; }
+    .sl-inv-val  { font-size: 1.5rem; font-weight: 800; color: #1e293b; line-height: 1; }
+    .sl-inv-val.negative { color: #dc2626; }
+    .sl-inv-lbl  { font-size: 0.62rem; font-weight: 700; color: #94a3b8;
+                   text-transform: uppercase; letter-spacing: 0.05em; margin-top: 4px; }
+
+    /* Multi-location */
+    .sl-locations { margin-top: 12px; }
+    .sl-loc-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+                  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
+                  margin-top: 6px; font-size: 0.8rem; flex-wrap: wrap; }
+    .sl-loc-name { font-weight: 600; color: #1e293b; flex: 1; min-width: 120px; }
+    .sl-loc-stat { color: #64748b; }
+    .sl-loc-stat span { font-weight: 700; color: #1e293b; }
+
+    /* Anomaly cards */
+    .sl-anomaly { border-radius: 8px; padding: 12px 14px; margin-bottom: 8px;
+                  display: flex; gap: 12px; align-items: flex-start; }
+    .sl-anomaly.error   { background: #fee2e2; border: 1px solid #fca5a5; }
+    .sl-anomaly.warning { background: #fef3c7; border: 1px solid #fcd34d; }
+    .sl-anomaly.info    { background: #eff6ff; border: 1px solid #bfdbfe; }
+    .sl-anomaly-icon    { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+    .sl-anomaly-body    { flex: 1; }
+    .sl-anomaly-type    { font-size: 0.68rem; font-weight: 800; text-transform: uppercase;
+                          letter-spacing: 0.06em; margin-bottom: 3px; }
+    .error .sl-anomaly-type   { color: #b91c1c; }
+    .warning .sl-anomaly-type { color: #92400e; }
+    .info .sl-anomaly-type    { color: #1d4ed8; }
+    .sl-anomaly-msg  { font-size: 0.82rem; color: #374151; line-height: 1.45; }
+    .sl-anomaly-date { font-size: 0.72rem; color: #94a3b8; margin-top: 3px; }
+    .sl-no-anomalies { text-align: center; padding: 20px; color: #16a34a;
+                       font-size: 0.88rem; font-weight: 600; }
+
+    /* Timeline table */
+    .sl-timeline-wrap { overflow-x: auto; }
+    .sl-timeline { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    .sl-timeline th { background: #f8fafc; padding: 8px 12px; text-align: left;
+                      font-weight: 700; color: #64748b; font-size: 0.67rem;
+                      text-transform: uppercase; letter-spacing: 0.04em;
+                      border-bottom: 2px solid #e2e8f0; white-space: nowrap; }
+    .sl-timeline td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9;
+                      color: #334155; vertical-align: middle; }
+    .sl-timeline tr:hover td { background: #fafafa; }
+    .sl-timeline tr:last-child td { border-bottom: none; }
+
+    /* Event type pill */
+    .sl-evt-pill { display: inline-block; padding: 2px 9px; border-radius: 12px;
+                   font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+                   letter-spacing: 0.04em; white-space: nowrap; }
+    .sl-evt-pill.sale         { background: #fee2e2; color: #b91c1c; }
+    .sl-evt-pill.refund       { background: #dcfce7; color: #15803d; }
+    .sl-evt-pill.cancellation { background: #f3f4f6; color: #6b7280; }
+
+    /* Running balance chip */
+    .sl-balance { font-variant-numeric: tabular-nums; font-weight: 700;
+                  font-size: 0.88rem; white-space: nowrap; }
+    .sl-balance.neg { color: #dc2626; }
+    .sl-balance.zero { color: #b45309; }
+
+    /* Delta */
+    .sl-delta { font-weight: 700; white-space: nowrap; }
+    .sl-delta.neg { color: #dc2626; }
+    .sl-delta.pos { color: #16a34a; }
+    .sl-delta.zero { color: #94a3b8; }
+
+    .sl-order-link { font-family: monospace; font-size: 0.8rem; font-weight: 600;
+                     color: #6366f1; text-decoration: none; }
+    .sl-order-link:hover { text-decoration: underline; }
+
+    /* Status badges */
+    .sl-status { display: inline-block; padding: 1px 7px; border-radius: 10px;
+                 font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+                 letter-spacing: 0.03em; }
+    .sl-status.paid     { background: #dcfce7; color: #15803d; }
+    .sl-status.refunded { background: #f3f4f6; color: #6b7280; }
+    .sl-status.pending  { background: #fef9c3; color: #92400e; }
+    .sl-status.voided   { background: #f1f5f9; color: #94a3b8; }
+    .sl-status.fulfilled   { background: #dbeafe; color: #1d4ed8; }
+    .sl-status.unfulfilled { background: #fef3c7; color: #92400e; }
+    .sl-status.cancelled   { background: #f3f4f6; color: #6b7280; }
+    .sl-status.partial     { background: #fef9c3; color: #92400e; }
+
+    /* Stats bar */
+    .sl-stats-bar { display: flex; gap: 24px; flex-wrap: wrap; padding: 12px 0;
+                    border-top: 1px solid #f1f5f9; margin-top: 4px; }
+    .sl-stat { text-align: center; }
+    .sl-stat-val { font-size: 1.4rem; font-weight: 800; color: #1e293b; line-height: 1; }
+    .sl-stat-lbl { font-size: 0.62rem; font-weight: 700; color: #94a3b8;
+                   text-transform: uppercase; letter-spacing: 0.05em; margin-top: 3px; }
+
+    /* Restock type badge */
+    .sl-restock { font-size: 0.7rem; font-weight: 600; padding: 1px 7px; border-radius: 10px; }
+    .sl-restock.restocked   { background: #dcfce7; color: #15803d; }
+    .sl-restock.no-restock  { background: #fee2e2; color: #b91c1c; }
+    .sl-restock.cancel      { background: #f1f5f9; color: #475569; }
+    .sl-restock.unknown     { background: #f8fafc; color: #94a3b8; }
+
+    /* Empty / loading */
+    .sl-empty { text-align: center; padding: 60px 20px; color: #94a3b8; }
+    .sl-empty-icon { font-size: 2.4rem; margin-bottom: 10px; }
+    .sl-empty-text { font-size: 0.9rem; }
+    .sl-error { color: #dc2626; font-size: 0.88rem; padding: 16px;
+                background: #fee2e2; border-radius: 8px; }
+
+    /* Note callout */
+    .sl-note { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
+               padding: 10px 14px; font-size: 0.78rem; color: #1e40af; margin-bottom: 14px; }
+
+    @media (max-width: 700px) {
+      .sl-inv-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main class="container" style="padding: 24px 20px">
+
+    <div class="sl-page-hdr">
+      <h1>🔍 Stock Sleuth</h1>
+      <p>Investigate a specific SKU — see current inventory state, full order history, and flag anomalies.</p>
+    </div>
+
+    <!-- Search -->
+    <div class="sl-search">
+      <div class="sl-search-field">
+        <label>SKU</label>
+        <input type="text" id="sl-sku" class="sl-search-input" placeholder="e.g. PHX-DN-10" autocomplete="off" />
+        <span class="sl-search-hint">Exact SKU match</span>
+      </div>
+      <div class="sl-window-field">
+        <label>History window</label>
+        <select id="sl-window" class="sl-window-select">
+          <option value="90">90 days</option>
+          <option value="180">6 months</option>
+          <option value="365">1 year</option>
+          <option value="730" selected>2 years</option>
+        </select>
+      </div>
+      <button id="sl-btn" class="btn btn-primary" onclick="runSleuth()">🔍 Investigate</button>
+    </div>
+
+    <!-- Results -->
+    <div id="sl-results">
+      <div class="sl-empty">
+        <div class="sl-empty-icon">🔍</div>
+        <div class="sl-empty-text">Enter a SKU to investigate its inventory history</div>
+      </div>
+    </div>
+
+  </main>
+  <script src="stock-sleuth.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>
