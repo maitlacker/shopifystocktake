@@ -68,6 +68,7 @@ function renderResults(d) {
   const stats = d.stats || {};
   const events = d.events || [];
   const anomalies = d.anomalies || [];
+  const inventoryEvents = d.inventoryEvents || [];
   const v = d.variant;
 
   const sections = [];
@@ -161,6 +162,39 @@ function renderResults(d) {
     <div class="sl-section">
       <div class="sl-section-title">Anomalies (${anomalies.length})</div>
       ${anomHtml}
+    </div>`);
+
+  // ── Inventory Adjustment Events ──
+  const invEvtNote = `Staff-attributed events come from Shopify's product event log. App-driven adjustments (e.g. REDO restocks, API calls) may show as "(app / unknown)". This is not a complete audit trail — manual admin adjustments by staff are the most reliably captured.`;
+
+  let invEvtBody;
+  if (inventoryEvents.length === 0) {
+    invEvtBody = `<div class="sl-empty" style="padding:24px 0 6px"><div class="sl-empty-text">No inventory adjustment events found via Shopify's product event log in this window.</div></div>`;
+  } else {
+    const evRows = [...inventoryEvents].reverse().map(ev => `<tr>
+      <td style="white-space:nowrap">${fmtDateTime(ev.date)}</td>
+      <td><strong style="color:#1e293b">${escHtml(ev.author)}</strong></td>
+      <td style="color:#64748b;font-size:0.78rem">${escHtml(ev.verb)}</td>
+      <td style="font-size:0.82rem;color:#334155">${escHtml(ev.message)}</td>
+    </tr>`).join('');
+    invEvtBody = `<div class="sl-timeline-wrap">
+      <table class="sl-timeline">
+        <thead><tr>
+          <th>Date &amp; Time</th>
+          <th>By</th>
+          <th>Action</th>
+          <th>Detail</th>
+        </tr></thead>
+        <tbody>${evRows}</tbody>
+      </table>
+    </div>`;
+  }
+
+  sections.push(`
+    <div class="sl-section">
+      <div class="sl-section-title">Inventory Adjustment Events (${inventoryEvents.length})</div>
+      <div class="sl-note">📝 ${escHtml(invEvtNote)}</div>
+      ${invEvtBody}
     </div>`);
 
   // ── Timeline ──

@@ -6205,6 +6205,40 @@ async function sleutherGetInventory(inventoryItemGid) {
   return { tracked: item.tracked, locations, totals };
 }
 
+async function sleutherFetchInventoryEvents(productLegacyId, sinceDate) {
+  const events = [];
+  const sinceParam = sinceDate ? `&created_at_min=${sinceDate.toISOString()}` : '';
+  let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/events.json?filter=Product&subject_id=${productLegacyId}&limit=250${sinceParam}`;
+  while (url) {
+    const r = await fetch(url, { headers: shopifyHeaders() });
+    if (!r.ok) break;
+    const data = await r.json().catch(() => ({}));
+    events.push(...(data.events || []));
+    const link = r.headers.get('link');
+    url = null;
+    if (link) { const m = link.match(/<([^>]+)>;\s*rel="next"/); if (m) url = m[1]; }
+  }
+  // Keep only inventory-related events
+  return events
+    .filter(ev => {
+      const verb = (ev.verb || '').toLowerCase();
+      const msg  = (ev.message || ev.body || '').toLowerCase();
+      return verb === 'adjusted'
+        || verb.includes('inventory')
+        || msg.includes('inventory')
+        || msg.includes('adjusted')
+        || msg.includes('units')
+        || msg.includes('stock');
+    })
+    .map(ev => ({
+      id:      ev.id,
+      date:    ev.created_at,
+      author:  ev.author || '(app / unknown)',
+      verb:    ev.verb   || '',
+      message: ev.message || (ev.body || '').replace(/<[^>]*>/g, '') || '',
+    }));
+}
+
 async function sleutherFetchOrders(sinceDate) {
   const orders = [];
   let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json?status=any&created_at_min=${sinceDate.toISOString()}&limit=250&fields=id,name,email,created_at,financial_status,fulfillment_status,cancelled_at,cancel_reason,line_items,refunds`;
@@ -6234,9 +6268,12 @@ app.get('/api/stock-sleuth', requireAuth, async (req, res) => {
     const variantId = String(variantNode.legacyResourceId);
     const inventoryItemGid = variantNode.inventoryItem.id;
 
-    const [inventory, allOrders] = await Promise.all([
+    const productLegacyId = String(variantNode.product.legacyResourceId);
+
+    const [inventory, allOrders, inventoryEvents] = await Promise.all([
       sleutherGetInventory(inventoryItemGid),
       sleutherFetchOrders(since),
+      sleutherFetchInventoryEvents(productLegacyId, since),
     ]);
 
     const matchedOrders = allOrders.filter(o =>
@@ -6395,6 +6432,7 @@ app.get('/api/stock-sleuth', requireAuth, async (req, res) => {
       inventory: inventory || { tracked: false, locations: [], totals: {} },
       events,
       anomalies,
+      inventoryEvents,
       stats: {
         orders_in_window: matchedOrders.length,
         total_sold: totalSold,
