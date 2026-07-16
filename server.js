@@ -1812,17 +1812,19 @@ async function upsertLines(client, orderId, lines) {
 
 app.post('/api/production-orders', async (req, res) => {
   const { poNumber, supplierId, supplierName, orderDate, deliveryDate, freightMode,
-          currency, exchangeRate, shippingCost, includeGst, notes, lines=[] } = req.body;
+          currency, exchangeRate, shippingCost, includeGst, notes, lines=[],
+          poType, isCollection, collectionName } = req.body;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { rows:[po] } = await client.query(
       `INSERT INTO production_orders
          (po_number,supplier_id,supplier_name,order_date,delivery_date,freight_mode,
-          currency,exchange_rate,shipping_cost,include_gst,notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+          currency,exchange_rate,shipping_cost,include_gst,notes,po_type,is_collection,collection_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
       [poNumber, supplierId||null, supplierName||'', orderDate, deliveryDate||null,
-       freightMode||'sea', currency||'AUD', exchangeRate||1, shippingCost||0, includeGst||false, notes||null]
+       freightMode||'sea', currency||'AUD', exchangeRate||1, shippingCost||0, includeGst||false, notes||null,
+       poType||'restock', isCollection||false, collectionName||null]
     );
     await upsertLines(client, po.id, lines);
     await client.query('COMMIT');
@@ -1836,7 +1838,8 @@ app.post('/api/production-orders', async (req, res) => {
 app.put('/api/production-orders/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   const { poNumber, supplierId, supplierName, orderDate, deliveryDate, freightMode,
-          currency, exchangeRate, shippingCost, includeGst, notes, status, lines } = req.body;
+          currency, exchangeRate, shippingCost, includeGst, notes, status, lines,
+          poType, isCollection, collectionName } = req.body;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1844,11 +1847,13 @@ app.put('/api/production-orders/:id', async (req, res) => {
       `UPDATE production_orders SET
          po_number=$1,supplier_id=$2,supplier_name=$3,order_date=$4,delivery_date=$5,
          freight_mode=$6,currency=$7,exchange_rate=$8,shipping_cost=$9,include_gst=$10,
-         notes=$11,status=COALESCE($12,status),updated_at=NOW()
-       WHERE id=$13 RETURNING *`,
+         notes=$11,status=COALESCE($12,status),po_type=$13,is_collection=$14,
+         collection_name=$15,updated_at=NOW()
+       WHERE id=$16 RETURNING *`,
       [poNumber, supplierId||null, supplierName||'', orderDate, deliveryDate||null,
        freightMode||'sea', currency||'AUD', exchangeRate||1, shippingCost||0,
-       includeGst||false, notes||null, status||null, id]
+       includeGst||false, notes||null, status||null,
+       poType||'restock', isCollection||false, collectionName||null, id]
     );
     if (!po) { await client.query('ROLLBACK'); return res.status(404).json({ error:'Not found' }); }
     if (lines !== undefined) await upsertLines(client, id, lines);
@@ -1982,13 +1987,17 @@ function buildPOPdf(doc, po, lines) {
      .text('ORDER DETAILS', COL2_X, detailTopY, { characterSpacing: 1, lineBreak: false });
 
   const detailRows = [
-    ['Order Date',    pdfDate(po.order_date)],
-    ['Delivery Date', pdfDate(po.delivery_date)],
-    ['Freight',       (po.freight_mode || 'sea').toUpperCase()],
-    ['Currency',      po.currency || 'AUD'],
+    ['Order Date', pdfDate(po.order_date)],
+    ['Due Date',   pdfDate(po.delivery_date)],
+    ['Freight',    (po.freight_mode || 'sea').toUpperCase()],
+    ['Currency',   po.currency || 'AUD'],
+    ['Type',       (po.po_type || 'restock').toUpperCase()],
   ];
   if (po.currency && po.currency !== 'AUD') {
     detailRows.push(['Ex. Rate', `1 ${po.currency} = ${fmtNum(po.exchange_rate, 4)} AUD`]);
+  }
+  if (po.is_collection && po.collection_name) {
+    detailRows.push(['Collection', po.collection_name]);
   }
 
   const LBL_COL = 84;
@@ -2011,7 +2020,8 @@ function buildPOPdf(doc, po, lines) {
   // Col widths: # | Product Name | Code | Quantities | Qty | Unit | Total  (sum = 499)
   const COLS = [22, 138, 56, 110, 30, 69, 74];
   const curr = po.currency || 'AUD';
-  const HDRS = ['#', 'Product Name', 'Code', 'Quantities', 'Qty', `Unit (${curr})`, `Total (${curr})`];
+  const exRatePdf = parseFloat(po.exchange_rate) || 1;
+  const HDRS = ['#', 'Product Name', 'Code', 'Quantities', 'Qty', 'Unit (AUD)', 'Total (AUD)'];
   const ALGN = ['center', 'left', 'left', 'left', 'right', 'right', 'right'];
   const PAD  = 5;
   const HDR_H = 22;
@@ -2040,9 +2050,10 @@ function buildPOPdf(doc, po, lines) {
       .filter(([, v]) => parseInt(v) > 0)
       .map(([k, v]) => `Size ${k} = ${v}`);
 
-    const totalQty  = line.total_qty || Object.values(qtyObj).reduce((s, v) => s + (parseInt(v) || 0), 0);
-    const unitPrice = parseFloat(line.unit_price) || 0;
-    const lineTotal = totalQty * unitPrice;
+    const totalQty     = line.total_qty || Object.values(qtyObj).reduce((s, v) => s + (parseInt(v) || 0), 0);
+    const unitPrice    = parseFloat(line.unit_price) || 0;
+    const unitPriceAud = unitPrice * exRatePdf;
+    const lineTotal    = totalQty * unitPriceAud;
     subtotalForeign += lineTotal;
 
     // Row height expands to fit all size lines (min ROW_H)
@@ -2058,7 +2069,7 @@ function buildPOPdf(doc, po, lines) {
       line.product_code || '',
       null,                        // placeholder — drawn separately below
       String(totalQty || 0),
-      fmtNum(unitPrice),
+      fmtNum(unitPriceAud),
       fmtNum(lineTotal),
     ];
 
@@ -2114,21 +2125,13 @@ function buildPOPdf(doc, po, lines) {
     y += 15;
   }
 
-  const exRate    = parseFloat(po.exchange_rate) || 1;
-  const freight   = parseFloat(po.shipping_cost) || 0;
-  const isForeign = curr !== 'AUD';
-  const subtotalAud = subtotalForeign * exRate;
+  const freight    = parseFloat(po.shipping_cost) || 0;
+  const subtotalAud = subtotalForeign;  // already accumulated in AUD (qty × unit × exRate)
   const beforeGst   = subtotalAud + freight;
   const gst         = po.include_gst ? beforeGst * 0.1 : 0;
   const grandTotal  = beforeGst + gst;
 
-  if (isForeign) {
-    totLine(`Subtotal (${curr})`, fmtNum(subtotalForeign));
-    totLine(`Ex. rate ×${fmtNum(exRate, 4)}`, '');
-    totLine('Subtotal AUD', fmtAud(subtotalAud));
-  } else {
-    totLine('Subtotal AUD', fmtAud(subtotalAud));
-  }
+  totLine('Subtotal AUD', fmtAud(subtotalAud));
   totLine('Freight', fmtAud(freight));
   if (po.include_gst) totLine('GST (10%)', fmtAud(gst));
 

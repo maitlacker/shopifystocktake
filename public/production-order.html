@@ -152,7 +152,7 @@
           <input type="date" id="po-order-date" />
         </div>
         <div class="po-field">
-          <label>Delivery Date</label>
+          <label>Due Date</label>
           <input type="date" id="po-delivery-date" />
         </div>
         <div class="po-field">
@@ -167,6 +167,25 @@
           <input type="number" id="po-exchange-rate" value="1.0000" step="0.0001" min="0.0001"
                  oninput="recalcTotals()" />
           <div class="po-exrate-info" id="po-exrate-info"></div>
+        </div>
+      </div>
+      <div class="po-grid2">
+        <div class="po-field">
+          <label>Type</label>
+          <select id="po-type">
+            <option value="restock">RESTOCK</option>
+            <option value="new">NEW</option>
+          </select>
+        </div>
+        <div class="po-field">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="po-collection" onchange="toggleCollection()"
+                   style="width:auto;height:auto;accent-color:#6366f1" />
+            Collection
+          </label>
+          <div id="po-collection-wrap" style="display:none;margin-top:8px">
+            <input type="text" id="po-collection-name" placeholder="Collection name (required)" />
+          </div>
         </div>
       </div>
       <div class="po-field">

@@ -96,11 +96,25 @@ function populateHeader(po) {
   document.getElementById('po-notes').value         = po.notes || '';
   document.getElementById('tot-shipping').value     = po.shipping_cost || '0';
   document.getElementById('tot-gst').checked        = !!po.include_gst;
+  document.getElementById('po-type').value          = po.po_type || 'restock';
+
+  const collCb = document.getElementById('po-collection');
+  if (collCb) collCb.checked = !!po.is_collection;
+  toggleCollection();
+  document.getElementById('po-collection-name').value = po.collection_name || '';
 
   if (po.supplier_id) {
     document.getElementById('po-supplier').value = po.supplier_id;
   }
   updateExRateInfo();
+}
+
+function toggleCollection() {
+  const checked = document.getElementById('po-collection').checked;
+  const wrap    = document.getElementById('po-collection-wrap');
+  const nameEl  = document.getElementById('po-collection-name');
+  wrap.style.display = checked ? '' : 'none';
+  if (nameEl) nameEl.required = checked;
 }
 
 // ── Supplier change ────────────────────────────────────────────────
@@ -224,6 +238,7 @@ function renderLine(l) {
         <label>Unit Price (${document.getElementById('po-currency').value || 'AUD'})</label>
         <input type="number" id="l-price-${l._lid}" value="${l.unitPrice||''}"
                min="0" step="0.01" placeholder="0.00" oninput="onPriceChange(${l._lid})" />
+        <div id="l-aud-${l._lid}" style="font-size:0.72rem;color:#6366f1;font-weight:600;margin-top:3px"></div>
       </div>
       <div class="po-field" style="margin:0">
         <label>Freight Override</label>
@@ -387,13 +402,24 @@ function recalcTotals() {
   const shipping    = parseFloat(document.getElementById('tot-shipping').value) || 0;
   const includeGst  = document.getElementById('tot-gst').checked;
 
-  // Sum line totals: qty * unitPrice (in supplier currency) * exRate = AUD
+  // Sum line totals: qty * (unitPrice * exRate) = AUD per line
   let subtotalForeign = 0;
   let subtotalAud     = 0;
   lines.forEach(l => {
-    const lineTotal = (l.totalQty || 0) * (l.unitPrice || 0);
-    subtotalForeign += lineTotal;
-    subtotalAud     += lineTotal * exRate;
+    const audUnit  = (l.unitPrice || 0) * exRate;
+    const audTotal = (l.totalQty  || 0) * audUnit;
+    subtotalForeign += (l.totalQty || 0) * (l.unitPrice || 0);
+    subtotalAud     += audTotal;
+
+    // Update per-line AUD display
+    const audEl = document.getElementById(`l-aud-${l._lid}`);
+    if (audEl) {
+      if (currency !== 'AUD' && l.unitPrice > 0) {
+        audEl.textContent = `AUD ${audUnit.toFixed(2)} / unit  ·  AUD ${audTotal.toFixed(2)} total`;
+      } else {
+        audEl.textContent = '';
+      }
+    }
   });
 
   const subtotalWithShipping = subtotalAud + shipping;
@@ -426,12 +452,13 @@ function updateLinesSummary() {
   const exRate   = parseFloat(document.getElementById('po-exchange-rate').value) || 1;
   const fmt = (n) => n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   el.innerHTML = lines.map((l, i) => {
-    const lineTotal = (l.totalQty || 0) * (l.unitPrice || 0);
+    const audUnit  = (l.unitPrice || 0) * exRate;
+    const audTotal = (l.totalQty  || 0) * audUnit;
     return `<div style="padding:4px 0;border-bottom:1px solid #f1f5f9">
       <span style="color:#64748b;font-size:0.78rem">Line ${i+1}</span>
       <strong style="margin-left:8px">${escHtml(l.productName || 'Unnamed')}</strong>
       <span style="color:#94a3b8;margin-left:8px">${l.totalQty} units</span>
-      ${lineTotal > 0 ? `<span style="float:right;font-weight:700">${currency} ${fmt(lineTotal)}${currency!=='AUD'?` = AUD ${fmt(lineTotal*exRate)}`:''}` : ''}
+      ${audTotal > 0 ? `<span style="float:right;font-weight:700">AUD ${fmt(audTotal)}</span>` : ''}
     </div>`;
   }).join('');
 }
@@ -443,18 +470,21 @@ function buildPayload(status) {
   const supplierName = supplierId ? supplierOpt.textContent.replace(/\s*\(.*\)\s*$/, '').trim() : '';
 
   return {
-    poNumber:     document.getElementById('po-number').value.trim(),
+    poNumber:       document.getElementById('po-number').value.trim(),
     supplierId,
     supplierName,
-    orderDate:    document.getElementById('po-order-date').value,
-    deliveryDate: document.getElementById('po-delivery-date').value || null,
-    freightMode:  document.getElementById('po-freight').value,
-    currency:     document.getElementById('po-currency').value,
-    exchangeRate: parseFloat(document.getElementById('po-exchange-rate').value) || 1,
-    shippingCost: parseFloat(document.getElementById('tot-shipping').value) || 0,
-    includeGst:   document.getElementById('tot-gst').checked,
-    notes:        document.getElementById('po-notes').value.trim() || null,
-    status:       status || undefined,
+    orderDate:      document.getElementById('po-order-date').value,
+    deliveryDate:   document.getElementById('po-delivery-date').value || null,
+    freightMode:    document.getElementById('po-freight').value,
+    currency:       document.getElementById('po-currency').value,
+    exchangeRate:   parseFloat(document.getElementById('po-exchange-rate').value) || 1,
+    shippingCost:   parseFloat(document.getElementById('tot-shipping').value) || 0,
+    includeGst:     document.getElementById('tot-gst').checked,
+    notes:          document.getElementById('po-notes').value.trim() || null,
+    poType:         document.getElementById('po-type').value || 'restock',
+    isCollection:   document.getElementById('po-collection').checked,
+    collectionName: document.getElementById('po-collection-name').value.trim() || null,
+    status:         status || undefined,
     lines: lines.map(l => ({
       lineType:        l.lineType,
       productId:       l.productId || null,
@@ -473,6 +503,11 @@ async function savePO(statusOverride) {
   const payload = buildPayload(statusOverride);
   if (!payload.poNumber)   { alert('PO Number is required.'); return; }
   if (!payload.orderDate)  { alert('Order Date is required.'); return; }
+  if (payload.isCollection && !payload.collectionName) {
+    alert('Collection Name is required when Collection is ticked.');
+    document.getElementById('po-collection-name').focus();
+    return;
+  }
 
   const btn = document.getElementById('btn-save');
   btn.disabled = true;
