@@ -178,11 +178,12 @@
           </select>
         </div>
         <div class="po-field">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input type="checkbox" id="po-collection" onchange="toggleCollection()"
-                   style="width:auto;height:auto;accent-color:#6366f1" />
-            Collection
-          </label>
+          <label>Launch Type</label>
+          <select id="po-launch-type" onchange="onLaunchTypeChange()">
+            <option value="">— None —</option>
+            <option value="new_collection">New Collection</option>
+            <option value="new_item">New Item</option>
+          </select>
           <div id="po-collection-wrap" style="display:none;margin-top:8px">
             <input type="text" id="po-collection-name" placeholder="Collection name (required)" />
           </div>

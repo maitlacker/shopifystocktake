@@ -709,6 +709,7 @@ async function initDb() {
     ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS po_type TEXT NOT NULL DEFAULT 'restock';
     ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS is_collection BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS collection_name TEXT;
+    ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS launch_type TEXT NOT NULL DEFAULT '';
 
     -- ── Forecast & Budget ─────────────────────────────────────────
     CREATE TABLE IF NOT EXISTS forecast_settings (

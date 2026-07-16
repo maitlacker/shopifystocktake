@@ -97,10 +97,8 @@ function populateHeader(po) {
   document.getElementById('tot-shipping').value     = po.shipping_cost || '0';
   document.getElementById('tot-gst').checked        = !!po.include_gst;
   document.getElementById('po-type').value          = po.po_type || 'restock';
-
-  const collCb = document.getElementById('po-collection');
-  if (collCb) collCb.checked = !!po.is_collection;
-  toggleCollection();
+  document.getElementById('po-launch-type').value   = po.launch_type || '';
+  onLaunchTypeChange();
   document.getElementById('po-collection-name').value = po.collection_name || '';
 
   if (po.supplier_id) {
@@ -109,12 +107,13 @@ function populateHeader(po) {
   updateExRateInfo();
 }
 
-function toggleCollection() {
-  const checked = document.getElementById('po-collection').checked;
-  const wrap    = document.getElementById('po-collection-wrap');
-  const nameEl  = document.getElementById('po-collection-name');
-  wrap.style.display = checked ? '' : 'none';
-  if (nameEl) nameEl.required = checked;
+function onLaunchTypeChange() {
+  const val    = document.getElementById('po-launch-type').value;
+  const wrap   = document.getElementById('po-collection-wrap');
+  const nameEl = document.getElementById('po-collection-name');
+  const show   = val === 'new_collection';
+  wrap.style.display = show ? '' : 'none';
+  if (nameEl) nameEl.required = show;
 }
 
 // ── Supplier change ────────────────────────────────────────────────
@@ -482,7 +481,7 @@ function buildPayload(status) {
     includeGst:     document.getElementById('tot-gst').checked,
     notes:          document.getElementById('po-notes').value.trim() || null,
     poType:         document.getElementById('po-type').value || 'restock',
-    isCollection:   document.getElementById('po-collection').checked,
+    launchType:     document.getElementById('po-launch-type').value || '',
     collectionName: document.getElementById('po-collection-name').value.trim() || null,
     status:         status || undefined,
     lines: lines.map(l => ({
@@ -503,8 +502,8 @@ async function savePO(statusOverride) {
   const payload = buildPayload(statusOverride);
   if (!payload.poNumber)   { alert('PO Number is required.'); return; }
   if (!payload.orderDate)  { alert('Order Date is required.'); return; }
-  if (payload.isCollection && !payload.collectionName) {
-    alert('Collection Name is required when Collection is ticked.');
+  if (payload.launchType === 'new_collection' && !payload.collectionName) {
+    alert('Collection Name is required when Launch Type is "New Collection".');
     document.getElementById('po-collection-name').focus();
     return;
   }

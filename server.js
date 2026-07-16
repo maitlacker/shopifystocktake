@@ -1813,18 +1813,18 @@ async function upsertLines(client, orderId, lines) {
 app.post('/api/production-orders', async (req, res) => {
   const { poNumber, supplierId, supplierName, orderDate, deliveryDate, freightMode,
           currency, exchangeRate, shippingCost, includeGst, notes, lines=[],
-          poType, isCollection, collectionName } = req.body;
+          poType, launchType, collectionName } = req.body;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { rows:[po] } = await client.query(
       `INSERT INTO production_orders
          (po_number,supplier_id,supplier_name,order_date,delivery_date,freight_mode,
-          currency,exchange_rate,shipping_cost,include_gst,notes,po_type,is_collection,collection_name)
+          currency,exchange_rate,shipping_cost,include_gst,notes,po_type,launch_type,collection_name)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
       [poNumber, supplierId||null, supplierName||'', orderDate, deliveryDate||null,
        freightMode||'sea', currency||'AUD', exchangeRate||1, shippingCost||0, includeGst||false, notes||null,
-       poType||'restock', isCollection||false, collectionName||null]
+       poType||'restock', launchType||'', collectionName||null]
     );
     await upsertLines(client, po.id, lines);
     await client.query('COMMIT');
@@ -1839,7 +1839,7 @@ app.put('/api/production-orders/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   const { poNumber, supplierId, supplierName, orderDate, deliveryDate, freightMode,
           currency, exchangeRate, shippingCost, includeGst, notes, status, lines,
-          poType, isCollection, collectionName } = req.body;
+          poType, launchType, collectionName } = req.body;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1847,13 +1847,13 @@ app.put('/api/production-orders/:id', async (req, res) => {
       `UPDATE production_orders SET
          po_number=$1,supplier_id=$2,supplier_name=$3,order_date=$4,delivery_date=$5,
          freight_mode=$6,currency=$7,exchange_rate=$8,shipping_cost=$9,include_gst=$10,
-         notes=$11,status=COALESCE($12,status),po_type=$13,is_collection=$14,
+         notes=$11,status=COALESCE($12,status),po_type=$13,launch_type=$14,
          collection_name=$15,updated_at=NOW()
        WHERE id=$16 RETURNING *`,
       [poNumber, supplierId||null, supplierName||'', orderDate, deliveryDate||null,
        freightMode||'sea', currency||'AUD', exchangeRate||1, shippingCost||0,
        includeGst||false, notes||null, status||null,
-       poType||'restock', isCollection||false, collectionName||null, id]
+       poType||'restock', launchType||'', collectionName||null, id]
     );
     if (!po) { await client.query('ROLLBACK'); return res.status(404).json({ error:'Not found' }); }
     if (lines !== undefined) await upsertLines(client, id, lines);
@@ -1996,7 +1996,10 @@ function buildPOPdf(doc, po, lines) {
   if (po.currency && po.currency !== 'AUD') {
     detailRows.push(['Ex. Rate', `1 ${po.currency} = ${fmtNum(po.exchange_rate, 4)} AUD`]);
   }
-  if (po.is_collection && po.collection_name) {
+  if (po.launch_type) {
+    detailRows.push(['Launch Type', po.launch_type === 'new_collection' ? 'New Collection' : 'New Item']);
+  }
+  if (po.launch_type === 'new_collection' && po.collection_name) {
     detailRows.push(['Collection', po.collection_name]);
   }
 
