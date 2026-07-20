@@ -114,9 +114,13 @@ async function generateChart() {
     </div>`;
 
   try {
-    const r    = await fetch(`/api/velocity-chart?ids=${ids}&max_days=${maxDays}`);
+    const r = await fetch(`/api/velocity-chart?ids=${ids}&max_days=${maxDays}`);
+    if (!r.ok) {
+      let msg;
+      try { msg = (await r.json()).error; } catch { msg = await r.text().catch(() => r.statusText); }
+      throw new Error(msg || r.statusText);
+    }
     const data = await r.json();
-    if (!r.ok) throw new Error(data.error || r.statusText);
 
     chartData = data.products;
     renderChart(chartData);

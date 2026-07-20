@@ -2915,6 +2915,7 @@ app.get('/api/velocity/idea-factory/latest', requireAuth, async (req, res) => {
 // ── Velocity Chart (per-product daily sales from launch) ──────────
 
 app.get('/api/velocity-chart', requireAuth, async (req, res) => {
+  try {
   const rawIds    = (req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean);
   const productIds = rawIds.map(Number).filter(n => n > 0);
   const maxDays   = Math.min(parseInt(req.query.max_days || '730'), 730);
@@ -2936,7 +2937,7 @@ app.get('/api/velocity-chart', requireAuth, async (req, res) => {
     id:          p.id,
     title:       p.title,
     publishedAt: p.published_at ? new Date(p.published_at) : null,
-    variantIds:  new Set(p.variants.map(v => v.id)),
+    variantIds:  new Set((p.variants || []).map(v => v.id)),
   })).filter(m => m.publishedAt);
 
   if (!meta.length)
@@ -2946,7 +2947,6 @@ app.get('/api/velocity-chart', requireAuth, async (req, res) => {
   const fetchFrom = minPub > capDate ? minPub : capDate;
   const sinceISO  = fetchFrom.toISOString().slice(0, 10);
 
-  try {
     const allOrders = [];
     let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json?` +
       `status=any&limit=250&created_at_min=${sinceISO}T00:00:00&fields=created_at,line_items`;
