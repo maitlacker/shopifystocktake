@@ -117,8 +117,8 @@ async function generateChart() {
     const r = await fetch(`/api/velocity-chart?ids=${ids}&max_days=${maxDays}`);
     if (!r.ok) {
       let msg;
-      try { msg = (await r.json()).error; } catch { msg = await r.text().catch(() => r.statusText); }
-      throw new Error(msg || r.statusText);
+      try { msg = (await r.json()).error; } catch { msg = await r.text().catch(() => ''); }
+      throw new Error(msg || `Server returned HTTP ${r.status}`);
     }
     const data = await r.json();
 
@@ -126,7 +126,9 @@ async function generateChart() {
     renderChart(chartData);
     renderStats(chartData);
   } catch (err) {
-    body.innerHTML = `<div class="vc-error">Error: ${escHtml(err.message)}</div>`;
+    const display = err.message || 'Unknown error — open browser DevTools console for details';
+    console.error('[velocity-chart]', err);
+    body.innerHTML = `<div class="vc-error">Error: ${escHtml(display)}</div>`;
   } finally {
     genBtn.disabled = false;
     genBtn.textContent = 'Generate Chart';

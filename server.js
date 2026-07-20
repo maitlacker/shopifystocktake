@@ -3001,8 +3001,9 @@ app.get('/api/velocity-chart', requireAuth, async (req, res) => {
 
     res.json({ products: results, orders_fetched: allOrders.length });
   } catch (err) {
-    console.error('Velocity chart error:', err.message);
-    res.status(500).json({ error: err.message });
+    const msg = (err instanceof Error ? err.message : String(err)) || 'Unknown server error';
+    console.error('[velocity-chart] error:', msg, err.stack || err);
+    res.status(500).json({ error: msg });
   }
 });
 
