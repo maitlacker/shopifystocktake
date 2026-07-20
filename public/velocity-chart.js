@@ -41,7 +41,7 @@ function showAC(results) {
   const available  = results.filter(p => !alreadyIds.has(p.id)).slice(0, 12);
   if (!available.length) { list.style.display = 'none'; return; }
   list.innerHTML = available.map(p =>
-    `<div class="vc-autocomplete-item" onmousedown="selectProduct(${p.id}, ${JSON.stringify(escHtml(p.title))})">
+    `<div class="vc-autocomplete-item" data-id="${p.id}" data-title="${escHtml(p.title)}" onmousedown="selectProductFromEl(this)">
       ${escHtml(p.title)}
       <div class="sub">${escHtml(p.variants?.[0]?.sku || '')}</div>
     </div>`
@@ -51,6 +51,10 @@ function showAC(results) {
 
 function hideAC() {
   document.getElementById('vc-autocomplete').style.display = 'none';
+}
+
+function selectProductFromEl(el) {
+  selectProduct(Number(el.dataset.id), el.dataset.title);
 }
 
 function selectProduct(id, title) {
