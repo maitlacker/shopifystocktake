@@ -2912,6 +2912,100 @@ app.get('/api/velocity/idea-factory/latest', requireAuth, async (req, res) => {
   }
 });
 
+// ── Velocity Chart (per-product daily sales from launch) ──────────
+
+app.get('/api/velocity-chart', requireAuth, async (req, res) => {
+  const rawIds    = (req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean);
+  const productIds = rawIds.map(Number).filter(n => n > 0);
+  const maxDays   = Math.min(parseInt(req.query.max_days || '730'), 730);
+
+  if (!productIds.length || productIds.length > 4)
+    return res.status(400).json({ error: 'Provide 1–4 product IDs' });
+
+  if (!productsCache.length) { productsCache = await fetchAllProducts(); lastFetched = new Date(); }
+
+  const products = productIds.map(id => productsCache.find(p => p.id === id)).filter(Boolean);
+  if (!products.length)
+    return res.status(404).json({ error: 'No products found — try refreshing the product cache.' });
+
+  const today    = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const capDate  = new Date(today.getTime() - maxDays * 86400000);
+
+  const meta = products.map(p => ({
+    id:          p.id,
+    title:       p.title,
+    publishedAt: p.published_at ? new Date(p.published_at) : null,
+    variantIds:  new Set(p.variants.map(v => v.id)),
+  })).filter(m => m.publishedAt);
+
+  if (!meta.length)
+    return res.status(400).json({ error: 'None of the selected products have a published date.' });
+
+  const minPub    = meta.reduce((d, m) => m.publishedAt < d ? m.publishedAt : d, meta[0].publishedAt);
+  const fetchFrom = minPub > capDate ? minPub : capDate;
+  const sinceISO  = fetchFrom.toISOString().slice(0, 10);
+
+  try {
+    const allOrders = [];
+    let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json?` +
+      `status=any&limit=250&created_at_min=${sinceISO}T00:00:00&fields=created_at,line_items`;
+
+    while (url) {
+      const r = await fetch(url, { headers: shopifyHeaders() });
+      if (r.status === 429) {
+        await new Promise(ok => setTimeout(ok, (parseFloat(r.headers.get('retry-after') || '2')) * 1000));
+        continue;
+      }
+      if (!r.ok) throw new Error(`Shopify orders ${r.status}`);
+      const data = await r.json();
+      allOrders.push(...(data.orders || []));
+      const next = (r.headers.get('link') || '').match(/<([^>]+)>;\s*rel="next"/);
+      url = next ? next[1] : null;
+    }
+
+    const results = meta.map(m => {
+      const dayMap = {};
+      for (const order of allOrders) {
+        const ds = order.created_at.slice(0, 10);
+        for (const item of (order.line_items || [])) {
+          if (m.variantIds.has(item.variant_id)) dayMap[ds] = (dayMap[ds] || 0) + item.quantity;
+        }
+      }
+
+      const startDate = m.publishedAt > fetchFrom ? m.publishedAt : fetchFrom;
+      const days = [];
+      const cur = new Date(startDate);
+      cur.setUTCHours(0, 0, 0, 0);
+      while (cur.toISOString().slice(0, 10) <= todayStr) {
+        const d = cur.toISOString().slice(0, 10);
+        days.push({ date: d, sold: dayMap[d] || 0 });
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+
+      const totalSold = days.reduce((s, d) => s + d.sold, 0);
+      const peak      = days.reduce((b, d, i) =>
+        d.sold > b.sold ? { date: d.date, sold: d.sold, dayNum: i + 1 } : b,
+        { date: null, sold: 0, dayNum: 0 });
+      const r7  = days.slice(-7).reduce((s, d) => s + d.sold, 0) / 7;
+      const p7  = days.length >= 14 ? days.slice(-14, -7).reduce((s, d) => s + d.sold, 0) / 7 : r7;
+      const trend = r7 > p7 * 1.1 ? 'up' : r7 < p7 * 0.9 ? 'down' : 'flat';
+
+      return {
+        id: m.id, title: m.title,
+        published_at: m.publishedAt.toISOString().slice(0, 10),
+        days, total_sold: totalSold, total_days: days.length,
+        peak, recent7_avg: +r7.toFixed(1), prior7_avg: +p7.toFixed(1), trend,
+      };
+    });
+
+    res.json({ products: results, orders_fetched: allOrders.length });
+  } catch (err) {
+    console.error('Velocity chart error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Sell-Through Report ────────────────────────────────────────────
 
 app.get('/api/sell-through', requireAuth, async (req, res) => {

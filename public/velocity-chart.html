@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Velocity Chart — The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    .vc-page-hdr { margin-bottom:22px; }
+    .vc-page-hdr h1 { font-size:1.4rem; font-weight:700; color:#1e293b; margin:0 0 4px; }
+    .vc-page-hdr p  { font-size:0.85rem; color:#64748b; margin:0; }
+
+    /* Selector panel */
+    .vc-selector { background:#fff; border:1px solid #e2e8f0; border-radius:12px;
+                   padding:18px 20px; margin-bottom:20px; }
+    .vc-selector-row { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-bottom:14px; }
+    .vc-field { display:flex; flex-direction:column; gap:5px; }
+    .vc-field label { font-size:0.7rem; font-weight:700; color:#64748b;
+                      text-transform:uppercase; letter-spacing:0.06em; }
+    .vc-field input, .vc-field select {
+      padding:9px 12px; border:1.5px solid #e2e8f0; border-radius:8px;
+      font-size:0.9rem; color:#1e293b; background:#fff; }
+    .vc-field input:focus, .vc-field select:focus { outline:none; border-color:#6366f1; }
+    .vc-search-wrap { position:relative; flex:1; min-width:240px; }
+    .vc-autocomplete { position:absolute; top:100%; left:0; right:0; background:#fff;
+                       border:1.5px solid #6366f1; border-radius:8px; z-index:200; margin-top:2px;
+                       max-height:220px; overflow-y:auto; box-shadow:0 8px 24px rgba(0,0,0,0.12); }
+    .vc-autocomplete-item { padding:8px 12px; cursor:pointer; font-size:0.85rem;
+                            border-bottom:1px solid #f1f5f9; }
+    .vc-autocomplete-item:last-child { border-bottom:none; }
+    .vc-autocomplete-item:hover { background:#f0f0ff; }
+    .vc-autocomplete-item .sub { font-size:0.72rem; color:#94a3b8; margin-top:1px; }
+
+    /* Product chips */
+    .vc-chips { display:flex; flex-wrap:wrap; gap:8px; min-height:32px; align-items:center; }
+    .vc-chip { display:inline-flex; align-items:center; gap:6px; padding:5px 10px 5px 12px;
+               border-radius:20px; font-size:0.8rem; font-weight:600; color:#fff;
+               white-space:nowrap; }
+    .vc-chip-x { background:none; border:none; color:rgba(255,255,255,0.8); cursor:pointer;
+                 font-size:0.9rem; line-height:1; padding:0; display:flex; align-items:center; }
+    .vc-chip-x:hover { color:#fff; }
+    .vc-chips-hint { font-size:0.78rem; color:#94a3b8; }
+
+    /* Chart section */
+    .vc-chart-wrap { background:#fff; border:1px solid #e2e8f0; border-radius:12px;
+                     padding:20px; margin-bottom:20px; }
+    .vc-chart-toolbar { display:flex; justify-content:space-between; align-items:center;
+                        margin-bottom:16px; flex-wrap:wrap; gap:8px; }
+    .vc-chart-title { font-size:0.78rem; font-weight:800; color:#64748b;
+                      text-transform:uppercase; letter-spacing:0.07em; }
+    .vc-toggle-label { display:flex; align-items:center; gap:6px; font-size:0.78rem;
+                       color:#64748b; cursor:pointer; user-select:none; }
+    .vc-toggle-label input { accent-color:#6366f1; width:14px; height:14px; cursor:pointer; }
+    .vc-canvas-wrap { position:relative; height:360px; }
+    .vc-loading { display:flex; align-items:center; justify-content:center; height:360px;
+                  flex-direction:column; gap:12px; color:#64748b; }
+    .vc-loading-spinner { width:32px; height:32px; border:3px solid #e2e8f0;
+                          border-top-color:#6366f1; border-radius:50%; animation:spin 0.8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .vc-empty { display:flex; align-items:center; justify-content:center; height:360px;
+                flex-direction:column; gap:10px; color:#94a3b8; font-size:0.9rem; }
+    .vc-empty-icon { font-size:2.4rem; }
+    .vc-error { background:#fee2e2; color:#b91c1c; border-radius:8px; padding:14px 16px;
+                font-size:0.85rem; }
+
+    /* Stats cards */
+    .vc-stats-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));
+                     gap:14px; margin-bottom:20px; }
+    .vc-stat-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:16px;
+                    border-top:3px solid var(--card-color, #6366f1); }
+    .vc-stat-product { font-size:0.75rem; font-weight:700; color:var(--card-color, #6366f1);
+                       text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;
+                       white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .vc-stat-row { display:flex; justify-content:space-between; align-items:baseline;
+                   padding:5px 0; border-bottom:1px solid #f1f5f9; font-size:0.82rem; }
+    .vc-stat-row:last-child { border-bottom:none; }
+    .vc-stat-lbl { color:#64748b; }
+    .vc-stat-val { font-weight:700; color:#1e293b; }
+    .vc-trend { display:inline-flex; align-items:center; gap:4px; font-size:0.8rem;
+                font-weight:700; padding:2px 8px; border-radius:10px; }
+    .vc-trend.up   { background:#dcfce7; color:#15803d; }
+    .vc-trend.flat { background:#fef9c3; color:#92400e; }
+    .vc-trend.down { background:#fee2e2; color:#b91c1c; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main class="container" style="padding:24px 20px">
+
+    <div class="vc-page-hdr">
+      <h1>📈 Velocity Chart</h1>
+      <p>Track daily sales velocity per style from launch — compare up to 4 products to spot slowing momentum before committing to a restock.</p>
+    </div>
+
+    <!-- Selector -->
+    <div class="vc-selector">
+      <div class="vc-selector-row">
+        <div class="vc-field vc-search-wrap">
+          <label>Search product</label>
+          <input type="text" id="vc-search" placeholder="Type product name or SKU…" autocomplete="off" />
+          <div id="vc-autocomplete" class="vc-autocomplete" style="display:none"></div>
+        </div>
+        <div class="vc-field">
+          <label>Lookback</label>
+          <select id="vc-lookback">
+            <option value="90">90 days</option>
+            <option value="180">6 months</option>
+            <option value="365" selected>1 year</option>
+            <option value="730">2 years (slow)</option>
+          </select>
+        </div>
+        <button id="vc-generate" class="btn btn-primary" onclick="generateChart()" disabled>
+          Generate Chart
+        </button>
+      </div>
+      <div class="vc-chips" id="vc-chips">
+        <span class="vc-chips-hint">Search and select up to 4 products above</span>
+      </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="vc-chart-wrap">
+      <div class="vc-chart-toolbar">
+        <span class="vc-chart-title">Daily Sales Velocity</span>
+        <label class="vc-toggle-label">
+          <input type="checkbox" id="vc-show-raw" checked onchange="toggleRawLines()" />
+          Show raw daily data
+        </label>
+      </div>
+      <div id="vc-chart-body">
+        <div class="vc-empty">
+          <div class="vc-empty-icon">📈</div>
+          <div>Select products above and click Generate Chart</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats cards -->
+    <div id="vc-stats" class="vc-stats-grid" style="display:none"></div>
+
+  </main>
+  <script src="velocity-chart.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>
