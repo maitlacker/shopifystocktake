@@ -212,6 +212,32 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('pagehide', () => saveSession(true));
 
+// ── Per-order stock remaining computation ──────────────────────────
+function computeDisplayStocks(items) {
+  // Group all items by variantId so we can sum run quantities
+  const variantGroups = {};
+  items.forEach((item) => {
+    if (item.stock === null || item.variantId == null) return;
+    const vid = String(item.variantId);
+    if (!variantGroups[vid]) variantGroups[vid] = [];
+    variantGroups[vid].push({ orderNumber: item.orderNumber, qty: item.qty });
+  });
+
+  // For each item: displayStock = shopify_qty + sum of qty from LATER orders for same variant
+  // = "how many physically remain in warehouse right after picking THIS order"
+  items.forEach((item) => {
+    if (item.stock === null || item.variantId == null) {
+      item.displayStock = null;
+      return;
+    }
+    const peers = variantGroups[String(item.variantId)] || [];
+    const laterQty = peers
+      .filter(p => p.orderNumber > item.orderNumber)
+      .reduce((sum, p) => sum + p.qty, 0);
+    item.displayStock = item.stock + laterQty;
+  });
+}
+
 // ── Load orders ────────────────────────────────────────────────────
 async function loadOrders() {
   const start = document.getElementById('start-order').value.trim();
@@ -235,6 +261,7 @@ async function loadOrders() {
     if (!res.ok) throw new Error(data.error || 'Failed to load orders');
 
     currentItems = data.items;
+    computeDisplayStocks(currentItems);
     pickState    = {};
     lastTap      = {};
     session      = null;
@@ -334,7 +361,7 @@ function renderList(data) {
           <div class="pick-order-num">#${item.orderNumber}</div>
           <div class="pick-qty-row">
             <div class="pick-qty${isMulti ? ' multi' : ''}">${item.qty}</div>
-            ${item.stock !== null ? `<div class="pick-stock">${item.stock} left</div>` : ''}
+            ${item.displayStock !== null ? `<div class="pick-stock${item.displayStock <= 0 ? ' stock-zero' : item.displayStock <= 5 ? ' stock-low' : ''}">${item.displayStock} left</div>` : ''}
           </div>
           ${noteHtml}
         </div>

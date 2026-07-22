@@ -883,11 +883,9 @@ app.get('/api/picking/orders', async (req, res) => {
   }
 
   try {
-    // Auto-populate products cache if empty (clears on every server restart)
-    if (!productsCache.length) {
-      productsCache = await fetchAllProducts();
-      lastFetched   = new Date();
-    }
+    // Always refresh products cache when loading a pick run — ensures stock numbers are live
+    productsCache = await fetchAllProducts();
+    lastFetched   = new Date();
 
     // Build variant→image and variant→stock maps from products cache
     const variantImageMap = {};
