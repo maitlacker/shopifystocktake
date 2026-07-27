@@ -16,6 +16,7 @@
         { label: 'Discrepancy Report',      href: '/discrepancies.html' },
         { label: 'Draft & Archived Stock',  href: '/draft-report.html' },
         { label: 'Stock Sleuth',            href: '/stock-sleuth.html' },
+        { label: 'Stock Receipts',          href: '/stock-receipts.html' },
         { label: 'History',                 href: '/history.html' },
       ],
     },

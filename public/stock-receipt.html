@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stock Receipt – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    .srf-back {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #4f46e5;
+      text-decoration: none;
+      margin-bottom: 16px;
+    }
+    .srf-back:hover { text-decoration: underline; }
+
+    /* Status badge */
+    .srf-status-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .srf-status-badge.draft       { background: #f1f5f9; color: #64748b; }
+    .srf-status-badge.in_progress { background: #fef3c7; color: #92400e; }
+    .srf-status-badge.complete    { background: #dcfce7; color: #15803d; }
+
+    /* Action bar */
+    .srf-action-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 14px 18px;
+      margin-bottom: 20px;
+      position: sticky;
+      top: 8px;
+      z-index: 20;
+    }
+    .srf-action-bar .srf-title-area {
+      flex: 1;
+      min-width: 0;
+    }
+    .srf-action-bar h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .srf-action-bar .srf-subtitle {
+      font-size: 0.78rem;
+      color: #64748b;
+      margin-top: 2px;
+    }
+
+    /* Section cards */
+    .srf-section {
+      background: #fff;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 20px 22px;
+      margin-bottom: 16px;
+    }
+    .srf-section-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin: 0 0 16px;
+    }
+    .srf-row {
+      display: grid;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+    .srf-row.cols-2 { grid-template-columns: 1fr 1fr; }
+    .srf-row.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+    .srf-row.cols-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+    @media (max-width: 640px) {
+      .srf-row.cols-2, .srf-row.cols-3, .srf-row.cols-4 { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 420px) {
+      .srf-row.cols-4 { grid-template-columns: 1fr; }
+    }
+
+    .srf-field { display: flex; flex-direction: column; gap: 5px; }
+    .srf-field label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .srf-field input,
+    .srf-field select,
+    .srf-field textarea {
+      padding: 9px 12px;
+      font-size: 0.93rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 9px;
+      outline: none;
+      background: #fff;
+      color: #1a1a2e;
+      font-family: inherit;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .srf-field input:focus,
+    .srf-field select:focus,
+    .srf-field textarea:focus { border-color: #4f46e5; }
+    .srf-field input[readonly],
+    .srf-field select[disabled],
+    .srf-field textarea[readonly] {
+      background: #f8fafc;
+      color: #475569;
+      cursor: default;
+    }
+    .srf-field textarea { resize: vertical; min-height: 80px; }
+
+    /* Auto-complete dropdown */
+    .srf-ac-wrap { position: relative; }
+    .srf-ac-list {
+      display: none;
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      background: #fff;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+      z-index: 100;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+    .srf-ac-item {
+      padding: 10px 14px;
+      cursor: pointer;
+      font-size: 0.88rem;
+      color: #1a1a2e;
+    }
+    .srf-ac-item:hover { background: #f8f7ff; }
+    .srf-ac-item .srf-ac-sub { font-size: 0.78rem; color: #94a3b8; margin-top: 1px; }
+
+    /* Toggle (Yes/No) */
+    .srf-toggle-row {
+      display: flex;
+      gap: 8px;
+    }
+    .srf-toggle {
+      flex: 1;
+      padding: 8px 0;
+      border: 2px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      background: #fff;
+      color: #64748b;
+      text-align: center;
+      transition: all 0.12s;
+    }
+    .srf-toggle.active-yes { border-color: #15803d; background: #dcfce7; color: #15803d; }
+    .srf-toggle.active-no  { border-color: #dc2626; background: #fee2e2; color: #dc2626; }
+    .srf-toggle[disabled]  { cursor: default; opacity: 0.7; }
+
+    /* Receipt type buttons */
+    .srf-type-btns { display: flex; gap: 8px; }
+    .srf-type-btn {
+      flex: 1;
+      padding: 8px;
+      border: 2px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      background: #fff;
+      color: #64748b;
+      text-align: center;
+    }
+    .srf-type-btn.active { border-color: #4f46e5; background: #ede9fe; color: #4f46e5; }
+    .srf-type-btn[disabled] { cursor: default; opacity: 0.8; }
+
+    /* Product features */
+    .srf-features-list { display: flex; flex-direction: column; gap: 8px; }
+    .srf-feature-row { display: flex; gap: 8px; align-items: center; }
+    .srf-feature-row input {
+      flex: 1;
+      padding: 8px 11px;
+      font-size: 0.9rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 8px;
+      outline: none;
+    }
+    .srf-feature-row input:focus { border-color: #4f46e5; }
+    .srf-feature-num {
+      width: 20px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #94a3b8;
+      flex-shrink: 0;
+      text-align: right;
+    }
+
+    /* Size grid */
+    .srf-size-grid-wrap { overflow-x: auto; }
+    .srf-size-grid {
+      border-collapse: collapse;
+      width: 100%;
+      min-width: 320px;
+    }
+    .srf-size-grid th {
+      background: #f8fafc;
+      padding: 7px 10px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      text-align: left;
+      border-bottom: 2px solid #e2e8f0;
+      white-space: nowrap;
+    }
+    .srf-size-grid td {
+      padding: 5px 6px;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .srf-size-grid td input {
+      width: 72px;
+      padding: 6px 8px;
+      font-size: 0.88rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 7px;
+      outline: none;
+      text-align: center;
+    }
+    .srf-size-grid td input:focus { border-color: #4f46e5; }
+    .srf-size-grid .srf-size-label {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      padding: 6px 10px;
+    }
+    .srf-size-grid tfoot td {
+      padding: 8px 10px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #374151;
+      border-top: 2px solid #e2e8f0;
+    }
+
+    /* Shopify link / shelf count */
+    .srf-linked-product {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #f8f7ff;
+      border: 1.5px solid #c4b5fd;
+      border-radius: 9px;
+      padding: 8px 12px;
+      margin-top: 8px;
+    }
+    .srf-linked-product .srf-lp-title {
+      flex: 1;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #4f46e5;
+    }
+    .srf-linked-product button {
+      font-size: 0.78rem;
+      padding: 4px 10px;
+      border: 1.5px solid #a5b4fc;
+      border-radius: 6px;
+      background: #fff;
+      color: #4f46e5;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .srf-shelf-results {
+      margin-top: 12px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .srf-shelf-results table { width: 100%; border-collapse: collapse; }
+    .srf-shelf-results th {
+      background: #f1f5f9;
+      padding: 7px 14px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      text-align: left;
+    }
+    .srf-shelf-results td {
+      padding: 8px 14px;
+      font-size: 0.88rem;
+      border-top: 1px solid #f1f5f9;
+    }
+    .srf-shelf-total {
+      padding: 8px 14px;
+      font-size: 0.88rem;
+      font-weight: 700;
+      background: #f8fafc;
+      border-top: 2px solid #e2e8f0;
+    }
+
+    /* Photos */
+    .srf-photos-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: flex-start;
+    }
+    .srf-photo-thumb {
+      position: relative;
+      width: 120px;
+      height: 120px;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 2px solid #e2e8f0;
+      flex-shrink: 0;
+    }
+    .srf-photo-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .srf-photo-del {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      background: rgba(220,38,38,0.88);
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      width: 22px;
+      height: 22px;
+      font-size: 13px;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .srf-photo-add {
+      width: 120px;
+      height: 120px;
+      border-radius: 10px;
+      border: 2px dashed #c4b5fd;
+      background: #f8f7ff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: #4f46e5;
+      font-size: 0.78rem;
+      font-weight: 600;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .srf-photo-add:hover { background: #ede9fe; }
+    .srf-photo-add span { font-size: 1.6rem; line-height: 1; }
+
+    /* Audit trail */
+    .srf-audit-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      padding: 0;
+      background: none;
+      border: none;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .srf-audit-body {
+      display: none;
+      margin-top: 14px;
+    }
+    .srf-audit-body.open { display: block; }
+    .srf-audit-entry {
+      display: flex;
+      gap: 10px;
+      font-size: 0.82rem;
+      color: #374151;
+      padding: 6px 0;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .srf-audit-time { color: #94a3b8; flex-shrink: 0; white-space: nowrap; }
+    .srf-audit-who  { color: #64748b; flex-shrink: 0; }
+    .srf-audit-what { flex: 1; }
+    .srf-audit-what .old { color: #94a3b8; text-decoration: line-through; font-size: 0.78rem; }
+    .srf-audit-what .new { color: #15803d; font-size: 0.78rem; }
+
+    /* Save indicator */
+    .srf-save-status {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #64748b;
+    }
+    .srf-save-status.saving { color: #d97706; }
+    .srf-save-status.saved  { color: #15803d; }
+    .srf-save-status.error  { color: #dc2626; }
+
+    /* Complete confirm overlay */
+    .srf-confirm-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 900;
+      align-items: center;
+      justify-content: center;
+    }
+    .srf-confirm-overlay.open { display: flex; }
+    .srf-confirm-box {
+      background: #fff;
+      border-radius: 18px;
+      padding: 28px;
+      width: min(400px, calc(100vw - 32px));
+      text-align: center;
+    }
+    .srf-confirm-box h3 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin: 0 0 10px;
+    }
+    .srf-confirm-box p {
+      font-size: 0.9rem;
+      color: #64748b;
+      margin: 0 0 20px;
+    }
+    .srf-confirm-box .btns {
+      display: flex;
+      gap: 10px;
+    }
+    .srf-confirm-box .btns button { flex: 1; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main>
+    <a href="/stock-receipts.html" class="srf-back">← Stock Receipts</a>
+
+    <!-- Sticky action bar -->
+    <div class="srf-action-bar" id="srf-action-bar">
+      <div class="srf-title-area">
+        <h3 id="srf-head-title">Stock Receipt</h3>
+        <div class="srf-subtitle" id="srf-head-sub"></div>
+      </div>
+      <span class="srf-save-status" id="srf-save-status"></span>
+      <a id="srf-pdf-btn" class="btn btn-secondary" style="text-decoration:none;display:none" target="_blank">↓ PDF</a>
+      <button class="btn btn-secondary" id="srf-save-btn" onclick="saveForm()">Save Progress</button>
+      <button class="btn btn-primary"   id="srf-complete-btn" onclick="openCompleteConfirm()">Mark Complete ✓</button>
+    </div>
+
+    <div id="srf-body"></div>
+
+    <!-- Complete confirmation -->
+    <div class="srf-confirm-overlay" id="srf-confirm-overlay">
+      <div class="srf-confirm-box">
+        <h3>Complete this receipt?</h3>
+        <p>Once marked complete the form will be locked and cannot be edited. A Slack notification will be sent.</p>
+        <div class="btns">
+          <button class="btn btn-secondary" onclick="closeCompleteConfirm()">Cancel</button>
+          <button class="btn btn-primary"   id="srf-confirm-btn" onclick="completeForm()">Yes, Complete</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="stock-receipt.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

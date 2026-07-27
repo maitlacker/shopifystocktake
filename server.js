@@ -6547,6 +6547,580 @@ app.get('/api/stock-sleuth', requireAuth, async (req, res) => {
   }
 });
 
+// ── Stock Receipt Forms (SRF) ─────────────────────────────────────
+
+app.get('/api/srf/config', requireAuth, async (req, res) => {
+  try {
+    const [ftRes, sgRes] = await Promise.all([
+      pool.query('SELECT * FROM srf_form_types ORDER BY sort_order, name'),
+      pool.query('SELECT * FROM srf_size_groups ORDER BY sort_order, name'),
+    ]);
+    res.json({ formTypes: ftRes.rows, sizeGroups: sgRes.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/srf/po-search', requireAuth, async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.json([]);
+    const { rows } = await pool.query(
+      `SELECT id, po_number, supplier_name, status, order_date
+       FROM production_orders
+       WHERE po_number ILIKE $1
+       ORDER BY order_date DESC LIMIT 10`,
+      [`%${q}%`]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/srf/style-search', requireAuth, async (req, res) => {
+  try {
+    const q = (req.query.q || '').toLowerCase().trim();
+    if (!q) return res.json([]);
+    const cache = productsCache.length ? productsCache : await fetchAllProducts();
+    const results = cache
+      .filter(p => p.title.toLowerCase().includes(q))
+      .slice(0, 12)
+      .map(p => ({ id: p.id, title: p.title, image: (p.images || [])[0]?.src || null }));
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/stock-receipts', requireAuth, async (req, res) => {
+  try {
+    const { status, form_type_id, q } = req.query;
+    const limit  = Math.min(Number(req.query.limit)  || 50, 200);
+    const offset = Number(req.query.offset) || 0;
+
+    const conditions   = [];
+    const filterParams = [];
+
+    if (status) {
+      filterParams.push(status);
+      conditions.push(`status = $${filterParams.length}`);
+    }
+    if (form_type_id) {
+      filterParams.push(Number(form_type_id));
+      conditions.push(`form_type_id = $${filterParams.length}`);
+    }
+    if (q) {
+      const like = `%${q}%`;
+      filterParams.push(like, like, like, like);
+      const n = filterParams.length;
+      conditions.push(`(style_name ILIKE $${n-3} OR supplier ILIKE $${n-2} OR po_number ILIKE $${n-1} OR invoice_number ILIKE $${n})`);
+    }
+
+    const where   = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const pLimit  = filterParams.length + 1;
+    const pOffset = filterParams.length + 2;
+
+    const [dataRes, countRes] = await Promise.all([
+      pool.query(
+        `SELECT id, form_type_name, size_group_name, receipt_type, style_name, supplier,
+                invoice_number, po_number, receipt_date, processed_by, status,
+                completed_at, created_at, created_by, updated_at
+         FROM stock_receipts ${where}
+         ORDER BY created_at DESC LIMIT $${pLimit} OFFSET $${pOffset}`,
+        [...filterParams, limit, offset]
+      ),
+      pool.query(`SELECT COUNT(*) FROM stock_receipts ${where}`, filterParams),
+    ]);
+
+    res.json({ receipts: dataRes.rows, total: Number(countRes.rows[0].count) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/stock-receipts', requireAuth, async (req, res) => {
+  try {
+    const { form_type_id, size_group_id, receipt_type = 'restock', processed_by } = req.body;
+    const user = req.user?.email || 'unknown';
+
+    const [ftRes, sgRes] = await Promise.all([
+      form_type_id  ? pool.query('SELECT name FROM srf_form_types WHERE id=$1', [form_type_id])  : Promise.resolve({ rows: [] }),
+      size_group_id ? pool.query('SELECT name, sizes FROM srf_size_groups WHERE id=$1', [size_group_id]) : Promise.resolve({ rows: [] }),
+    ]);
+    const form_type_name  = ftRes.rows[0]?.name  || null;
+    const size_group_name = sgRes.rows[0]?.name  || null;
+    const rawSizes        = sgRes.rows[0]?.sizes || [];
+    const sizesArr        = Array.isArray(rawSizes) ? rawSizes : JSON.parse(rawSizes);
+
+    const { rows } = await pool.query(
+      `INSERT INTO stock_receipts (form_type_id, form_type_name, size_group_id, size_group_name,
+         receipt_type, processed_by, receipt_date, status, created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,CURRENT_DATE,'draft',$7,$7) RETURNING id`,
+      [form_type_id || null, form_type_name, size_group_id || null, size_group_name,
+       receipt_type, processed_by || null, user]
+    );
+    const id = rows[0].id;
+
+    for (let i = 0; i < sizesArr.length; i++) {
+      await pool.query(
+        `INSERT INTO stock_receipt_sizes (receipt_id, size_label, sort_order) VALUES ($1,$2,$3)`,
+        [id, String(sizesArr[i]), i]
+      );
+    }
+    await pool.query(
+      `INSERT INTO stock_receipt_audit (receipt_id, action, changed_by) VALUES ($1,'created',$2)`,
+      [id, user]
+    );
+
+    res.json({ id });
+  } catch (err) {
+    console.error('[srf] create error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/stock-receipts/:id', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [receiptRes, sizesRes, photosRes, auditRes] = await Promise.all([
+      pool.query('SELECT * FROM stock_receipts WHERE id=$1', [id]),
+      pool.query('SELECT * FROM stock_receipt_sizes WHERE receipt_id=$1 ORDER BY sort_order', [id]),
+      pool.query(
+        `SELECT id, receipt_id, filename, uploaded_at, uploaded_by,
+                LEFT(data, 100) AS data_preview, LENGTH(data) AS data_length
+         FROM stock_receipt_photos WHERE receipt_id=$1 ORDER BY id`, [id]
+      ),
+      pool.query('SELECT * FROM stock_receipt_audit WHERE receipt_id=$1 ORDER BY changed_at DESC LIMIT 100', [id]),
+    ]);
+    if (!receiptRes.rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json({
+      receipt: receiptRes.rows[0],
+      sizes:   sizesRes.rows,
+      photos:  photosRes.rows,
+      audit:   auditRes.rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/stock-receipts/:id/photos/:pid/data', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT data, filename FROM stock_receipt_photos WHERE id=$1 AND receipt_id=$2',
+      [req.params.pid, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json({ data: rows[0].data, filename: rows[0].filename });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/stock-receipts/:id', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const user = req.user?.email || 'unknown';
+
+    const existingRes = await pool.query('SELECT * FROM stock_receipts WHERE id=$1', [id]);
+    if (!existingRes.rows.length) return res.status(404).json({ error: 'Not found' });
+    if (existingRes.rows[0].status === 'complete') return res.status(400).json({ error: 'Completed forms cannot be edited' });
+
+    const prev = existingRes.rows[0];
+    const body = req.body;
+
+    const UPDATABLE = [
+      'receipt_type','style_name','supplier','invoice_number','po_number','po_id',
+      'product_code','shopify_product_id','shopify_product_title','receipt_date',
+      'processed_by','stock_matches_invoice','on_rack_for_photoshoot',
+      'cost_price','discount_percent','freight_price','final_price',
+      'fabric','stretch_allowance','product_features','notes',
+    ];
+
+    const setClauses   = [];
+    const setParams    = [];
+    const auditEntries = [];
+
+    for (const field of UPDATABLE) {
+      if (!(field in body)) continue;
+      const newVal = body[field];
+      const oldVal = prev[field];
+      const toStr  = v => v == null ? null : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+      const newStr = toStr(newVal);
+      const oldStr = toStr(oldVal);
+      if (newStr !== oldStr) {
+        setClauses.push(`${field} = $${setParams.push(newVal)}`);
+        auditEntries.push({ field_name: field, old_value: oldStr, new_value: newStr });
+      }
+    }
+
+    // Transition draft → in_progress on first save
+    if (prev.status === 'draft') {
+      setClauses.push(`status = 'in_progress'`);
+    }
+
+    setClauses.push(`updated_at = NOW()`);
+    setClauses.push(`updated_by = $${setParams.push(user)}`);
+    setParams.push(id);
+
+    await pool.query(
+      `UPDATE stock_receipts SET ${setClauses.join(', ')} WHERE id=$${setParams.length}`,
+      setParams
+    );
+
+    // Replace size rows
+    if (Array.isArray(body.sizes)) {
+      await pool.query('DELETE FROM stock_receipt_sizes WHERE receipt_id=$1', [id]);
+      for (let i = 0; i < body.sizes.length; i++) {
+        const s = body.sizes[i];
+        await pool.query(
+          `INSERT INTO stock_receipt_sizes (receipt_id, size_label, sort_order, qty, measurements)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [id, s.size_label, i, s.qty ?? null, JSON.stringify(s.measurements || {})]
+        );
+      }
+      auditEntries.push({ field_name: 'sizes', old_value: null, new_value: `${body.sizes.length} rows` });
+    }
+
+    for (const entry of auditEntries) {
+      await pool.query(
+        `INSERT INTO stock_receipt_audit (receipt_id, action, field_name, old_value, new_value, changed_by)
+         VALUES ($1,'updated',$2,$3,$4,$5)`,
+        [id, entry.field_name, entry.old_value, entry.new_value, user]
+      );
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[srf] update error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/stock-receipts/:id/complete', requireAuth, async (req, res) => {
+  try {
+    const id   = Number(req.params.id);
+    const user = req.user?.email || 'unknown';
+
+    const existingRes = await pool.query('SELECT * FROM stock_receipts WHERE id=$1', [id]);
+    if (!existingRes.rows.length) return res.status(404).json({ error: 'Not found' });
+    if (existingRes.rows[0].status === 'complete') return res.status(400).json({ error: 'Already complete' });
+
+    await pool.query(
+      `UPDATE stock_receipts SET status='complete', completed_at=NOW(), completed_by=$1,
+         updated_at=NOW(), updated_by=$1 WHERE id=$2`,
+      [user, id]
+    );
+    await pool.query(
+      `INSERT INTO stock_receipt_audit (receipt_id, action, changed_by) VALUES ($1,'completed',$2)`,
+      [id, user]
+    );
+
+    // Slack notification — fire and forget, no crash if env var missing
+    const slackWebhook = process.env.SLACK_RECEIPT_WEBHOOK_URL;
+    if (slackWebhook) {
+      const r = existingRes.rows[0];
+      fetch(slackWebhook, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: `✅ Stock Receipt #${id} completed`,
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `✅ *Stock Receipt #${id} — Complete*\n*${r.form_type_name || 'Receipt'}* | *${r.style_name || 'No style name'}*\nCompleted by: ${user}`,
+              },
+            },
+            {
+              type: 'section',
+              fields: [
+                { type: 'mrkdwn', text: `*Supplier:*\n${r.supplier || '—'}` },
+                { type: 'mrkdwn', text: `*Invoice:*\n${r.invoice_number || '—'}` },
+                { type: 'mrkdwn', text: `*PO Number:*\n${r.po_number || '—'}` },
+                { type: 'mrkdwn', text: `*Date:*\n${r.receipt_date ? String(r.receipt_date).slice(0,10) : '—'}` },
+              ],
+            },
+          ],
+        }),
+      }).catch(err => console.error('[srf] Slack notification failed:', err.message));
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[srf] complete error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/stock-receipts/:id/photos', requireAuth, async (req, res) => {
+  try {
+    const id   = Number(req.params.id);
+    const user = req.user?.email || 'unknown';
+    const { filename, data } = req.body;
+    if (!data) return res.status(400).json({ error: 'No photo data' });
+
+    const existingRes = await pool.query('SELECT status FROM stock_receipts WHERE id=$1', [id]);
+    if (!existingRes.rows.length) return res.status(404).json({ error: 'Not found' });
+    if (existingRes.rows[0].status === 'complete') return res.status(400).json({ error: 'Completed forms cannot be edited' });
+
+    const countRes = await pool.query('SELECT COUNT(*) FROM stock_receipt_photos WHERE receipt_id=$1', [id]);
+    if (Number(countRes.rows[0].count) >= 3) return res.status(400).json({ error: 'Maximum 3 photos per receipt' });
+
+    const { rows } = await pool.query(
+      `INSERT INTO stock_receipt_photos (receipt_id, filename, data, uploaded_by)
+       VALUES ($1,$2,$3,$4) RETURNING id, filename, uploaded_at`,
+      [id, filename || null, data, user]
+    );
+    await pool.query(
+      `INSERT INTO stock_receipt_audit (receipt_id, action, field_name, new_value, changed_by)
+       VALUES ($1,'photo_added','photo',$2,$3)`,
+      [id, filename || 'photo', user]
+    );
+    res.json({ photo: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/stock-receipts/:id/photos/:pid', requireAuth, async (req, res) => {
+  try {
+    const id   = Number(req.params.id);
+    const pid  = Number(req.params.pid);
+    const user = req.user?.email || 'unknown';
+
+    const existingRes = await pool.query('SELECT status FROM stock_receipts WHERE id=$1', [id]);
+    if (!existingRes.rows.length) return res.status(404).json({ error: 'Not found' });
+    if (existingRes.rows[0].status === 'complete') return res.status(400).json({ error: 'Completed forms cannot be edited' });
+
+    await pool.query('DELETE FROM stock_receipt_photos WHERE id=$1 AND receipt_id=$2', [pid, id]);
+    await pool.query(
+      `INSERT INTO stock_receipt_audit (receipt_id, action, field_name, changed_by)
+       VALUES ($1,'photo_removed','photo',$2)`,
+      [id, user]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/stock-receipts/:id/shelf-count', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { rows } = await pool.query(
+      'SELECT shopify_product_id, shopify_product_title FROM stock_receipts WHERE id=$1', [id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    const shopifyId = rows[0].shopify_product_id;
+    if (!shopifyId) return res.json({ variants: [], total: 0, note: 'No Shopify product linked' });
+
+    const r = await fetch(
+      `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products/${shopifyId}.json?fields=id,title,variants`,
+      { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } }
+    );
+    if (!r.ok) return res.status(502).json({ error: `Shopify API error ${r.status}` });
+    const { product } = await r.json();
+
+    const variants = (product.variants || []).map(v => ({
+      id:    v.id,
+      title: v.title,
+      sku:   v.sku,
+      qty:   v.inventory_quantity,
+    }));
+    const total = variants.reduce((s, v) => s + (v.qty || 0), 0);
+    res.json({ variants, total, product_title: product.title });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/stock-receipts/:id/pdf', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [receiptRes, sizesRes, photosRes] = await Promise.all([
+      pool.query('SELECT * FROM stock_receipts WHERE id=$1', [id]),
+      pool.query('SELECT * FROM stock_receipt_sizes WHERE receipt_id=$1 ORDER BY sort_order', [id]),
+      pool.query('SELECT id, filename, data FROM stock_receipt_photos WHERE receipt_id=$1 ORDER BY id', [id]),
+    ]);
+    if (!receiptRes.rows.length) return res.status(404).send('Not found');
+
+    const r      = receiptRes.rows[0];
+    const sizes  = sizesRes.rows;
+    const photos = photosRes.rows;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="stock-receipt-${id}.pdf"`);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    doc.pipe(res);
+
+    const PAGE_W = doc.page.width;
+    const PAGE_H = doc.page.height;
+    const ML     = 40;
+    const W      = PAGE_W - 80;
+
+    function addPageIfNeeded(yPos, needed) {
+      if (yPos + needed > PAGE_H - 50) { doc.addPage(); return 40; }
+      return yPos;
+    }
+
+    function drawField(label, value, x, w, yPos) {
+      doc.fontSize(7).font('Helvetica-Bold').fillColor('#64748b').text(label, x, yPos, { width: w });
+      doc.fontSize(9).font('Helvetica').fillColor('#1a1a2e').text(value || '—', x, yPos + 9, { width: w, lineBreak: false });
+      return yPos + 24;
+    }
+
+    function divider(yPos) {
+      doc.moveTo(ML, yPos).lineTo(ML + W, yPos).strokeColor('#e2e8f0').lineWidth(0.5).stroke();
+      return yPos + 6;
+    }
+
+    // ── Title ──
+    doc.fontSize(16).font('Helvetica-Bold').fillColor('#1a1a2e')
+       .text('STOCK RECEIPT FORM', ML, 40, { align: 'center', width: W });
+    doc.fontSize(10).font('Helvetica').fillColor('#64748b')
+       .text(`#${id}  ·  ${r.form_type_name || ''}  ·  ${r.receipt_type === 'new' ? 'New Product' : 'Restock'}`, ML, 60, { align: 'center', width: W });
+    const sColor = r.status === 'complete' ? '#15803d' : r.status === 'in_progress' ? '#d97706' : '#64748b';
+    doc.fontSize(8).fillColor(sColor).text(`Status: ${r.status.toUpperCase().replace('_',' ')}`, ML, 75, { align: 'center', width: W });
+    doc.fillColor('#000');
+
+    let y = 96;
+    y = divider(y);
+
+    // ── Row 1: Date / Processed by / Type ──
+    const c3 = W / 3;
+    drawField('RECEIPT DATE',  r.receipt_date ? String(r.receipt_date).slice(0,10) : '—', ML, c3 - 8, y);
+    drawField('PROCESSED BY',  r.processed_by, ML + c3, c3 - 8, y);
+    drawField('TYPE',          r.receipt_type === 'new' ? 'New Product' : 'Restock', ML + c3 * 2, c3 - 8, y);
+    y += 28;
+    y = divider(y);
+
+    // ── Row 2: Style / Supplier / Invoice / PO ──
+    const c4 = W / 4;
+    drawField('STYLE NAME',  r.style_name,     ML,          c4 - 6, y);
+    drawField('SUPPLIER',    r.supplier,        ML + c4,     c4 - 6, y);
+    drawField('INVOICE #',   r.invoice_number,  ML + c4*2,   c4 - 6, y);
+    drawField('PO NUMBER',   r.po_number,       ML + c4*3,   c4 - 6, y);
+    y += 28;
+    y = divider(y);
+
+    // ── Pricing ──
+    const c2 = W / 2 - 6;
+    drawField('COST PRICE',   r.cost_price     != null ? `$${Number(r.cost_price).toFixed(2)}`     : '—', ML,       c2, y);
+    drawField('DISCOUNT',     r.discount_percent != null ? `${r.discount_percent}%`                : '—', ML+c2+12, c2, y);
+    y += 28;
+    drawField('FREIGHT',      r.freight_price  != null ? `$${Number(r.freight_price).toFixed(2)}`  : '—', ML,       c2, y);
+    drawField('FINAL PRICE',  r.final_price    != null ? `$${Number(r.final_price).toFixed(2)}`    : '—', ML+c2+12, c2, y);
+    y += 28;
+    drawField('FABRIC',          r.fabric,             ML,       c2, y);
+    drawField('STRETCH ALLOWANCE', r.stretch_allowance, ML+c2+12, c2, y);
+    y += 28;
+    drawField('STOCK MATCHES INVOICE',  r.stock_matches_invoice  == null ? '—' : (r.stock_matches_invoice  ? 'Yes ✓' : 'No ✗'), ML,       c2, y);
+    drawField('ON RACK FOR PHOTOSHOOT', r.on_rack_for_photoshoot == null ? '—' : (r.on_rack_for_photoshoot ? 'Yes ✓' : 'No ✗'), ML+c2+12, c2, y);
+    y += 28;
+    y = divider(y);
+
+    // ── Product Features ──
+    const features = Array.isArray(r.product_features) ? r.product_features
+      : (r.product_features ? JSON.parse(r.product_features) : []);
+    const filled = features.filter(Boolean);
+    if (filled.length) {
+      y = addPageIfNeeded(y, 14 + filled.length * 13);
+      doc.fontSize(7).font('Helvetica-Bold').fillColor('#64748b').text('PRODUCT FEATURES', ML, y);
+      y += 11;
+      filled.forEach(f => {
+        doc.fontSize(9).font('Helvetica').fillColor('#1a1a2e').text(`• ${f}`, ML + 4, y, { width: W - 8 });
+        y += 13;
+      });
+      y += 4;
+      y = divider(y);
+    }
+
+    // ── Size Grid ──
+    if (sizes.length) {
+      y = addPageIfNeeded(y, 14 + (sizes.length + 2) * 14);
+      doc.fontSize(7).font('Helvetica-Bold').fillColor('#64748b').text('SIZE QUANTITIES', ML, y);
+      y += 12;
+
+      // Determine measurement fields from first row with data
+      const sampleMeasurements = (() => {
+        const s = sizes.find(sz => {
+          const m = typeof sz.measurements === 'string' ? JSON.parse(sz.measurements) : (sz.measurements || {});
+          return Object.keys(m).length > 0;
+        });
+        if (!s) return {};
+        return typeof s.measurements === 'string' ? JSON.parse(s.measurements) : s.measurements;
+      })();
+      const mFields = Object.keys(sampleMeasurements);
+      const allCols = ['Size', 'Qty', ...mFields];
+      const colW    = Math.min(55, W / allCols.length);
+
+      // Header row
+      doc.fontSize(7).font('Helvetica-Bold').fillColor('#64748b');
+      allCols.forEach((col, ci) => doc.text(col, ML + ci * colW, y, { width: colW - 2 }));
+      y += 11;
+      doc.moveTo(ML, y).lineTo(ML + colW * allCols.length, y).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
+      y += 4;
+
+      doc.fontSize(9).font('Helvetica').fillColor('#1a1a2e');
+      let totalQty = 0;
+      sizes.forEach(s => {
+        const m = typeof s.measurements === 'string' ? JSON.parse(s.measurements) : (s.measurements || {});
+        const vals = [s.size_label, s.qty != null ? String(s.qty) : '—', ...mFields.map(f => m[f] != null ? String(m[f]) : '—')];
+        vals.forEach((v, ci) => doc.text(v, ML + ci * colW, y, { width: colW - 2, lineBreak: false }));
+        totalQty += s.qty || 0;
+        y += 13;
+      });
+      doc.font('Helvetica-Bold').text('TOTAL', ML, y);
+      doc.text(String(totalQty), ML + colW, y, { width: colW - 2 });
+      y += 16;
+      y = divider(y);
+    }
+
+    // ── Notes ──
+    if (r.notes) {
+      y = addPageIfNeeded(y, 40);
+      doc.fontSize(7).font('Helvetica-Bold').fillColor('#64748b').text('NOTES', ML, y);
+      y += 11;
+      doc.fontSize(9).font('Helvetica').fillColor('#1a1a2e').text(r.notes, ML, y, { width: W });
+      y += doc.heightOfString(r.notes, { width: W, fontSize: 9 }) + 12;
+      y = divider(y);
+    }
+
+    // ── Photos ──
+    if (photos.length) {
+      y = addPageIfNeeded(y, 140);
+      doc.fontSize(7).font('Helvetica-Bold').fillColor('#64748b').text(`PHOTOS (${photos.length})`, ML, y);
+      y += 12;
+      const photoW = Math.min(150, (W - (photos.length - 1) * 10) / photos.length);
+      photos.forEach((photo, pi) => {
+        try {
+          let imgData = photo.data;
+          if (imgData.includes(',')) imgData = imgData.split(',')[1];
+          const buf = Buffer.from(imgData, 'base64');
+          doc.image(buf, ML + pi * (photoW + 10), y, { fit: [photoW, 120] });
+        } catch (_) { /* skip invalid image */ }
+      });
+      y += 130;
+    }
+
+    // ── Footer ──
+    doc.fontSize(7).font('Helvetica').fillColor('#94a3b8')
+       .text(
+         `Generated ${new Date().toLocaleString('en-AU')}  ·  The Self Styler WMS  ·  Receipt #${id}`,
+         ML, PAGE_H - 30, { align: 'center', width: W }
+       );
+
+    doc.end();
+  } catch (err) {
+    console.error('[srf] PDF error:', err.message);
+    if (!res.headersSent) res.status(500).send('PDF error: ' + err.message);
+  }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 

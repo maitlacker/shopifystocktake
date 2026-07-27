@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stock Receipts – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    .srl-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+    .srl-search {
+      flex: 1;
+      min-width: 200px;
+      max-width: 340px;
+      padding: 10px 14px;
+      font-size: 0.95rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 10px;
+      outline: none;
+    }
+    .srl-search:focus { border-color: #4f46e5; }
+    .srl-filter {
+      padding: 10px 14px;
+      font-size: 0.9rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 10px;
+      outline: none;
+      background: #fff;
+      color: #374151;
+      cursor: pointer;
+    }
+    .srl-filter:focus { border-color: #4f46e5; }
+
+    /* Receipt cards grid */
+    .srl-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 14px;
+    }
+    .srl-card {
+      background: #fff;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 18px 20px;
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      text-decoration: none;
+      display: block;
+      color: inherit;
+    }
+    .srl-card:hover {
+      border-color: #4f46e5;
+      box-shadow: 0 4px 16px rgba(79,70,229,0.10);
+    }
+    .srl-card-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .srl-card-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      flex: 1;
+      min-width: 0;
+    }
+    .srl-card-id {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #94a3b8;
+    }
+    .srl-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+    .srl-badge.draft      { background: #f1f5f9; color: #64748b; }
+    .srl-badge.in_progress { background: #fef3c7; color: #92400e; }
+    .srl-badge.complete   { background: #dcfce7; color: #15803d; }
+    .srl-card-meta {
+      font-size: 0.82rem;
+      color: #64748b;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px 10px;
+    }
+    .srl-card-meta span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .srl-card-meta strong { color: #374151; }
+    .srl-card-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .srl-card-actions a {
+      flex: 1;
+      text-align: center;
+      padding: 7px 0;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .srl-btn-view { background: #ede9fe; color: #4f46e5; }
+    .srl-btn-view:hover { background: #ddd6fe; }
+    .srl-btn-pdf  { background: #f1f5f9; color: #475569; }
+    .srl-btn-pdf:hover { background: #e2e8f0; }
+
+    .srl-empty {
+      text-align: center;
+      padding: 64px 24px;
+      color: #94a3b8;
+      font-size: 1rem;
+    }
+    .srl-count {
+      font-size: 0.85rem;
+      color: #64748b;
+      margin-bottom: 14px;
+    }
+
+    /* New form modal */
+    .srl-modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 900;
+      align-items: center;
+      justify-content: center;
+    }
+    .srl-modal-overlay.open { display: flex; }
+    .srl-modal {
+      background: #fff;
+      border-radius: 18px;
+      padding: 28px 28px 24px;
+      width: min(480px, calc(100vw - 32px));
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .srl-modal h3 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin: 0 0 20px;
+    }
+    .srl-modal-field { margin-bottom: 16px; }
+    .srl-modal-field label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+    }
+    .srl-modal-field select,
+    .srl-modal-field input {
+      width: 100%;
+      padding: 10px 12px;
+      font-size: 0.95rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 10px;
+      outline: none;
+      background: #fff;
+      box-sizing: border-box;
+    }
+    .srl-modal-field select:focus,
+    .srl-modal-field input:focus { border-color: #4f46e5; }
+    .srl-modal-row { display: flex; gap: 10px; }
+    .srl-modal-row .srl-modal-field { flex: 1; }
+    .srl-modal-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .srl-modal-actions button { flex: 1; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main>
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Stock Receipts</h2>
+        <p class="page-subtitle">Digital stock receipt forms — record, track, and download</p>
+      </div>
+      <button class="btn btn-primary" onclick="openNewModal()">+ New Receipt</button>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="srl-toolbar">
+      <input class="srl-search" id="srl-search" type="text" placeholder="Search style, supplier, PO, invoice…" oninput="debounceLoad()" />
+      <select class="srl-filter" id="srl-status" onchange="loadReceipts()">
+        <option value="">All Statuses</option>
+        <option value="draft">Draft</option>
+        <option value="in_progress">In Progress</option>
+        <option value="complete">Complete</option>
+      </select>
+      <select class="srl-filter" id="srl-form-type" onchange="loadReceipts()">
+        <option value="">All Types</option>
+      </select>
+    </div>
+
+    <div class="srl-count" id="srl-count"></div>
+    <div id="srl-list"></div>
+  </main>
+
+  <!-- New Receipt Modal -->
+  <div class="srl-modal-overlay" id="new-modal">
+    <div class="srl-modal">
+      <h3>New Stock Receipt</h3>
+      <div class="srl-modal-field">
+        <label>Form Type</label>
+        <select id="nm-form-type">
+          <option value="">Select type…</option>
+        </select>
+      </div>
+      <div class="srl-modal-field">
+        <label>Size Group</label>
+        <select id="nm-size-group">
+          <option value="">Select size group…</option>
+        </select>
+      </div>
+      <div class="srl-modal-row">
+        <div class="srl-modal-field">
+          <label>Receipt Type</label>
+          <select id="nm-receipt-type">
+            <option value="restock">Restock</option>
+            <option value="new">New Product</option>
+          </select>
+        </div>
+        <div class="srl-modal-field">
+          <label>Processed By</label>
+          <input id="nm-processed-by" type="text" placeholder="Initials or name" maxlength="40" />
+        </div>
+      </div>
+      <p id="nm-error" style="color:#dc2626;font-size:0.85rem;margin:0;display:none"></p>
+      <div class="srl-modal-actions">
+        <button class="btn btn-secondary" onclick="closeNewModal()">Cancel</button>
+        <button class="btn btn-primary" id="nm-create-btn" onclick="createReceipt()">Create Form</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="stock-receipts.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

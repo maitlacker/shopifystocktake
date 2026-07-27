@@ -745,6 +745,116 @@ async function initDb() {
       sell_through_pct  NUMERIC(5,2),
       alerted_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    -- ── Stock Receipt Forms (SRF) ─────────────────────────────────────
+
+    CREATE TABLE IF NOT EXISTS srf_size_groups (
+      id         SERIAL PRIMARY KEY,
+      name       TEXT NOT NULL UNIQUE,
+      sizes      JSONB NOT NULL DEFAULT '[]',
+      is_default BOOLEAN NOT NULL DEFAULT FALSE,
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS srf_form_types (
+      id                 SERIAL PRIMARY KEY,
+      name               TEXT NOT NULL UNIQUE,
+      measurement_fields JSONB NOT NULL DEFAULT '[]',
+      sort_order         INT NOT NULL DEFAULT 0,
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    INSERT INTO srf_size_groups (name, sizes, is_default, sort_order) VALUES
+      ('Clothing Numeric 6-20', '["6","8","10","12","14","16","18","20"]', true, 1),
+      ('Clothing Letter XS-XXXL', '["XS","S","M","L","XL","XXL","XXXL"]', false, 2),
+      ('Jeans 24-34', '["24","25","26","27","28","29","30","31","32","33","34"]', false, 3),
+      ('Shoes 35-42', '["35","36","37","38","39","40","41","42"]', false, 4),
+      ('Accessories ONE SIZE', '["ONE SIZE"]', false, 5)
+    ON CONFLICT (name) DO NOTHING;
+
+    INSERT INTO srf_form_types (name, measurement_fields, sort_order) VALUES
+      ('Tops/Dresses', '["Bust/Chest","Body Length","Hem Width","Sleeve Length","Shoulder Width"]', 1),
+      ('Bottoms', '["Waist","Hip","Thigh","Inseam","Rise"]', 2),
+      ('Jeans', '["Waist","Hip","Thigh","Inseam","Rise"]', 3),
+      ('Accessories', '["Width","Height","Depth"]', 4),
+      ('Shoes', '["Insole Length"]', 5)
+    ON CONFLICT (name) DO NOTHING;
+
+    CREATE TABLE IF NOT EXISTS stock_receipts (
+      id                     SERIAL PRIMARY KEY,
+      form_type_id           INT REFERENCES srf_form_types(id),
+      form_type_name         TEXT,
+      size_group_id          INT REFERENCES srf_size_groups(id),
+      size_group_name        TEXT,
+      receipt_type           TEXT NOT NULL DEFAULT 'restock',
+      style_name             TEXT,
+      supplier               TEXT,
+      invoice_number         TEXT,
+      po_number              TEXT,
+      po_id                  INT,
+      product_code           TEXT,
+      shopify_product_id     BIGINT,
+      shopify_product_title  TEXT,
+      receipt_date           DATE,
+      processed_by           TEXT,
+      stock_matches_invoice  BOOLEAN,
+      on_rack_for_photoshoot BOOLEAN,
+      cost_price             NUMERIC(10,2),
+      discount_percent       NUMERIC(5,2),
+      freight_price          NUMERIC(10,2),
+      final_price            NUMERIC(10,2),
+      fabric                 TEXT,
+      stretch_allowance      TEXT,
+      product_features       JSONB NOT NULL DEFAULT '[]',
+      notes                  TEXT,
+      status                 TEXT NOT NULL DEFAULT 'draft',
+      completed_at           TIMESTAMPTZ,
+      completed_by           TEXT,
+      created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_by             TEXT,
+      updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by             TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_stock_receipts_status
+      ON stock_receipts(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_stock_receipts_form_type
+      ON stock_receipts(form_type_id);
+
+    CREATE TABLE IF NOT EXISTS stock_receipt_sizes (
+      id           SERIAL PRIMARY KEY,
+      receipt_id   INT NOT NULL REFERENCES stock_receipts(id) ON DELETE CASCADE,
+      size_label   TEXT NOT NULL,
+      sort_order   INT NOT NULL DEFAULT 0,
+      qty          INT,
+      measurements JSONB NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS idx_srf_sizes_receipt
+      ON stock_receipt_sizes(receipt_id, sort_order);
+
+    CREATE TABLE IF NOT EXISTS stock_receipt_photos (
+      id           SERIAL PRIMARY KEY,
+      receipt_id   INT NOT NULL REFERENCES stock_receipts(id) ON DELETE CASCADE,
+      filename     TEXT,
+      data         TEXT NOT NULL,
+      uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      uploaded_by  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_srf_photos_receipt
+      ON stock_receipt_photos(receipt_id);
+
+    CREATE TABLE IF NOT EXISTS stock_receipt_audit (
+      id          SERIAL PRIMARY KEY,
+      receipt_id  INT NOT NULL REFERENCES stock_receipts(id) ON DELETE CASCADE,
+      action      TEXT NOT NULL,
+      field_name  TEXT,
+      old_value   TEXT,
+      new_value   TEXT,
+      changed_by  TEXT NOT NULL DEFAULT 'system',
+      changed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_srf_audit_receipt
+      ON stock_receipt_audit(receipt_id, changed_at DESC);
   `);
 }
 
