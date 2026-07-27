@@ -102,8 +102,21 @@ function renderCard(r) {
       <div class="srl-card-actions" onclick="event.stopPropagation()">
         <a class="srl-btn-view" href="/stock-receipt.html?id=${r.id}">Open Form</a>
         <a class="srl-btn-pdf"  href="/api/stock-receipts/${r.id}/pdf" target="_blank">↓ PDF</a>
+        ${r.status !== 'complete' ? `<button class="srl-btn-del" onclick="deleteReceipt(${r.id})">Delete</button>` : ''}
       </div>
     </div>`;
+}
+
+async function deleteReceipt(id) {
+  if (!confirm('Delete this stock receipt? This action is tracked and cannot be undone.')) return;
+  try {
+    const r = await fetch(`/api/stock-receipts/${id}`, { method: 'DELETE' });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    loadReceipts();
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
 }
 
 // ── New receipt modal ──────────────────────────────────────────────

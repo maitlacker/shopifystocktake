@@ -6583,10 +6583,23 @@ app.get('/api/srf/style-search', requireAuth, async (req, res) => {
     const q = (req.query.q || '').toLowerCase().trim();
     if (!q) return res.json([]);
     const cache = productsCache.length ? productsCache : await fetchAllProducts();
-    const results = cache
-      .filter(p => p.title.toLowerCase().includes(q))
-      .slice(0, 12)
-      .map(p => ({ id: p.id, title: p.title, image: (p.images || [])[0]?.src || null }));
+    const results = [];
+    const seen = new Set();
+    for (const p of cache) {
+      if (seen.has(p.id)) continue;
+      const titleMatch = p.title.toLowerCase().includes(q);
+      const skuMatch   = (p.variants || []).find(v => v.sku && v.sku.toLowerCase().includes(q));
+      if (titleMatch || skuMatch) {
+        seen.add(p.id);
+        results.push({
+          id:    p.id,
+          title: p.title,
+          image: (p.images || [])[0]?.src || null,
+          sku:   skuMatch ? skuMatch.sku : null,
+        });
+        if (results.length >= 12) break;
+      }
+    }
     res.json(results);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -6617,7 +6630,8 @@ app.get('/api/stock-receipts', requireAuth, async (req, res) => {
       conditions.push(`(style_name ILIKE $${n-3} OR supplier ILIKE $${n-2} OR po_number ILIKE $${n-1} OR invoice_number ILIKE $${n})`);
     }
 
-    const where   = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    conditions.push('deleted_at IS NULL');
+    const where   = `WHERE ${conditions.join(' AND ')}`;
     const pLimit  = filterParams.length + 1;
     const pOffset = filterParams.length + 2;
 
@@ -6693,7 +6707,7 @@ app.get('/api/stock-receipts/:id', requireAuth, async (req, res) => {
       ),
       pool.query('SELECT * FROM stock_receipt_audit WHERE receipt_id=$1 ORDER BY changed_at DESC LIMIT 100', [id]),
     ]);
-    if (!receiptRes.rows.length) return res.status(404).json({ error: 'Not found' });
+    if (!receiptRes.rows.length || receiptRes.rows[0].deleted_at) return res.status(404).json({ error: 'Not found' });
     res.json({
       receipt: receiptRes.rows[0],
       sizes:   sizesRes.rows,
@@ -6907,31 +6921,121 @@ app.delete('/api/stock-receipts/:id/photos/:pid', requireAuth, async (req, res) 
   }
 });
 
+app.delete('/api/stock-receipts/:id', requireAuth, async (req, res) => {
+  try {
+    const id   = Number(req.params.id);
+    const user = req.user?.email || 'unknown';
+
+    const { rows } = await pool.query('SELECT status, deleted_at FROM stock_receipts WHERE id=$1', [id]);
+    if (!rows.length || rows[0].deleted_at) return res.status(404).json({ error: 'Not found' });
+    if (rows[0].status === 'complete') return res.status(400).json({ error: 'Completed forms cannot be deleted' });
+
+    await pool.query(
+      'UPDATE stock_receipts SET deleted_at=NOW(), deleted_by=$1, updated_at=NOW(), updated_by=$1 WHERE id=$2',
+      [user, id]
+    );
+    await pool.query(
+      `INSERT INTO stock_receipt_audit (receipt_id, action, changed_by) VALUES ($1,'deleted',$2)`,
+      [id, user]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/stock-receipts/:id/shelf-count', requireAuth, async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const { rows } = await pool.query(
-      'SELECT shopify_product_id, shopify_product_title FROM stock_receipts WHERE id=$1', [id]
-    );
-    if (!rows.length) return res.status(404).json({ error: 'Not found' });
-    const shopifyId = rows[0].shopify_product_id;
-    if (!shopifyId) return res.json({ variants: [], total: 0, note: 'No Shopify product linked' });
+    const overrideProductId = req.query.product_id ? Number(req.query.product_id) : null;
 
-    const r = await fetch(
+    let shopifyId = overrideProductId;
+    if (!shopifyId) {
+      const { rows } = await pool.query(
+        'SELECT shopify_product_id FROM stock_receipts WHERE id=$1 AND deleted_at IS NULL', [id]
+      );
+      if (!rows.length) return res.status(404).json({ error: 'Not found' });
+      shopifyId = rows[0].shopify_product_id;
+    }
+    if (!shopifyId) return res.json({ variants: [], totals: null, note: 'No Shopify product linked' });
+
+    // 1. Fetch product variants from Shopify
+    const prodRes = await fetch(
       `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products/${shopifyId}.json?fields=id,title,variants`,
       { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } }
     );
-    if (!r.ok) return res.status(502).json({ error: `Shopify API error ${r.status}` });
-    const { product } = await r.json();
+    if (!prodRes.ok) return res.status(502).json({ error: `Shopify API error ${prodRes.status}` });
+    const { product } = await prodRes.json();
 
-    const variants = (product.variants || []).map(v => ({
-      id:    v.id,
-      title: v.title,
-      sku:   v.sku,
-      qty:   v.inventory_quantity,
-    }));
-    const total = variants.reduce((s, v) => s + (v.qty || 0), 0);
-    res.json({ variants, total, product_title: product.title });
+    const variantIds = new Set((product.variants || []).map(v => v.id));
+
+    // 2. Paginate unfulfilled open orders, collecting committed qty per variant
+    const committedMap = {}; // variantId → committed qty
+    const orderQtyMap  = {}; // orderNumber → { variantId → qty }
+    let ordersUrl = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json` +
+      `?status=open&fulfillment_status=unfulfilled,partial&limit=250&fields=id,order_number,line_items`;
+
+    while (ordersUrl) {
+      const r = await fetch(ordersUrl, { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } });
+      if (!r.ok) break;
+      const { orders } = await r.json();
+      for (const order of (orders || [])) {
+        for (const item of (order.line_items || [])) {
+          if (!variantIds.has(item.variant_id)) continue;
+          const qty = item.fulfillable_quantity ?? item.quantity;
+          if (qty <= 0) continue;
+          committedMap[item.variant_id] = (committedMap[item.variant_id] || 0) + qty;
+          if (!orderQtyMap[order.order_number]) orderQtyMap[order.order_number] = {};
+          orderQtyMap[order.order_number][item.variant_id] =
+            (orderQtyMap[order.order_number][item.variant_id] || 0) + qty;
+        }
+      }
+      const link = r.headers.get('link');
+      ordersUrl = null;
+      if (link) {
+        const m = link.match(/<([^>]+)>;\s*rel="next"/);
+        if (m) ordersUrl = m[1];
+      }
+    }
+
+    // 3. Query picking_item_states for WMS-picked items in those unfulfilled orders
+    const wmsPickedMap = {}; // variantId → wms-picked qty
+    const unfulfilledOrderNumbers = Object.keys(orderQtyMap).map(Number);
+    if (unfulfilledOrderNumbers.length && variantIds.size) {
+      const { rows: pickedRows } = await pool.query(
+        `SELECT order_number, variant_id FROM picking_item_states
+         WHERE picked = true
+           AND order_number = ANY($1::int[])
+           AND variant_id   = ANY($2::bigint[])`,
+        [unfulfilledOrderNumbers, [...variantIds]]
+      );
+      for (const row of pickedRows) {
+        const varId  = Number(row.variant_id);
+        const orderN = Number(row.order_number);
+        const qty    = (orderQtyMap[orderN] || {})[varId] || 0;
+        wmsPickedMap[varId] = (wmsPickedMap[varId] || 0) + qty;
+      }
+    }
+
+    // 4. Build per-variant breakdown
+    const variants = (product.variants || []).map(v => {
+      const available  = v.inventory_quantity || 0;
+      const committed  = committedMap[v.id]  || 0;
+      const wms_picked = wmsPickedMap[v.id]  || 0;
+      const on_hand    = available + committed;
+      const true_shelf = on_hand - wms_picked;
+      return { id: v.id, title: v.title, sku: v.sku, available, committed, wms_picked, on_hand, true_shelf };
+    });
+
+    const totals = {
+      available:  variants.reduce((s, v) => s + v.available,  0),
+      committed:  variants.reduce((s, v) => s + v.committed,  0),
+      wms_picked: variants.reduce((s, v) => s + v.wms_picked, 0),
+      on_hand:    variants.reduce((s, v) => s + v.on_hand,    0),
+      true_shelf: variants.reduce((s, v) => s + v.true_shelf, 0),
+    };
+
+    res.json({ variants, totals, product_title: product.title });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

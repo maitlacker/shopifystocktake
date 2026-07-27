@@ -320,6 +320,17 @@
       background: #f8fafc;
       border-top: 2px solid #e2e8f0;
     }
+    .srf-shelf-title {
+      padding: 10px 14px 0;
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+    .srf-shelf-note {
+      padding: 6px 14px 10px;
+      font-size: 0.78rem;
+      color: #94a3b8;
+    }
 
     /* Photos */
     .srf-photos-row {
@@ -470,6 +481,7 @@
         <div class="srf-subtitle" id="srf-head-sub"></div>
       </div>
       <span class="srf-save-status" id="srf-save-status"></span>
+      <button class="btn" id="srf-delete-btn" onclick="deleteReceipt()" style="display:none;background:#fee2e2;color:#dc2626;border:none">Delete</button>
       <a id="srf-pdf-btn" class="btn btn-secondary" style="text-decoration:none;display:none" target="_blank">↓ PDF</a>
       <button class="btn btn-secondary" id="srf-save-btn" onclick="saveForm()">Save Progress</button>
       <button class="btn btn-primary"   id="srf-complete-btn" onclick="openCompleteConfirm()">Mark Complete ✓</button>

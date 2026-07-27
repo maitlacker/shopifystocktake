@@ -66,6 +66,15 @@ function renderActionBar(r) {
   document.getElementById('srf-pdf-btn').href          = `/api/stock-receipts/${receiptId}/pdf`;
   document.getElementById('srf-pdf-btn').style.display = 'inline-flex';
 
+  const delBtn = document.getElementById('srf-delete-btn');
+  if (delBtn) {
+    if (isReadOnly) {
+      delBtn.style.display = 'none';
+    } else {
+      delBtn.style.display = 'inline-flex';
+    }
+  }
+
   if (isReadOnly) {
     document.getElementById('srf-save-btn').style.display     = 'none';
     document.getElementById('srf-complete-btn').style.display = 'none';
@@ -429,6 +438,7 @@ function onStyleSearch(q) {
       list.innerHTML = results.map(p =>
         `<div class="srf-ac-item" data-id="${p.id}" data-title="${escHtml(p.title)}" onmousedown="selectStyleProduct(this)">
           ${escHtml(p.title)}
+          ${p.sku ? `<div class="srf-ac-sub">SKU: ${escHtml(p.sku)}</div>` : ''}
         </div>`
       ).join('');
       list.style.display = 'block';
@@ -458,6 +468,7 @@ function onShopifySearch(q) {
       list.innerHTML = results.map(p =>
         `<div class="srf-ac-item" data-id="${p.id}" data-title="${escHtml(p.title)}" onmousedown="selectShopifyProd(this)">
           ${escHtml(p.title)}
+          ${p.sku ? `<div class="srf-ac-sub">SKU: ${escHtml(p.sku)}</div>` : ''}
         </div>`
       ).join('');
       list.style.display = 'block';
@@ -502,31 +513,67 @@ function unlinkProduct() {
 async function loadShelfCount() {
   const el = document.getElementById('shelf-count-results');
   if (!el) return;
-  el.innerHTML = '<div style="color:#64748b;font-size:0.85rem;padding:8px 0">Loading…</div>';
+  el.innerHTML = '<div style="color:#64748b;font-size:0.85rem;padding:8px 0">Loading shelf count…</div>';
   try {
-    const r    = await fetch(`/api/stock-receipts/${receiptId}/shelf-count`);
+    const productId = formData.shopify_product_id || null;
+    const qs = productId ? `?product_id=${productId}` : '';
+    const r    = await fetch(`/api/stock-receipts/${receiptId}/shelf-count${qs}`);
     const data = await r.json();
     if (data.note) {
       el.innerHTML = `<div style="color:#94a3b8;font-size:0.85rem;padding:8px 0">${escHtml(data.note)}</div>`;
       return;
     }
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    const t = data.totals;
     el.innerHTML = `
       <div class="srf-shelf-results">
+        <div class="srf-shelf-title">Stock on Shelf — ${escHtml(data.product_title || '')}</div>
         <table>
-          <thead><tr><th>Variant</th><th>SKU</th><th>Available</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Variant</th><th>SKU</th>
+              <th title="Shopify available qty">Available</th>
+              <th title="Qty in unfulfilled orders">Committed</th>
+              <th title="WMS picks not yet fulfilled">WMS Picked</th>
+              <th title="Available + Committed − WMS Picked" style="color:#4f46e5">On Shelf</th>
+            </tr>
+          </thead>
           <tbody>${data.variants.map(v => `
             <tr>
               <td>${escHtml(v.title)}</td>
               <td style="color:#94a3b8;font-size:0.82rem">${escHtml(v.sku || '—')}</td>
-              <td style="font-weight:700;color:${v.qty > 0 ? '#15803d' : '#dc2626'}">${v.qty}</td>
+              <td>${v.available}</td>
+              <td>${v.committed > 0 ? v.committed : '<span style="color:#94a3b8">0</span>'}</td>
+              <td>${v.wms_picked > 0 ? `<span style="color:#dc2626">${v.wms_picked}</span>` : '<span style="color:#94a3b8">0</span>'}</td>
+              <td style="font-weight:700;color:${v.true_shelf > 0 ? '#15803d' : '#dc2626'}">${v.true_shelf}</td>
             </tr>`).join('')}
           </tbody>
+          ${t ? `<tfoot>
+            <tr style="font-weight:700;border-top:2px solid #e2e8f0">
+              <td colspan="2">Total</td>
+              <td>${t.available}</td>
+              <td>${t.committed}</td>
+              <td>${t.wms_picked > 0 ? `<span style="color:#dc2626">${t.wms_picked}</span>` : '0'}</td>
+              <td style="color:#4f46e5">${t.true_shelf}</td>
+            </tr>
+          </tfoot>` : ''}
         </table>
-        <div class="srf-shelf-total">Total available: <strong>${data.total}</strong> units</div>
+        <div class="srf-shelf-note">On Shelf = Available + Committed − WMS Picked (not yet fulfilled)</div>
       </div>`;
   } catch (err) {
     el.innerHTML = `<div style="color:#dc2626;font-size:0.85rem;padding:8px 0">Error: ${escHtml(err.message)}</div>`;
+  }
+}
+
+async function deleteReceipt() {
+  if (!confirm('Delete this stock receipt? This action is tracked and cannot be undone.')) return;
+  try {
+    const r = await fetch(`/api/stock-receipts/${receiptId}`, { method: 'DELETE' });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    window.location.href = '/stock-receipts.html';
+  } catch (err) {
+    alert('Error: ' + err.message);
   }
 }
 
