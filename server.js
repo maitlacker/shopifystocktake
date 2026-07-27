@@ -6764,7 +6764,8 @@ app.put('/api/stock-receipts/:id', requireAuth, async (req, res) => {
       const newStr = toStr(newVal);
       const oldStr = toStr(oldVal);
       if (newStr !== oldStr) {
-        setClauses.push(`${field} = $${setParams.push(newVal)}`);
+        const dbVal = (field === 'product_features') ? JSON.stringify(newVal) : newVal;
+        setClauses.push(`${field} = $${setParams.push(dbVal)}`);
         auditEntries.push({ field_name: field, old_value: oldStr, new_value: newStr });
       }
     }
