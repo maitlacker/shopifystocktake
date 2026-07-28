@@ -7004,7 +7004,7 @@ app.get('/api/stock-receipts/:id/shelf-count', requireAuth, async (req, res) => 
     const unfulfilledOrderNumbers = Object.keys(orderQtyMap).map(Number);
     if (unfulfilledOrderNumbers.length && variantIds.size) {
       const { rows: pickedRows } = await pool.query(
-        `SELECT order_number, variant_id FROM picking_item_states
+        `SELECT DISTINCT order_number, variant_id FROM picking_item_states
          WHERE picked = true
            AND order_number = ANY($1::int[])
            AND variant_id   = ANY($2::bigint[])`,
