@@ -827,6 +827,14 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_stock_receipts_form_type
       ON stock_receipts(form_type_id);
 
+    -- Remove the leftover Jeans 24-34 group on DBs where Jeans 6-18 already
+    -- existed (the rename above is skipped there, leaving both rows).
+    -- Repoint any receipts referencing it first to satisfy the FK.
+    UPDATE stock_receipts
+      SET size_group_id = (SELECT id FROM srf_size_groups WHERE name='Jeans 6-18')
+      WHERE size_group_id IN (SELECT id FROM srf_size_groups WHERE name='Jeans 24-34');
+    DELETE FROM srf_size_groups WHERE name='Jeans 24-34';
+
     CREATE TABLE IF NOT EXISTS stock_receipt_sizes (
       id           SERIAL PRIMARY KEY,
       receipt_id   INT NOT NULL REFERENCES stock_receipts(id) ON DELETE CASCADE,
