@@ -221,6 +221,12 @@ function renderBody(r, sizes, photos, audit) {
       </div>
     </div>
 
+    <!-- Size Grid -->
+    <div class="srf-section">
+      <div class="srf-section-title">Size Grid</div>
+      <div class="srf-size-grid-wrap" id="size-grid-wrap"></div>
+    </div>
+
     <!-- Product Features -->
     <div class="srf-section">
       <div class="srf-section-title">Product Features <span style="font-weight:400;text-transform:none;font-size:0.72rem;color:#94a3b8">(up to 7)</span></div>
@@ -231,12 +237,6 @@ function renderBody(r, sizes, photos, audit) {
             <input type="text" class="feature-input" data-idx="${i}" value="${escHtml(f)}" placeholder="Feature ${i+1}…" maxlength="120"${ro_attr} />
           </div>`).join('')}
       </div>
-    </div>
-
-    <!-- Size Grid -->
-    <div class="srf-section">
-      <div class="srf-section-title">Size Grid</div>
-      <div class="srf-size-grid-wrap" id="size-grid-wrap"></div>
     </div>
 
     <!-- Shopify product link (only show when unlinked + editable) -->
