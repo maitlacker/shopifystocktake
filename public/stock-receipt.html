@@ -481,7 +481,9 @@
         <div class="srf-subtitle" id="srf-head-sub"></div>
       </div>
       <span class="srf-save-status" id="srf-save-status"></span>
-      <button class="btn" id="srf-delete-btn" onclick="deleteReceipt()" style="display:none;background:#fee2e2;color:#dc2626;border:none">Delete</button>
+      <button class="btn" id="srf-archive-btn"  onclick="archiveReceipt()"   style="display:none;background:#f1f5f9;color:#64748b;border:none">Archive</button>
+      <button class="btn" id="srf-unarchive-btn" onclick="unarchiveReceipt()" style="display:none;background:#f1f5f9;color:#64748b;border:none">Unarchive</button>
+      <button class="btn" id="srf-delete-btn"    onclick="deleteReceipt()"    style="display:none;background:#fee2e2;color:#dc2626;border:none">Delete</button>
       <a id="srf-pdf-btn" class="btn btn-secondary" style="text-decoration:none;display:none" target="_blank">↓ PDF</a>
       <button class="btn btn-secondary" id="srf-save-btn" onclick="saveForm()">Save Progress</button>
       <button class="btn btn-primary"   id="srf-complete-btn" onclick="openCompleteConfirm()">Mark Complete ✓</button>

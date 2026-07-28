@@ -6612,6 +6612,7 @@ app.get('/api/stock-receipts', requireAuth, async (req, res) => {
     const limit  = Math.min(Number(req.query.limit)  || 50, 200);
     const offset = Number(req.query.offset) || 0;
 
+    const showArchived = req.query.archived === '1';
     const conditions   = [];
     const filterParams = [];
 
@@ -6631,6 +6632,7 @@ app.get('/api/stock-receipts', requireAuth, async (req, res) => {
     }
 
     conditions.push('deleted_at IS NULL');
+    conditions.push(showArchived ? 'archived_at IS NOT NULL' : 'archived_at IS NULL');
     const where   = `WHERE ${conditions.join(' AND ')}`;
     const pLimit  = filterParams.length + 1;
     const pOffset = filterParams.length + 2;
@@ -6639,7 +6641,7 @@ app.get('/api/stock-receipts', requireAuth, async (req, res) => {
       pool.query(
         `SELECT id, form_type_name, size_group_name, receipt_type, style_name, supplier,
                 invoice_number, po_number, receipt_date, processed_by, status,
-                completed_at, created_at, created_by, updated_at
+                completed_at, archived_at, created_at, created_by, updated_at
          FROM stock_receipts ${where}
          ORDER BY created_at DESC LIMIT $${pLimit} OFFSET $${pOffset}`,
         [...filterParams, limit, offset]
@@ -6937,6 +6939,48 @@ app.delete('/api/stock-receipts/:id', requireAuth, async (req, res) => {
     );
     await pool.query(
       `INSERT INTO stock_receipt_audit (receipt_id, action, changed_by) VALUES ($1,'deleted',$2)`,
+      [id, user]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/stock-receipts/:id/archive', requireAuth, async (req, res) => {
+  try {
+    const id   = Number(req.params.id);
+    const user = req.user?.email || 'unknown';
+    const { rows } = await pool.query('SELECT deleted_at, archived_at FROM stock_receipts WHERE id=$1', [id]);
+    if (!rows.length || rows[0].deleted_at) return res.status(404).json({ error: 'Not found' });
+    if (rows[0].archived_at) return res.status(400).json({ error: 'Already archived' });
+    await pool.query(
+      'UPDATE stock_receipts SET archived_at=NOW(), archived_by=$1, updated_at=NOW(), updated_by=$1 WHERE id=$2',
+      [user, id]
+    );
+    await pool.query(
+      `INSERT INTO stock_receipt_audit (receipt_id, action, changed_by) VALUES ($1,'archived',$2)`,
+      [id, user]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/stock-receipts/:id/unarchive', requireAuth, async (req, res) => {
+  try {
+    const id   = Number(req.params.id);
+    const user = req.user?.email || 'unknown';
+    const { rows } = await pool.query('SELECT deleted_at, archived_at FROM stock_receipts WHERE id=$1', [id]);
+    if (!rows.length || rows[0].deleted_at) return res.status(404).json({ error: 'Not found' });
+    if (!rows[0].archived_at) return res.status(400).json({ error: 'Not archived' });
+    await pool.query(
+      'UPDATE stock_receipts SET archived_at=NULL, archived_by=NULL, updated_at=NOW(), updated_by=$1 WHERE id=$2',
+      [user, id]
+    );
+    await pool.query(
+      `INSERT INTO stock_receipt_audit (receipt_id, action, changed_by) VALUES ($1,'unarchived',$2)`,
       [id, user]
     );
     res.json({ success: true });

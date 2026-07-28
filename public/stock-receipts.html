@@ -90,6 +90,7 @@
     .srl-badge.draft      { background: #f1f5f9; color: #64748b; }
     .srl-badge.in_progress { background: #fef3c7; color: #92400e; }
     .srl-badge.complete   { background: #dcfce7; color: #15803d; }
+    .srl-badge.archived   { background: #f1f5f9; color: #94a3b8; }
     .srl-card-meta {
       font-size: 0.82rem;
       color: #64748b;
@@ -117,6 +118,8 @@
     .srl-btn-view:hover { background: #ddd6fe; }
     .srl-btn-pdf  { background: #f1f5f9; color: #475569; }
     .srl-btn-pdf:hover { background: #e2e8f0; }
+    .srl-btn-arc  { flex: 0 0 auto; padding: 7px 14px; border-radius: 8px; font-size: 0.82rem; font-weight: 600; background: #f1f5f9; color: #64748b; border: none; cursor: pointer; }
+    .srl-btn-arc:hover { background: #e2e8f0; }
     .srl-btn-del  { flex: 0 0 auto; padding: 7px 14px; border-radius: 8px; font-size: 0.82rem; font-weight: 600; background: #fee2e2; color: #dc2626; border: none; cursor: pointer; }
     .srl-btn-del:hover { background: #fecaca; }
 
@@ -209,6 +212,7 @@
         <option value="draft">Draft</option>
         <option value="in_progress">In Progress</option>
         <option value="complete">Complete</option>
+        <option value="_archived">Archived</option>
       </select>
       <select class="srl-filter" id="srl-form-type" onchange="loadReceipts()">
         <option value="">All Types</option>

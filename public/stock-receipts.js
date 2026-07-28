@@ -48,12 +48,16 @@ function debounceLoad() {
 
 async function loadReceipts() {
   const q          = document.getElementById('srl-search').value.trim();
-  const status     = document.getElementById('srl-status').value;
+  const statusVal  = document.getElementById('srl-status').value;
   const formTypeId = document.getElementById('srl-form-type').value;
 
   const params = new URLSearchParams({ limit: 60, offset: 0 });
-  if (q)          params.set('q', q);
-  if (status)     params.set('status', status);
+  if (q) params.set('q', q);
+  if (statusVal === '_archived') {
+    params.set('archived', '1');
+  } else {
+    if (statusVal) params.set('status', statusVal);
+  }
   if (formTypeId) params.set('form_type_id', formTypeId);
 
   const listEl  = document.getElementById('srl-list');
@@ -79,7 +83,10 @@ async function loadReceipts() {
 }
 
 function renderCard(r) {
-  const statusLabel = r.status === 'in_progress' ? 'In Progress' : r.status.charAt(0).toUpperCase() + r.status.slice(1);
+  const isArchived  = !!r.archived_at;
+  const badgeCls    = isArchived ? 'archived' : r.status;
+  const badgeLabel  = isArchived ? 'Archived'
+    : (r.status === 'in_progress' ? 'In Progress' : r.status.charAt(0).toUpperCase() + r.status.slice(1));
   const dateStr     = r.receipt_date ? r.receipt_date.slice(0,10) : (r.created_at ? r.created_at.slice(0,10) : '—');
 
   return `
@@ -89,7 +96,7 @@ function renderCard(r) {
           <div class="srl-card-title">${escHtml(r.style_name || '(no style name)')}</div>
           <div class="srl-card-id">#${r.id} · ${escHtml(r.form_type_name || '')} · ${r.receipt_type === 'new' ? 'New' : 'Restock'}</div>
         </div>
-        <span class="srl-badge ${r.status}">${statusLabel}</span>
+        <span class="srl-badge ${badgeCls}">${badgeLabel}</span>
       </div>
       <div class="srl-card-meta">
         <span><strong>Date</strong> ${escHtml(dateStr)}</span>
@@ -102,9 +109,35 @@ function renderCard(r) {
       <div class="srl-card-actions" onclick="event.stopPropagation()">
         <a class="srl-btn-view" href="/stock-receipt.html?id=${r.id}">Open Form</a>
         <a class="srl-btn-pdf"  href="/api/stock-receipts/${r.id}/pdf" target="_blank">↓ PDF</a>
-        ${r.status !== 'complete' ? `<button class="srl-btn-del" onclick="deleteReceipt(${r.id})">Delete</button>` : ''}
+        ${isArchived
+          ? `<button class="srl-btn-arc" onclick="unarchiveReceipt(${r.id})">Unarchive</button>`
+          : `<button class="srl-btn-arc" onclick="archiveReceipt(${r.id})">Archive</button>`}
+        ${!isArchived && r.status !== 'complete' ? `<button class="srl-btn-del" onclick="deleteReceipt(${r.id})">Delete</button>` : ''}
       </div>
     </div>`;
+}
+
+async function archiveReceipt(id) {
+  if (!confirm('Archive this receipt? It will be hidden from the main list but can be restored.')) return;
+  try {
+    const r = await fetch(`/api/stock-receipts/${id}/archive`, { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    loadReceipts();
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+async function unarchiveReceipt(id) {
+  try {
+    const r = await fetch(`/api/stock-receipts/${id}/unarchive`, { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    loadReceipts();
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
 }
 
 async function deleteReceipt(id) {

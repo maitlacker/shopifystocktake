@@ -66,16 +66,17 @@ function renderActionBar(r) {
   document.getElementById('srf-pdf-btn').href          = `/api/stock-receipts/${receiptId}/pdf`;
   document.getElementById('srf-pdf-btn').style.display = 'inline-flex';
 
-  const delBtn = document.getElementById('srf-delete-btn');
-  if (delBtn) {
-    if (isReadOnly) {
-      delBtn.style.display = 'none';
-    } else {
-      delBtn.style.display = 'inline-flex';
-    }
-  }
+  const isArchived = !!r.archived_at;
 
-  if (isReadOnly) {
+  const archBtn   = document.getElementById('srf-archive-btn');
+  const unarchBtn = document.getElementById('srf-unarchive-btn');
+  const delBtn    = document.getElementById('srf-delete-btn');
+
+  if (archBtn)   archBtn.style.display   = (!isArchived) ? 'inline-flex' : 'none';
+  if (unarchBtn) unarchBtn.style.display = isArchived    ? 'inline-flex' : 'none';
+  if (delBtn)    delBtn.style.display    = (!isArchived && !isReadOnly) ? 'inline-flex' : 'none';
+
+  if (isReadOnly || isArchived) {
     document.getElementById('srf-save-btn').style.display     = 'none';
     document.getElementById('srf-complete-btn').style.display = 'none';
   }
@@ -562,6 +563,29 @@ async function loadShelfCount() {
       </div>`;
   } catch (err) {
     el.innerHTML = `<div style="color:#dc2626;font-size:0.85rem;padding:8px 0">Error: ${escHtml(err.message)}</div>`;
+  }
+}
+
+async function archiveReceipt() {
+  if (!confirm('Archive this receipt? It will be hidden from the main list but can be restored anytime.')) return;
+  try {
+    const r = await fetch(`/api/stock-receipts/${receiptId}/archive`, { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    window.location.reload();
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+async function unarchiveReceipt() {
+  try {
+    const r = await fetch(`/api/stock-receipts/${receiptId}/unarchive`, { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    window.location.reload();
+  } catch (err) {
+    alert('Error: ' + err.message);
   }
 }
 
