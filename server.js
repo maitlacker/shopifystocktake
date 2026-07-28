@@ -6836,7 +6836,7 @@ app.post('/api/stock-receipts/:id/complete', requireAuth, async (req, res) => {
     );
 
     // Slack notification — fire and forget, no crash if env var missing
-    const slackWebhook = process.env.SLACK_RECEIPT_WEBHOOK_URL;
+    const slackWebhook = process.env.SLACK_SRF_WEBHOOK_URL;
     if (slackWebhook) {
       const r = existingRes.rows[0];
       fetch(slackWebhook, {
