@@ -7263,7 +7263,7 @@ app.get('/api/stock-receipts/:id/pdf', requireAuth, async (req, res) => {
     doc.fontSize(7).font('Helvetica').fillColor('#94a3b8')
        .text(
          `Generated ${new Date().toLocaleString('en-AU')}  ·  The Self Styler WMS  ·  Receipt #${id}`,
-         ML, PAGE_H - 30, { align: 'center', width: W }
+         ML, PAGE_H - 55, { align: 'center', width: W }
        );
 
     doc.end();
