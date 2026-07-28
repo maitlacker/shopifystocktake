@@ -7155,6 +7155,8 @@ app.get('/api/stock-receipts/:id/pdf', requireAuth, async (req, res) => {
     drawField('INVOICE #',   r.invoice_number,  ML + c4*2,   c4 - 6, y);
     drawField('PO NUMBER',   r.po_number,       ML + c4*3,   c4 - 6, y);
     y += 28;
+    drawField('PRODUCT CODE', r.product_code,  ML,          c4 - 6, y);
+    y += 28;
     y = divider(y);
 
     // ── Pricing ──
