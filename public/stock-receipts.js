@@ -38,6 +38,13 @@ async function loadConfig() {
       if (sg.is_default) opt.selected = true;
       nmSg.appendChild(opt);
     });
+
+    // Auto-select matching size group when form type changes
+    nmFt.addEventListener('change', function () {
+      const selectedName = this.options[this.selectedIndex]?.text || '';
+      const match = config.sizeGroups.find(sg => sg.name.toLowerCase().startsWith(selectedName.toLowerCase()));
+      if (match) nmSg.value = match.id;
+    });
   } catch (_) {}
 }
 

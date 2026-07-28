@@ -768,10 +768,15 @@ async function initDb() {
     INSERT INTO srf_size_groups (name, sizes, is_default, sort_order) VALUES
       ('Clothing Numeric 6-20', '["6","8","10","12","14","16","18","20"]', true, 1),
       ('Clothing Letter XS-XXXL', '["XS","S","M","L","XL","XXL","XXXL"]', false, 2),
-      ('Jeans 24-34', '["24","25","26","27","28","29","30","31","32","33","34"]', false, 3),
+      ('Jeans 6-18', '["6","7","8","9","10","11","12","14","16","18"]', false, 3),
       ('Shoes 35-42', '["35","36","37","38","39","40","41","42"]', false, 4),
       ('Accessories ONE SIZE', '["ONE SIZE"]', false, 5)
     ON CONFLICT (name) DO NOTHING;
+
+    -- Migrate old Jeans 24-34 row if it exists
+    UPDATE srf_size_groups
+    SET name='Jeans 6-18', sizes='["6","7","8","9","10","11","12","14","16","18"]'
+    WHERE name='Jeans 24-34';
 
     INSERT INTO srf_form_types (name, measurement_fields, sort_order) VALUES
       ('Tops/Dresses', '["Bust/Chest","Body Length","Hem Width","Sleeve Length","Shoulder Width"]', 1),
