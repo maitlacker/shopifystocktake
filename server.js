@@ -7104,149 +7104,229 @@ app.get('/api/stock-receipts/:id/pdf', requireAuth, async (req, res) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="stock-receipt-${id}.pdf"`);
 
-    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    const doc = new PDFDocument({ margin: 45, size: 'A4' });
     doc.pipe(res);
 
     const PAGE_W = doc.page.width;
     const PAGE_H = doc.page.height;
-    const ML     = 40;
-    const W      = PAGE_W - 80;
+    const ML     = 45;
+    const MR     = PAGE_W - ML;
+    const W      = MR - ML;
+
+    const C = {
+      navy:    '#1e293b',
+      dark:    '#334155',
+      mid:     '#64748b',
+      light:   '#94a3b8',
+      border:  '#e2e8f0',
+      borderD: '#cbd5e1',
+      bgMid:   '#f1f5f9',
+      green:   '#15803d',
+      amber:   '#d97706',
+    };
 
     function addPageIfNeeded(yPos, needed) {
-      if (yPos + needed > PAGE_H - 50) { doc.addPage(); return 40; }
+      if (yPos + needed > PAGE_H - 80) { doc.addPage(); return ML; }
       return yPos;
     }
 
-    function drawField(label, value, x, w, yPos) {
-      doc.fontSize(7).font('Helvetica-Bold').fillColor('#64748b').text(label, x, yPos, { width: w });
-      doc.fontSize(9).font('Helvetica').fillColor('#1a1a2e').text(value || '—', x, yPos + 9, { width: w, lineBreak: false });
-      return yPos + 24;
+    function hLine(yPos, color, weight) {
+      doc.moveTo(ML, yPos).lineTo(MR, yPos)
+         .strokeColor(color || C.border).lineWidth(weight || 0.5).stroke();
     }
 
-    function divider(yPos) {
-      doc.moveTo(ML, yPos).lineTo(ML + W, yPos).strokeColor('#e2e8f0').lineWidth(0.5).stroke();
-      return yPos + 6;
+    function sectionBand(title, yPos) {
+      doc.rect(ML, yPos, W, 22).fillColor(C.bgMid).fill();
+      doc.fontSize(8).font('Helvetica-Bold').fillColor(C.mid)
+         .text(title, ML + 8, yPos + 7, { width: W - 16, lineBreak: false });
+      return yPos + 28;
     }
 
-    // ── Title ──
-    doc.fontSize(16).font('Helvetica-Bold').fillColor('#1a1a2e')
-       .text('STOCK RECEIPT FORM', ML, 40, { align: 'center', width: W });
-    doc.fontSize(10).font('Helvetica').fillColor('#64748b')
-       .text(`#${id}  ·  ${r.form_type_name || ''}  ·  ${r.receipt_type === 'new' ? 'New Product' : 'Restock'}`, ML, 60, { align: 'center', width: W });
-    const sColor = r.status === 'complete' ? '#15803d' : r.status === 'in_progress' ? '#d97706' : '#64748b';
-    doc.fontSize(8).fillColor(sColor).text(`Status: ${r.status.toUpperCase().replace('_',' ')}`, ML, 75, { align: 'center', width: W });
-    doc.fillColor('#000');
+    function field(label, value, x, w, yPos) {
+      doc.fontSize(8).font('Helvetica-Bold').fillColor(C.mid)
+         .text(label, x, yPos, { width: w, lineBreak: false });
+      doc.fontSize(11).font('Helvetica').fillColor(C.navy)
+         .text(String(value || '—'), x, yPos + 11, { width: w, lineBreak: false });
+    }
 
-    let y = 96;
-    y = divider(y);
+    // ── Header ──────────────────────────────────────────────────────
+    let y = ML;
 
-    // ── Row 1: Date / Processed by / Type ──
+    doc.fontSize(8).font('Helvetica').fillColor(C.light)
+       .text('THE SELF STYLER  ·  WAREHOUSE MANAGEMENT SYSTEM', ML, y, { width: W, lineBreak: false });
+    y += 14;
+
+    doc.fontSize(20).font('Helvetica-Bold').fillColor(C.navy)
+       .text('STOCK RECEIPT FORM', ML, y, { lineBreak: false });
+
+    const statusText  = r.status === 'complete'    ? 'COMPLETE'    :
+                        r.status === 'in_progress' ? 'IN PROGRESS' :
+                        r.status.toUpperCase().replace('_', ' ');
+    const statusColor = r.status === 'complete' ? C.green : r.status === 'in_progress' ? C.amber : C.mid;
+    const BW = 90, BH = 20;
+    doc.rect(MR - BW, y + 2, BW, BH).strokeColor(statusColor).lineWidth(1).stroke();
+    doc.fontSize(8).font('Helvetica-Bold').fillColor(statusColor)
+       .text(statusText, MR - BW, y + 7, { width: BW, align: 'center', lineBreak: false });
+    y += 28;
+
+    const headerParts = [`#${id}`, r.form_type_name, r.size_group_name,
+                         r.receipt_type === 'new' ? 'New Product' : 'Restock'].filter(Boolean);
+    doc.fontSize(10).font('Helvetica').fillColor(C.mid)
+       .text(headerParts.join('  ·  '), ML, y, { width: W - BW - 10, lineBreak: false });
+    y += 14;
+
+    doc.moveTo(ML, y).lineTo(MR, y).strokeColor(C.navy).lineWidth(2).stroke();
+    y += 14;
+
+    // ── Receipt Details ─────────────────────────────────────────────
+    y = sectionBand('RECEIPT DETAILS', y);
+
     const c3 = W / 3;
-    drawField('RECEIPT DATE',  r.receipt_date ? String(r.receipt_date).slice(0,10) : '—', ML, c3 - 8, y);
-    drawField('PROCESSED BY',  r.processed_by, ML + c3, c3 - 8, y);
-    drawField('TYPE',          r.receipt_type === 'new' ? 'New Product' : 'Restock', ML + c3 * 2, c3 - 8, y);
-    y += 28;
-    y = divider(y);
+    field('RECEIPT DATE', r.receipt_date ? String(r.receipt_date).slice(0,10) : '—', ML,        c3 - 8, y);
+    field('PROCESSED BY', r.processed_by,                                             ML + c3,   c3 - 8, y);
+    field('TYPE',         r.receipt_type === 'new' ? 'New Product' : 'Restock',       ML + c3*2, c3 - 8, y);
+    y += 34;
 
-    // ── Row 2: Style / Supplier / Invoice / PO ──
     const c4 = W / 4;
-    drawField('STYLE NAME',  r.style_name,     ML,          c4 - 6, y);
-    drawField('SUPPLIER',    r.supplier,        ML + c4,     c4 - 6, y);
-    drawField('INVOICE #',   r.invoice_number,  ML + c4*2,   c4 - 6, y);
-    drawField('PO NUMBER',   r.po_number,       ML + c4*3,   c4 - 6, y);
-    y += 28;
-    drawField('PRODUCT CODE', r.product_code,  ML,          c4 - 6, y);
-    y += 28;
-    y = divider(y);
+    field('STYLE NAME',   r.style_name,     ML,        c4 - 6, y);
+    field('SUPPLIER',     r.supplier,       ML + c4,   c4 - 6, y);
+    field('INVOICE #',    r.invoice_number, ML + c4*2, c4 - 6, y);
+    field('PO NUMBER',    r.po_number,      ML + c4*3, c4 - 6, y);
+    y += 34;
 
-    // ── Pricing ──
+    field('PRODUCT CODE', r.product_code, ML, c4 - 6, y);
+    y += 34 + 6;
+    hLine(y);
+    y += 10;
+
+    // ── Pricing & Product Info ──────────────────────────────────────
+    y = sectionBand('PRICING & PRODUCT INFO', y);
+
+    field('COST PRICE',  r.cost_price       != null ? `$${Number(r.cost_price).toFixed(2)}`      : '—', ML,        c4 - 6, y);
+    field('DISCOUNT',    r.discount_percent != null ? `${r.discount_percent}%`                   : '—', ML + c4,   c4 - 6, y);
+    field('FREIGHT',     r.freight_price    != null ? `$${Number(r.freight_price).toFixed(2)}`   : '—', ML + c4*2, c4 - 6, y);
+    field('FINAL PRICE', r.final_price      != null ? `$${Number(r.final_price).toFixed(2)}`     : '—', ML + c4*3, c4 - 6, y);
+    y += 34;
+
     const c2 = W / 2 - 6;
-    drawField('COST PRICE',   r.cost_price     != null ? `$${Number(r.cost_price).toFixed(2)}`     : '—', ML,       c2, y);
-    drawField('DISCOUNT',     r.discount_percent != null ? `${r.discount_percent}%`                : '—', ML+c2+12, c2, y);
-    y += 28;
-    drawField('FREIGHT',      r.freight_price  != null ? `$${Number(r.freight_price).toFixed(2)}`  : '—', ML,       c2, y);
-    drawField('FINAL PRICE',  r.final_price    != null ? `$${Number(r.final_price).toFixed(2)}`    : '—', ML+c2+12, c2, y);
-    y += 28;
-    drawField('FABRIC',          r.fabric,             ML,       c2, y);
-    drawField('STRETCH ALLOWANCE', r.stretch_allowance, ML+c2+12, c2, y);
-    y += 28;
-    drawField('STOCK MATCHES INVOICE',  r.stock_matches_invoice  == null ? '—' : (r.stock_matches_invoice  ? 'Yes ✓' : 'No ✗'), ML,       c2, y);
-    drawField('ON RACK FOR PHOTOSHOOT', r.on_rack_for_photoshoot == null ? '—' : (r.on_rack_for_photoshoot ? 'Yes ✓' : 'No ✗'), ML+c2+12, c2, y);
-    y += 28;
-    y = divider(y);
+    field('FABRIC',             r.fabric,            ML,           c2, y);
+    field('STRETCH ALLOWANCE',  r.stretch_allowance, ML + c2 + 12, c2, y);
+    y += 34;
 
-    // ── Product Features ──
+    field('STOCK MATCHES INVOICE',  r.stock_matches_invoice  == null ? '—' : (r.stock_matches_invoice  ? 'Yes ✓' : 'No ✗'), ML,           c2, y);
+    field('ON RACK FOR PHOTOSHOOT', r.on_rack_for_photoshoot == null ? '—' : (r.on_rack_for_photoshoot ? 'Yes ✓' : 'No ✗'), ML + c2 + 12, c2, y);
+    y += 34 + 6;
+    hLine(y);
+    y += 10;
+
+    // ── Product Features ────────────────────────────────────────────
     const features = Array.isArray(r.product_features) ? r.product_features
       : (r.product_features ? JSON.parse(r.product_features) : []);
     const filled = features.filter(Boolean);
     if (filled.length) {
-      y = addPageIfNeeded(y, 14 + filled.length * 13);
-      doc.fontSize(7).font('Helvetica-Bold').fillColor('#64748b').text('PRODUCT FEATURES', ML, y);
-      y += 11;
+      y = addPageIfNeeded(y, 28 + filled.length * 17 + 16);
+      y = sectionBand('PRODUCT FEATURES', y);
       filled.forEach(f => {
-        doc.fontSize(9).font('Helvetica').fillColor('#1a1a2e').text(`• ${f}`, ML + 4, y, { width: W - 8 });
-        y += 13;
+        doc.fontSize(10).font('Helvetica').fillColor(C.navy)
+           .text(`•  ${f}`, ML + 4, y, { width: W - 8, lineBreak: false });
+        y += 17;
       });
-      y += 4;
-      y = divider(y);
+      y += 6;
+      hLine(y);
+      y += 10;
     }
 
-    // ── Size Grid ──
+    // ── Size Grid ───────────────────────────────────────────────────
     if (sizes.length) {
-      y = addPageIfNeeded(y, 14 + (sizes.length + 2) * 14);
-      doc.fontSize(7).font('Helvetica-Bold').fillColor('#64748b').text('SIZE QUANTITIES', ML, y);
-      y += 12;
-
-      // Determine measurement fields from first row with data
-      const sampleMeasurements = (() => {
-        const s = sizes.find(sz => {
+      const sampleM = (() => {
+        for (const sz of sizes) {
           const m = typeof sz.measurements === 'string' ? JSON.parse(sz.measurements) : (sz.measurements || {});
-          return Object.keys(m).length > 0;
-        });
-        if (!s) return {};
-        return typeof s.measurements === 'string' ? JSON.parse(s.measurements) : s.measurements;
+          if (Object.keys(m).length > 0) return m;
+        }
+        return {};
       })();
-      const mFields = Object.keys(sampleMeasurements);
-      const allCols = ['Size', 'Qty', ...mFields];
-      const colW    = Math.min(55, W / allCols.length);
+      const mFields  = Object.keys(sampleM);
+      const allCols  = ['SIZE', 'QTY', ...mFields.map(f => f.toUpperCase())];
+      const HDRH     = 24;
+      const ROW_H    = 26;
+      const TOTH     = 26;
+      const gridH    = HDRH + sizes.length * ROW_H + TOTH;
+
+      y = addPageIfNeeded(y, 28 + gridH);
+      y = sectionBand('SIZE QUANTITIES', y);
+
+      const SIZE_W = Math.min(150, W * 0.30);
+      const QTY_W  = mFields.length ? Math.min(110, W * 0.20) : W - SIZE_W;
+      const M_W    = mFields.length ? (W - SIZE_W - QTY_W) / mFields.length : 0;
+      const colWidths = [SIZE_W, QTY_W, ...mFields.map(() => M_W)];
+      const colX = [];
+      let cx = ML;
+      colWidths.forEach(cw => { colX.push(cx); cx += cw; });
+
+      const gridTop = y;
 
       // Header row
-      doc.fontSize(7).font('Helvetica-Bold').fillColor('#64748b');
-      allCols.forEach((col, ci) => doc.text(col, ML + ci * colW, y, { width: colW - 2 }));
-      y += 11;
-      doc.moveTo(ML, y).lineTo(ML + colW * allCols.length, y).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
-      y += 4;
-
-      doc.fontSize(9).font('Helvetica').fillColor('#1a1a2e');
-      let totalQty = 0;
-      sizes.forEach(s => {
-        const m = typeof s.measurements === 'string' ? JSON.parse(s.measurements) : (s.measurements || {});
-        const vals = [s.size_label, s.qty != null ? String(s.qty) : '—', ...mFields.map(f => m[f] != null ? String(m[f]) : '—')];
-        vals.forEach((v, ci) => doc.text(v, ML + ci * colW, y, { width: colW - 2, lineBreak: false }));
-        totalQty += s.qty || 0;
-        y += 13;
+      doc.rect(ML, y, W, HDRH).fillColor(C.bgMid).fill();
+      doc.fontSize(9).font('Helvetica-Bold').fillColor(C.mid);
+      allCols.forEach((col, ci) => {
+        doc.text(col, colX[ci] + 8, y + 8, { width: colWidths[ci] - 10, lineBreak: false });
       });
-      doc.font('Helvetica-Bold').text('TOTAL', ML, y);
-      doc.text(String(totalQty), ML + colW, y, { width: colW - 2 });
-      y += 16;
-      y = divider(y);
+      hLine(y + HDRH, C.borderD, 1);
+      y += HDRH;
+
+      // Data rows
+      let totalQty = 0;
+      sizes.forEach((s, idx) => {
+        const m    = typeof s.measurements === 'string' ? JSON.parse(s.measurements) : (s.measurements || {});
+        const vals = [s.size_label, s.qty != null ? String(s.qty) : '—',
+                      ...mFields.map(f => m[f] != null ? String(m[f]) : '—')];
+        if (idx > 0) hLine(y, C.border, 0.5);
+        vals.forEach((v, ci) => {
+          doc.fontSize(12).font(ci === 0 ? 'Helvetica-Bold' : 'Helvetica').fillColor(C.navy)
+             .text(v, colX[ci] + 8, y + 7, { width: colWidths[ci] - 10, lineBreak: false });
+        });
+        totalQty += s.qty || 0;
+        y += ROW_H;
+      });
+
+      // Total row
+      doc.rect(ML, y, W, TOTH).fillColor(C.bgMid).fill();
+      hLine(y, C.dark, 1.5);
+      doc.fontSize(11).font('Helvetica-Bold').fillColor(C.navy)
+         .text('TOTAL', colX[0] + 8, y + 8, { width: colWidths[0] - 10, lineBreak: false });
+      doc.fontSize(14).font('Helvetica-Bold').fillColor(C.navy)
+         .text(String(totalQty), colX[1] + 8, y + 6, { width: colWidths[1] - 10, lineBreak: false });
+      y += TOTH;
+
+      // Vertical column separators + outer box (drawn last, on top)
+      for (let ci = 1; ci < allCols.length; ci++) {
+        doc.moveTo(colX[ci], gridTop).lineTo(colX[ci], gridTop + gridH)
+           .strokeColor(C.border).lineWidth(0.5).stroke();
+      }
+      doc.rect(ML, gridTop, W, gridH).strokeColor(C.borderD).lineWidth(0.75).stroke();
+
+      y += 8;
+      hLine(y);
+      y += 10;
     }
 
-    // ── Notes ──
+    // ── Notes ───────────────────────────────────────────────────────
     if (r.notes) {
-      y = addPageIfNeeded(y, 40);
-      doc.fontSize(7).font('Helvetica-Bold').fillColor('#64748b').text('NOTES', ML, y);
-      y += 11;
-      doc.fontSize(9).font('Helvetica').fillColor('#1a1a2e').text(r.notes, ML, y, { width: W });
-      y += doc.heightOfString(r.notes, { width: W, fontSize: 9 }) + 12;
-      y = divider(y);
+      doc.fontSize(10).font('Helvetica');
+      const noteH = doc.heightOfString(r.notes, { width: W - 8 }) + 4;
+      y = addPageIfNeeded(y, 28 + noteH + 16);
+      y = sectionBand('NOTES', y);
+      doc.fontSize(10).font('Helvetica').fillColor(C.navy)
+         .text(r.notes, ML + 4, y, { width: W - 8 });
+      y += noteH + 8;
+      hLine(y);
+      y += 10;
     }
 
-    // ── Photos ──
+    // ── Photos ──────────────────────────────────────────────────────
     if (photos.length) {
-      y = addPageIfNeeded(y, 140);
-      doc.fontSize(7).font('Helvetica-Bold').fillColor('#64748b').text(`PHOTOS (${photos.length})`, ML, y);
-      y += 12;
+      y = addPageIfNeeded(y, 28 + 140);
+      y = sectionBand(`PHOTOS (${photos.length})`, y);
       const photoW = Math.min(150, (W - (photos.length - 1) * 10) / photos.length);
       photos.forEach((photo, pi) => {
         try {
@@ -7259,8 +7339,8 @@ app.get('/api/stock-receipts/:id/pdf', requireAuth, async (req, res) => {
       y += 130;
     }
 
-    // ── Footer ──
-    doc.fontSize(7).font('Helvetica').fillColor('#94a3b8')
+    // ── Footer ──────────────────────────────────────────────────────
+    doc.fontSize(7).font('Helvetica').fillColor(C.light)
        .text(
          `Generated ${new Date().toLocaleString('en-AU')}  ·  The Self Styler WMS  ·  Receipt #${id}`,
          ML, PAGE_H - 55, { align: 'center', width: W }
