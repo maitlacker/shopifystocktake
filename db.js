@@ -773,10 +773,11 @@ async function initDb() {
       ('Accessories ONE SIZE', '["ONE SIZE"]', false, 5)
     ON CONFLICT (name) DO NOTHING;
 
-    -- Migrate old Jeans 24-34 row if it exists
+    -- Migrate old Jeans 24-34 row only if Jeans 6-18 was not just inserted
     UPDATE srf_size_groups
     SET name='Jeans 6-18', sizes='["6","7","8","9","10","11","12","14","16","18"]'
-    WHERE name='Jeans 24-34';
+    WHERE name='Jeans 24-34'
+      AND NOT EXISTS (SELECT 1 FROM srf_size_groups WHERE name='Jeans 6-18');
 
     INSERT INTO srf_form_types (name, measurement_fields, sort_order) VALUES
       ('Tops/Dresses', '["Bust/Chest","Body Length","Hem Width","Sleeve Length","Shoulder Width"]', 1),
