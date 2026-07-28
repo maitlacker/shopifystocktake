@@ -5,6 +5,7 @@ let formData          = {};
 let sizesData         = [];
 let photosData        = [];
 let measurementFields = [];
+let suppliersConfig   = [];
 let isReadOnly        = false;
 let typeVal           = 'restock';
 let invoiceVal        = null;
@@ -44,6 +45,7 @@ async function init() {
     const ft = config.formTypes.find(f => f.id === receipt.form_type_id);
     measurementFields = Array.isArray(ft?.measurement_fields) ? ft.measurement_fields
       : (ft?.measurement_fields ? JSON.parse(ft.measurement_fields) : []);
+    suppliersConfig = (config.suppliers || []).map(s => s.company_name);
 
     renderActionBar(receipt);
     renderBody(receipt, sizes, photos, audit);
@@ -116,7 +118,18 @@ function renderBody(r, sizes, photos, audit) {
         </div>
         <div class="srf-field">
           <label>Supplier</label>
-          <input type="text" id="f-supplier" ${v(r.supplier)} placeholder="Supplier name"${ro_attr} />
+          ${ro
+            ? `<input type="text" id="f-supplier" ${v(r.supplier)} readonly />`
+            : `<select id="f-supplier"${ro_dis}>
+                <option value="">— Select supplier —</option>
+                ${suppliersConfig.map(s =>
+                  `<option value="${escHtml(s)}"${r.supplier === s ? ' selected' : ''}>${escHtml(s)}</option>`
+                ).join('')}
+                ${r.supplier && !suppliersConfig.includes(r.supplier)
+                  ? `<option value="${escHtml(r.supplier)}" selected>${escHtml(r.supplier)}</option>`
+                  : ''}
+              </select>`
+          }
         </div>
       </div>
       <div class="srf-row cols-4">

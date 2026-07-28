@@ -6551,11 +6551,12 @@ app.get('/api/stock-sleuth', requireAuth, async (req, res) => {
 
 app.get('/api/srf/config', requireAuth, async (req, res) => {
   try {
-    const [ftRes, sgRes] = await Promise.all([
+    const [ftRes, sgRes, supRes] = await Promise.all([
       pool.query('SELECT * FROM srf_form_types ORDER BY sort_order, name'),
       pool.query('SELECT * FROM srf_size_groups ORDER BY sort_order, name'),
+      pool.query('SELECT id, company_name FROM suppliers ORDER BY company_name ASC'),
     ]);
-    res.json({ formTypes: ftRes.rows, sizeGroups: sgRes.rows });
+    res.json({ formTypes: ftRes.rows, sizeGroups: sgRes.rows, suppliers: supRes.rows });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
