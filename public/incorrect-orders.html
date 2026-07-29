@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Incorrect Orders – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    .io-page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .io-page-title { font-size: 1.6rem; font-weight: 700; color: #1e293b; }
+    .io-page-title span { color: #64748b; font-size: 1rem; font-weight: 400; margin-left: 8px; }
+
+    .io-stats-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .io-stat {
+      background: #fff;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 14px 20px;
+      min-width: 120px;
+      text-align: center;
+    }
+    .io-stat-num { font-size: 1.8rem; font-weight: 700; color: #1e293b; }
+    .io-stat-label { font-size: 0.78rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+    .io-stat.amber .io-stat-num { color: #d97706; }
+    .io-stat.blue .io-stat-num  { color: #2563eb; }
+    .io-stat.green .io-stat-num { color: #15803d; }
+
+    .io-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .io-filter-tabs {
+      display: flex;
+      gap: 6px;
+      background: #f1f5f9;
+      border-radius: 10px;
+      padding: 4px;
+    }
+    .io-tab {
+      padding: 7px 16px;
+      border-radius: 8px;
+      border: none;
+      background: transparent;
+      color: #64748b;
+      font-size: 0.88rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .io-tab.active {
+      background: #fff;
+      color: #1e293b;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.10);
+      font-weight: 600;
+    }
+    .io-tab:hover:not(.active) { color: #1e293b; }
+
+    .io-table-wrap { overflow-x: auto; }
+    .io-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+    .io-table th {
+      text-align: left;
+      padding: 10px 14px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border-bottom: 2px solid #e2e8f0;
+      white-space: nowrap;
+    }
+    .io-table td {
+      padding: 13px 14px;
+      border-bottom: 1px solid #f1f5f9;
+      vertical-align: middle;
+    }
+    .io-table tr.io-data-row:hover td { background: #f8fafc; cursor: pointer; }
+
+    .io-week-row td {
+      background: #f1f5f9;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 8px 14px;
+    }
+
+    .io-order-num { font-weight: 700; color: #1e293b; }
+    .io-customer  { font-size: 0.82rem; color: #64748b; margin-top: 2px; }
+
+    .io-item-name  { color: #334155; max-width: 200px; }
+    .io-item-empty { color: #cbd5e1; font-style: italic; }
+
+    .io-stock-dot {
+      display: inline-block;
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      text-align: center;
+      line-height: 22px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+    .io-stock-dot.yes { background: #dcfce7; color: #15803d; }
+    .io-stock-dot.no  { background: #f1f5f9; color: #94a3b8; }
+
+    .io-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 99px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .io-badge.open              { background: #fef3c7; color: #92400e; }
+    .io-badge.replacement_sent  { background: #dbeafe; color: #1e40af; }
+    .io-badge.resolved          { background: #dcfce7; color: #15803d; }
+
+    .io-date { color: #64748b; font-size: 0.85rem; white-space: nowrap; }
+
+    .io-open-btn {
+      padding: 6px 14px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 8px;
+      background: #fff;
+      color: #4f46e5;
+      font-size: 0.83rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .io-open-btn:hover { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+
+    .io-empty {
+      text-align: center;
+      padding: 60px 20px;
+      color: #94a3b8;
+      font-size: 1rem;
+    }
+    .io-empty-icon { font-size: 2.5rem; margin-bottom: 12px; }
+
+    .io-slack-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #4ade80;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main class="container" style="padding-top:28px">
+
+    <div class="io-page-header">
+      <div>
+        <div class="io-page-title">Incorrect Orders <span id="io-total-count"></span></div>
+      </div>
+      <a href="/incorrect-order.html" class="btn btn-primary">+ New Case</a>
+    </div>
+
+    <div class="io-stats-row" id="io-stats-row">
+      <div class="io-stat amber"><div class="io-stat-num" id="stat-open">—</div><div class="io-stat-label">Open</div></div>
+      <div class="io-stat blue"><div class="io-stat-num" id="stat-replacement">—</div><div class="io-stat-label">Replacement Sent</div></div>
+      <div class="io-stat green"><div class="io-stat-num" id="stat-resolved">—</div><div class="io-stat-label">Resolved</div></div>
+      <div class="io-stat"><div class="io-stat-num" id="stat-stock-pending">—</div><div class="io-stat-label">Stock Check Pending</div></div>
+    </div>
+
+    <div class="io-toolbar">
+      <div class="io-filter-tabs">
+        <button class="io-tab active" data-status="all">All</button>
+        <button class="io-tab" data-status="open">Open</button>
+        <button class="io-tab" data-status="replacement_sent">Replacement Sent</button>
+        <button class="io-tab" data-status="resolved">Resolved</button>
+      </div>
+    </div>
+
+    <div class="io-table-wrap">
+      <table class="io-table">
+        <thead>
+          <tr>
+            <th>Order</th>
+            <th>Correct Item (Ordered)</th>
+            <th style="text-align:center">Stock ✓</th>
+            <th>Incorrect Item (Sent)</th>
+            <th style="text-align:center">Stock ✓</th>
+            <th>Status</th>
+            <th>Reported</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="io-tbody">
+          <tr><td colspan="8" class="io-empty"><div class="io-empty-icon">📋</div>Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </main>
+  <script src="nav.js"></script>
+  <script src="incorrect-orders.js"></script>
+</body>
+</html>

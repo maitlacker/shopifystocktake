@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Incorrect Order – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    .io-back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #64748b;
+      text-decoration: none;
+      font-size: 0.88rem;
+      font-weight: 500;
+      margin-bottom: 20px;
+      transition: color 0.15s;
+    }
+    .io-back-link:hover { color: #4f46e5; }
+
+    .io-detail-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .io-detail-title { font-size: 1.4rem; font-weight: 700; color: #1e293b; }
+    .io-detail-sub   { font-size: 0.88rem; color: #64748b; margin-top: 4px; }
+
+    .io-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 99px;
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+    .io-badge.open              { background: #fef3c7; color: #92400e; }
+    .io-badge.replacement_sent  { background: #dbeafe; color: #1e40af; }
+    .io-badge.resolved          { background: #dcfce7; color: #15803d; }
+
+    .io-card {
+      background: #fff;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 22px 24px;
+      margin-bottom: 18px;
+    }
+    .io-card-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: #64748b;
+      margin-bottom: 16px;
+    }
+
+    /* Order lookup */
+    .io-lookup-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .io-order-input {
+      flex: 1;
+      min-width: 160px;
+      max-width: 220px;
+      padding: 10px 14px;
+      font-size: 1rem;
+      font-weight: 600;
+      border: 2px solid #e2e8f0;
+      border-radius: 10px;
+      outline: none;
+      color: #1e293b;
+    }
+    .io-order-input:focus { border-color: #4f46e5; }
+    .io-lookup-btn {
+      padding: 10px 18px;
+      background: #4f46e5;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .io-lookup-btn:hover { background: #4338ca; }
+    .io-lookup-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .io-order-info {
+      margin-top: 14px;
+      padding: 14px 16px;
+      background: #f8fafc;
+      border-radius: 10px;
+      border: 1px solid #e2e8f0;
+    }
+    .io-order-info-row { display: flex; gap: 8px; margin-bottom: 6px; font-size: 0.9rem; }
+    .io-order-info-row:last-child { margin-bottom: 0; }
+    .io-info-label { font-weight: 600; color: #64748b; min-width: 110px; flex-shrink: 0; }
+    .io-info-val   { color: #1e293b; }
+
+    /* Line items from order */
+    .io-line-items { margin-top: 10px; }
+    .io-line-item  { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #f1f5f9; font-size: 0.85rem; color: #334155; }
+    .io-line-item:last-child { border-bottom: none; }
+    .io-use-btn {
+      padding: 4px 10px;
+      border: 1.5px solid #4f46e5;
+      border-radius: 6px;
+      background: transparent;
+      color: #4f46e5;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      margin-left: 8px;
+    }
+    .io-use-btn:hover { background: #4f46e5; color: #fff; }
+
+    /* Items two-col */
+    .io-items-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    @media (max-width: 640px) { .io-items-grid { grid-template-columns: 1fr; } }
+
+    .io-item-card {
+      border: 2px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 20px;
+      background: #fff;
+    }
+    .io-item-card.correct  { border-color: #bbf7d0; }
+    .io-item-card.received { border-color: #fecaca; }
+
+    .io-item-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 14px;
+    }
+    .io-item-card.correct  .io-item-badge { background: #dcfce7; color: #15803d; }
+    .io-item-card.received .io-item-badge { background: #fee2e2; color: #b91c1c; }
+
+    .io-field-label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+    }
+    .io-field-wrap { margin-bottom: 14px; position: relative; }
+
+    .io-text-input, .io-textarea {
+      width: 100%;
+      padding: 10px 14px;
+      border: 2px solid #e2e8f0;
+      border-radius: 10px;
+      font-size: 0.92rem;
+      color: #1e293b;
+      outline: none;
+      box-sizing: border-box;
+      background: #fff;
+      font-family: inherit;
+      resize: vertical;
+    }
+    .io-text-input:focus, .io-textarea:focus { border-color: #4f46e5; }
+
+    /* Product search dropdown */
+    .io-product-search-wrap { position: relative; }
+    .io-product-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0; right: 0;
+      background: #fff;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+      z-index: 200;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+    .io-product-option {
+      padding: 10px 14px;
+      cursor: pointer;
+      border-bottom: 1px solid #f1f5f9;
+      font-size: 0.88rem;
+      color: #1e293b;
+    }
+    .io-product-option:hover { background: #f1f5f9; }
+    .io-product-option:last-child { border-bottom: none; }
+    .io-product-sku { font-size: 0.75rem; color: #94a3b8; }
+
+    .io-linked-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #ede9fe;
+      color: #4f46e5;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      margin-top: 4px;
+    }
+    .io-linked-tag button {
+      background: none; border: none; cursor: pointer;
+      color: #7c3aed; font-size: 0.9rem; padding: 0; line-height: 1;
+    }
+
+    /* Stock counted toggle */
+    .io-stock-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 4px;
+    }
+    .io-stock-label { font-size: 0.78rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+    .io-stock-toggle {
+      display: flex;
+      gap: 6px;
+    }
+    .io-stock-btn {
+      padding: 7px 16px;
+      border-radius: 8px;
+      border: 2px solid #e2e8f0;
+      background: #fff;
+      font-size: 0.83rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      color: #64748b;
+    }
+    .io-stock-btn.active-yes { background: #dcfce7; border-color: #86efac; color: #15803d; }
+    .io-stock-btn.active-no  { background: #fee2e2; border-color: #fca5a5; color: #b91c1c; }
+    .io-stock-btn:hover:not(.active-yes):not(.active-no) { border-color: #94a3b8; color: #1e293b; }
+
+    /* Status workflow */
+    .io-status-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .io-status-btn {
+      padding: 9px 18px;
+      border-radius: 10px;
+      border: 2px solid #e2e8f0;
+      background: #fff;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      color: #64748b;
+      transition: all 0.15s;
+    }
+    .io-status-btn:hover { border-color: #94a3b8; color: #1e293b; }
+    .io-status-btn.active { border-color: transparent; }
+    .io-status-btn[data-val="open"].active              { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+    .io-status-btn[data-val="replacement_sent"].active  { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
+    .io-status-btn[data-val="resolved"].active          { background: #dcfce7; color: #15803d; border-color: #86efac; }
+
+    .io-resolution-fields { margin-top: 14px; }
+    .io-select {
+      width: 100%;
+      padding: 10px 14px;
+      border: 2px solid #e2e8f0;
+      border-radius: 10px;
+      font-size: 0.92rem;
+      outline: none;
+      background: #fff;
+      color: #1e293b;
+      cursor: pointer;
+    }
+    .io-select:focus { border-color: #4f46e5; }
+
+    /* Notes / timeline */
+    .io-add-note-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      margin-top: 14px;
+    }
+    .io-add-note-input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 2px solid #e2e8f0;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      outline: none;
+      font-family: inherit;
+      resize: none;
+      color: #1e293b;
+    }
+    .io-add-note-input:focus { border-color: #4f46e5; }
+    .io-add-note-btn {
+      padding: 10px 18px;
+      background: #4f46e5;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .io-add-note-btn:hover { background: #4338ca; }
+
+    .io-timeline { margin-top: 16px; }
+    .io-timeline-entry {
+      display: flex;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .io-timeline-entry:last-child { border-bottom: none; }
+    .io-tl-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #a5b4fc;
+      flex-shrink: 0;
+      margin-top: 6px;
+    }
+    .io-tl-body  { flex: 1; font-size: 0.88rem; color: #334155; }
+    .io-tl-meta  { font-size: 0.75rem; color: #94a3b8; margin-top: 2px; }
+
+    /* Action bar */
+    .io-action-bar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1.5px solid #e2e8f0;
+    }
+    .io-slack-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      background: #fff;
+      border: 2px solid #4ade80;
+      border-radius: 10px;
+      color: #15803d;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .io-slack-btn:hover { background: #dcfce7; }
+    .io-slack-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .io-slack-sent { border-color: #86efac; background: #dcfce7; cursor: default; }
+
+    .io-delete-btn {
+      padding: 10px 18px;
+      background: #fff;
+      border: 2px solid #fca5a5;
+      border-radius: 10px;
+      color: #b91c1c;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-left: auto;
+    }
+    .io-delete-btn:hover { background: #fee2e2; }
+
+    .io-save-btn {
+      padding: 10px 28px;
+      background: #4f46e5;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 0.92rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .io-save-btn:hover { background: #4338ca; }
+    .io-save-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .io-toast {
+      position: fixed;
+      bottom: 24px; right: 24px;
+      background: #1e293b;
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      z-index: 999;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all 0.25s;
+    }
+    .io-toast.show { opacity: 1; transform: translateY(0); }
+    .io-toast.success { background: #15803d; }
+    .io-toast.error   { background: #b91c1c; }
+
+    .io-reported-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .io-date-input {
+      padding: 8px 12px;
+      border: 2px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      outline: none;
+      color: #1e293b;
+    }
+    .io-date-input:focus { border-color: #4f46e5; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main class="container" style="padding-top:28px; max-width:900px">
+
+    <a href="/incorrect-orders.html" class="io-back-link">← Incorrect Orders</a>
+
+    <div class="io-detail-header">
+      <div>
+        <div class="io-detail-title" id="io-page-title">New Incorrect Order Case</div>
+        <div class="io-detail-sub" id="io-page-sub"></div>
+      </div>
+      <div id="io-status-badge"></div>
+    </div>
+
+    <!-- Order Lookup -->
+    <div class="io-card">
+      <div class="io-card-title">Shopify Order</div>
+      <div class="io-reported-row">
+        <span style="font-size:0.82rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Date Reported:</span>
+        <input type="date" id="io-reported-date" class="io-date-input" />
+      </div>
+      <div class="io-lookup-row">
+        <input type="text" id="io-order-num" class="io-order-input" placeholder="#282708" />
+        <button class="io-lookup-btn" id="io-lookup-btn">Look Up in Shopify</button>
+      </div>
+      <div id="io-order-info" style="display:none" class="io-order-info">
+        <div class="io-order-info-row">
+          <span class="io-info-label">Customer</span>
+          <span class="io-info-val" id="io-customer-name">—</span>
+        </div>
+        <div class="io-order-info-row" id="io-note-row" style="display:none">
+          <span class="io-info-label">Order Note</span>
+          <span class="io-info-val" id="io-order-note-val">—</span>
+        </div>
+        <div id="io-line-items-wrap" style="display:none">
+          <div style="font-size:0.78rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;margin-top:12px;margin-bottom:6px">Items in Order</div>
+          <div id="io-line-items" class="io-line-items"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Items grid -->
+    <div class="io-items-grid">
+      <!-- Correct item -->
+      <div class="io-item-card correct">
+        <div class="io-item-badge">✓ Should Have Sent</div>
+        <div class="io-field-wrap io-product-search-wrap">
+          <div class="io-field-label">Style Name</div>
+          <input type="text" id="io-correct-item" class="io-text-input" placeholder="e.g. Dakota Straight-Leg Jeans Black 11" autocomplete="off" />
+          <div id="io-correct-dropdown" class="io-product-dropdown" style="display:none"></div>
+          <div id="io-correct-linked" style="display:none"></div>
+          <input type="hidden" id="io-correct-product-id" />
+        </div>
+        <div class="io-stock-row">
+          <span class="io-stock-label">Stock Counted</span>
+          <div class="io-stock-toggle">
+            <button class="io-stock-btn" id="io-correct-stock-yes" data-side="correct" data-val="true">✓ Yes</button>
+            <button class="io-stock-btn" id="io-correct-stock-no"  data-side="correct" data-val="false">✗ No</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Received (wrong) item -->
+      <div class="io-item-card received">
+        <div class="io-item-badge">⚠ Incorrectly Sent</div>
+        <div class="io-field-wrap io-product-search-wrap">
+          <div class="io-field-label">Style Name</div>
+          <input type="text" id="io-received-item" class="io-text-input" placeholder="e.g. Dakota Straight-Leg Jeans Black 14" autocomplete="off" />
+          <div id="io-received-dropdown" class="io-product-dropdown" style="display:none"></div>
+          <div id="io-received-linked" style="display:none"></div>
+          <input type="hidden" id="io-received-product-id" />
+        </div>
+        <div class="io-stock-row">
+          <span class="io-stock-label">Stock Counted</span>
+          <div class="io-stock-toggle">
+            <button class="io-stock-btn" id="io-received-stock-yes" data-side="received" data-val="true">✓ Yes</button>
+            <button class="io-stock-btn" id="io-received-stock-no"  data-side="received" data-val="false">✗ No</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status & Resolution -->
+    <div class="io-card">
+      <div class="io-card-title">Status &amp; Resolution</div>
+      <div class="io-status-row">
+        <button class="io-status-btn active" data-val="open">Open</button>
+        <button class="io-status-btn" data-val="replacement_sent">Replacement Sent</button>
+        <button class="io-status-btn" data-val="resolved">Resolved</button>
+      </div>
+      <div class="io-resolution-fields" id="io-resolution-wrap">
+        <div class="io-field-wrap">
+          <div class="io-field-label">Resolution Type</div>
+          <select id="io-resolution" class="io-select">
+            <option value="">— Select outcome —</option>
+            <option value="replacement">Replacement sent (we had stock)</option>
+            <option value="refund">Customer refunded</option>
+            <option value="credit">Store credit issued</option>
+            <option value="kept_item">Customer kept incorrect item</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="io-field-wrap" id="io-replacement-order-wrap" style="display:none">
+          <div class="io-field-label">Replacement Order #</div>
+          <input type="text" id="io-replacement-order" class="io-text-input" placeholder="#288705" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Notes -->
+    <div class="io-card">
+      <div class="io-card-title">Notes</div>
+      <div class="io-field-wrap">
+        <div class="io-field-label">Pick/Pack Notes <span style="font-weight:400;text-transform:none;letter-spacing:0">(from Shopify order, editable)</span></div>
+        <textarea id="io-pick-pack-notes" class="io-textarea" rows="2" placeholder="e.g. MB PACKED BS PICKED 25/6 — incorrectly labelled a size 11"></textarea>
+      </div>
+      <div class="io-field-wrap" style="margin-bottom:0">
+        <div class="io-field-label">General Notes</div>
+        <textarea id="io-notes" class="io-textarea" rows="3" placeholder="Any additional context about this case..."></textarea>
+      </div>
+    </div>
+
+    <!-- Timeline -->
+    <div class="io-card" id="io-timeline-card">
+      <div class="io-card-title">Case Notes</div>
+      <div class="io-timeline" id="io-timeline"></div>
+      <div class="io-add-note-row">
+        <textarea class="io-add-note-input" id="io-new-note" rows="2" placeholder="Add a case note..."></textarea>
+        <button class="io-add-note-btn" id="io-add-note-btn">Add</button>
+      </div>
+    </div>
+
+    <!-- Action bar -->
+    <div class="io-action-bar">
+      <button class="io-slack-btn" id="io-slack-btn" disabled>
+        <span>🔔</span> Send Urgent Stock Check to Slack
+      </button>
+      <button class="io-save-btn" id="io-save-btn">Save</button>
+      <button class="io-delete-btn" id="io-delete-btn" style="display:none">Delete Case</button>
+    </div>
+
+  </main>
+
+  <div class="io-toast" id="io-toast"></div>
+
+  <script src="nav.js"></script>
+  <script src="incorrect-order.js"></script>
+</body>
+</html>

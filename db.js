@@ -874,6 +874,49 @@ async function initDb() {
     ALTER TABLE stock_receipts ADD COLUMN IF NOT EXISTS deleted_by  TEXT;
     ALTER TABLE stock_receipts ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
     ALTER TABLE stock_receipts ADD COLUMN IF NOT EXISTS archived_by TEXT;
+
+    -- ── Incorrect Orders (Customer Service) ──────────────────────────
+
+    CREATE TABLE IF NOT EXISTS incorrect_orders (
+      id                     SERIAL PRIMARY KEY,
+      order_number           TEXT NOT NULL,
+      shopify_order_id       BIGINT,
+      shopify_order_note     TEXT,
+      customer_name          TEXT,
+      reported_date          DATE NOT NULL DEFAULT CURRENT_DATE,
+      correct_item           TEXT,
+      correct_product_id     BIGINT,
+      correct_stock_counted  BOOLEAN NOT NULL DEFAULT FALSE,
+      received_item          TEXT,
+      received_product_id    BIGINT,
+      received_stock_counted BOOLEAN NOT NULL DEFAULT FALSE,
+      pick_pack_notes        TEXT,
+      notes                  TEXT,
+      status                 TEXT NOT NULL DEFAULT 'open',
+      resolution             TEXT,
+      replacement_order      TEXT,
+      slack_notified_at      TIMESTAMPTZ,
+      created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_by             TEXT,
+      updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by             TEXT,
+      deleted_at             TIMESTAMPTZ,
+      deleted_by             TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_incorrect_orders_status
+      ON incorrect_orders(status, reported_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_incorrect_orders_order_number
+      ON incorrect_orders(order_number);
+
+    CREATE TABLE IF NOT EXISTS incorrect_order_notes (
+      id         SERIAL PRIMARY KEY,
+      order_id   INT NOT NULL REFERENCES incorrect_orders(id) ON DELETE CASCADE,
+      note       TEXT NOT NULL,
+      added_by   TEXT NOT NULL,
+      added_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_incorrect_order_notes_order
+      ON incorrect_order_notes(order_id, added_at DESC);
   `);
 }
 

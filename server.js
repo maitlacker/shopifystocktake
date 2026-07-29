@@ -7353,6 +7353,175 @@ app.get('/api/stock-receipts/:id/pdf', requireAuth, async (req, res) => {
   }
 });
 
+// ── Incorrect Orders (Customer Service) ─────────────────────────────
+
+app.get('/api/incorrect-orders', requireAuth, async (req, res) => {
+  const { status } = req.query;
+  const params = [];
+  let where = 'WHERE deleted_at IS NULL';
+  if (status && status !== 'all') { where += ' AND status = $1'; params.push(status); }
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM incorrect_orders ${where} ORDER BY reported_date DESC, id DESC`,
+      params
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/incorrect-orders/shopify-order', requireAuth, async (req, res) => {
+  const num = (req.query.num || '').replace(/^#/, '').trim();
+  if (!num) return res.status(400).json({ error: 'Order number required' });
+  try {
+    const r = await fetch(
+      `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json?name=%23${encodeURIComponent(num)}&status=any&fields=id,name,note,note_attributes,created_at,customer,line_items`,
+      { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } }
+    );
+    const data = await r.json();
+    if (!data.orders || !data.orders.length) return res.json(null);
+    const o = data.orders[0];
+    res.json({
+      id: o.id,
+      name: o.name,
+      note: o.note || null,
+      customer_name: o.customer
+        ? `${o.customer.first_name || ''} ${o.customer.last_name || ''}`.trim()
+        : null,
+      line_items: (o.line_items || []).map(li => ({
+        title: li.title,
+        variant_title: li.variant_title,
+        product_id: li.product_id,
+        sku: li.sku,
+        quantity: li.quantity,
+      })),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/incorrect-orders', requireAuth, async (req, res) => {
+  const { order_number, shopify_order_id, shopify_order_note, customer_name,
+          reported_date, correct_item, correct_product_id, received_item,
+          received_product_id, pick_pack_notes, notes } = req.body;
+  if (!order_number) return res.status(400).json({ error: 'Order number required' });
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO incorrect_orders
+        (order_number, shopify_order_id, shopify_order_note, customer_name,
+         reported_date, correct_item, correct_product_id, received_item,
+         received_product_id, pick_pack_notes, notes, created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12) RETURNING *`,
+      [order_number, shopify_order_id || null, shopify_order_note || null,
+       customer_name || null, reported_date || new Date().toISOString().split('T')[0],
+       correct_item || null, correct_product_id || null,
+       received_item || null, received_product_id || null,
+       pick_pack_notes || null, notes || null, req.user.email]
+    );
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/incorrect-orders/:id', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT io.*,
+        COALESCE(json_agg(n ORDER BY n.added_at DESC) FILTER (WHERE n.id IS NOT NULL), '[]') AS timeline
+       FROM incorrect_orders io
+       LEFT JOIN incorrect_order_notes n ON n.order_id = io.id
+       WHERE io.id = $1 AND io.deleted_at IS NULL
+       GROUP BY io.id`,
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/incorrect-orders/:id', requireAuth, async (req, res) => {
+  const { order_number, shopify_order_id, shopify_order_note, customer_name,
+          reported_date, correct_item, correct_product_id, correct_stock_counted,
+          received_item, received_product_id, received_stock_counted,
+          pick_pack_notes, notes, status, resolution, replacement_order } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `UPDATE incorrect_orders SET
+        order_number=$1, shopify_order_id=$2, shopify_order_note=$3, customer_name=$4,
+        reported_date=$5, correct_item=$6, correct_product_id=$7,
+        correct_stock_counted=$8, received_item=$9, received_product_id=$10,
+        received_stock_counted=$11, pick_pack_notes=$12, notes=$13,
+        status=$14, resolution=$15, replacement_order=$16,
+        updated_at=NOW(), updated_by=$17
+       WHERE id=$18 AND deleted_at IS NULL RETURNING *`,
+      [order_number, shopify_order_id || null, shopify_order_note || null,
+       customer_name || null, reported_date,
+       correct_item || null, correct_product_id || null, !!correct_stock_counted,
+       received_item || null, received_product_id || null, !!received_stock_counted,
+       pick_pack_notes || null, notes || null,
+       status || 'open', resolution || null, replacement_order || null,
+       req.user.email, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/incorrect-orders/:id', requireAuth, async (req, res) => {
+  try {
+    await pool.query(
+      'UPDATE incorrect_orders SET deleted_at=NOW(), deleted_by=$1 WHERE id=$2',
+      [req.user.email, req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/incorrect-orders/:id/notes', requireAuth, async (req, res) => {
+  const { note } = req.body;
+  if (!note) return res.status(400).json({ error: 'Note required' });
+  try {
+    const { rows } = await pool.query(
+      'INSERT INTO incorrect_order_notes (order_id, note, added_by) VALUES ($1,$2,$3) RETURNING *',
+      [req.params.id, note, req.user.email]
+    );
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/incorrect-orders/:id/notify', requireAuth, async (req, res) => {
+  const webhook = process.env.SLACK_CS_WEBHOOK_URL;
+  if (!webhook) return res.status(503).json({ error: 'SLACK_CS_WEBHOOK_URL not configured' });
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM incorrect_orders WHERE id=$1 AND deleted_at IS NULL', [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    const r = rows[0];
+    const body = {
+      blocks: [
+        { type: 'header', text: { type: 'plain_text', text: '🚨 Incorrect Order — Urgent Stock Check' } },
+        {
+          type: 'section',
+          fields: [
+            { type: 'mrkdwn', text: `*Order:*\n${r.order_number}` },
+            { type: 'mrkdwn', text: `*Customer:*\n${r.customer_name || '—'}` },
+            { type: 'mrkdwn', text: `*Should have sent:*\n${r.correct_item || '—'}` },
+            { type: 'mrkdwn', text: `*Incorrectly sent:*\n${r.received_item || '—'}` },
+          ],
+        },
+        ...(r.pick_pack_notes ? [{ type: 'section', text: { type: 'mrkdwn', text: `*Pick/Pack Note:* ${r.pick_pack_notes}` } }] : []),
+        { type: 'section', text: { type: 'mrkdwn', text: `_Please check physical stock for both items and update the WMS._` } },
+      ],
+    };
+    const sr = await fetch(webhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!sr.ok) throw new Error(`Slack responded ${sr.status}`);
+    await pool.query('UPDATE incorrect_orders SET slack_notified_at=NOW() WHERE id=$1', [r.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
