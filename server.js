@@ -7509,6 +7509,15 @@ app.post('/api/incorrect-orders/:id/notify', requireAuth, async (req, res) => {
         },
         ...(r.pick_pack_notes ? [{ type: 'section', text: { type: 'mrkdwn', text: `*Pick/Pack Note:* ${r.pick_pack_notes}` } }] : []),
         { type: 'section', text: { type: 'mrkdwn', text: `_Please check physical stock for both items and update the WMS._` } },
+        {
+          type: 'actions',
+          elements: [{
+            type: 'button',
+            text: { type: 'plain_text', text: '→ Open Case in WMS' },
+            url: `${process.env.APP_URL}/incorrect-order.html?id=${r.id}`,
+            style: 'primary',
+          }],
+        },
       ],
     };
     const sr = await fetch(webhook, {
