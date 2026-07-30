@@ -6861,6 +6861,15 @@ app.post('/api/stock-receipts/:id/complete', requireAuth, async (req, res) => {
                 { type: 'mrkdwn', text: `*Date:*\n${r.receipt_date ? String(r.receipt_date).slice(0,10) : '—'}` },
               ],
             },
+            {
+              type: 'actions',
+              elements: [{
+                type: 'button',
+                text: { type: 'plain_text', text: '→ Open Receipt in WMS' },
+                url: `${process.env.APP_URL}/stock-receipt.html?id=${id}`,
+                style: 'primary',
+              }],
+            },
           ],
         }),
       }).catch(err => console.error('[srf] Slack notification failed:', err.message));
