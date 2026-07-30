@@ -95,14 +95,30 @@
           if (!r.ok) return;
           const products = await r.json();
           if (!products.length) { dropdown.style.display = 'none'; return; }
-          dropdown.innerHTML = products.slice(0, 12).map(p => {
-            const variant = p.variants && p.variants[0];
-            const sku = variant ? (variant.sku || '') : '';
-            return `<div class="io-product-option" data-id="${p.id}" data-title="${escHtml(p.title)}">
-              ${escHtml(p.title)}
-              ${sku ? `<div class="io-product-sku">SKU: ${escHtml(sku)}</div>` : ''}
-            </div>`;
-          }).join('');
+
+          const rows = [];
+          products.slice(0, 8).forEach(p => {
+            const variants = p.variants || [];
+            const isDefault = variants.length <= 1 && (!variants[0] || variants[0].title === 'Default Title');
+            if (isDefault) {
+              const sku = variants[0] ? (variants[0].sku || '') : '';
+              rows.push(`<div class="io-product-option" data-id="${p.id}" data-title="${escHtml(p.title)}">
+                <span class="io-opt-title">${escHtml(p.title)}</span>
+                ${sku ? `<span class="io-product-sku">${escHtml(sku)}</span>` : ''}
+              </div>`);
+            } else {
+              rows.push(`<div class="io-product-header">${escHtml(p.title)}</div>`);
+              variants.slice(0, 30).forEach(v => {
+                const label = `${p.title} – ${v.title}`;
+                rows.push(`<div class="io-product-option io-variant-opt" data-id="${p.id}" data-title="${escHtml(label)}">
+                  <span class="io-variant-size-label">${escHtml(v.title)}</span>
+                  ${v.sku ? `<span class="io-product-sku">${escHtml(v.sku)}</span>` : ''}
+                </div>`);
+              });
+            }
+          });
+
+          dropdown.innerHTML = rows.join('');
           dropdown.style.display = '';
         } catch (_) { dropdown.style.display = 'none'; }
       }, 280);
