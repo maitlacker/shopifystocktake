@@ -7399,7 +7399,7 @@ app.get('/api/stock-receipts/:id/pdf', requireAuth, async (req, res) => {
         return {};
       })();
       const mFields  = Object.keys(sampleM);
-      const allCols  = ['SIZE', 'QTY', ...mFields.map(f => f.toUpperCase())];
+      const allCols  = ['SIZE', 'QTY', 'WEIGHT (G)', ...mFields.map(f => f.toUpperCase())];
       const HDRH     = 24;
       const ROW_H    = 26;
       const TOTH     = 26;
@@ -7409,9 +7409,8 @@ app.get('/api/stock-receipts/:id/pdf', requireAuth, async (req, res) => {
       y = sectionBand('SIZE QUANTITIES', y);
 
       const SIZE_W = Math.min(150, W * 0.30);
-      const QTY_W  = mFields.length ? Math.min(110, W * 0.20) : W - SIZE_W;
-      const M_W    = mFields.length ? (W - SIZE_W - QTY_W) / mFields.length : 0;
-      const colWidths = [SIZE_W, QTY_W, ...mFields.map(() => M_W)];
+      const REST_W = (W - SIZE_W) / (2 + mFields.length); // qty + weight + measurements
+      const colWidths = [SIZE_W, REST_W, REST_W, ...mFields.map(() => REST_W)];
       const colX = [];
       let cx = ML;
       colWidths.forEach(cw => { colX.push(cx); cx += cw; });
@@ -7432,6 +7431,7 @@ app.get('/api/stock-receipts/:id/pdf', requireAuth, async (req, res) => {
       sizes.forEach((s, idx) => {
         const m    = typeof s.measurements === 'string' ? JSON.parse(s.measurements) : (s.measurements || {});
         const vals = [s.size_label, s.qty != null ? String(s.qty) : '—',
+                      s.weight_grams != null ? String(parseFloat(s.weight_grams)) : '—',
                       ...mFields.map(f => m[f] != null ? String(m[f]) : '—')];
         if (idx > 0) hLine(y, C.border, 0.5);
         vals.forEach((v, ci) => {
