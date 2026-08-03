@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Influencer Campaign – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    .ic-page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .ic-page-title { font-size: 1.6rem; font-weight: 700; color: #1e293b; }
+    .ic-back { color: #64748b; text-decoration: none; font-size: 0.88rem; }
+    .ic-back:hover { color: #4f46e5; }
+
+    .ic-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 99px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      text-transform: capitalize;
+      vertical-align: middle;
+      margin-left: 10px;
+    }
+    .ic-badge.planned   { background: #f1f5f9; color: #475569; }
+    .ic-badge.live      { background: #fef3c7; color: #92400e; }
+    .ic-badge.completed { background: #dcfce7; color: #15803d; }
+    .ic-badge.archived  { background: #f1f5f9; color: #94a3b8; }
+
+    .ic-card {
+      background: #fff;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 22px;
+      margin-bottom: 20px;
+    }
+    .ic-card-title {
+      font-size: 1.02rem;
+      font-weight: 700;
+      color: #1e293b;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .ic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+    .ic-field label {
+      display: block;
+      font-size: 0.76rem;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 5px;
+    }
+    .ic-field input, .ic-field select, .ic-field textarea {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 0.92rem;
+      color: #1e293b;
+      outline: none;
+      background: #fff;
+      box-sizing: border-box;
+      font-family: inherit;
+    }
+    .ic-field input:focus, .ic-field select:focus, .ic-field textarea:focus { border-color: #4f46e5; }
+    .ic-field.wide { grid-column: 1 / -1; }
+
+    /* Status workflow buttons */
+    .ic-status-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+    .ic-status-btn {
+      padding: 8px 18px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 9px;
+      background: #fff;
+      color: #64748b;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .ic-status-btn.active-planned   { background: #475569; border-color: #475569; color: #fff; }
+    .ic-status-btn.active-live      { background: #d97706; border-color: #d97706; color: #fff; }
+    .ic-status-btn.active-completed { background: #15803d; border-color: #15803d; color: #fff; }
+
+    /* Product picker */
+    .ic-search-wrap { position: relative; margin-bottom: 14px; }
+    .ic-search-wrap input {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 9px;
+      font-size: 0.94rem;
+      outline: none;
+      box-sizing: border-box;
+    }
+    .ic-search-wrap input:focus { border-color: #4f46e5; }
+    .ic-dropdown {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0; right: 0;
+      background: #fff;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+      max-height: 320px;
+      overflow-y: auto;
+      z-index: 50;
+      display: none;
+    }
+    .ic-dropdown.open { display: block; }
+    .ic-dd-option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      cursor: pointer;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .ic-dd-option:hover { background: #f8fafc; }
+    .ic-dd-thumb { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; background: #f1f5f9; }
+    .ic-dd-title { font-size: 0.9rem; color: #1e293b; font-weight: 500; }
+    .ic-dd-msg { padding: 14px; color: #94a3b8; font-size: 0.88rem; text-align: center; }
+
+    .ic-product-list { display: flex; flex-direction: column; gap: 10px; }
+    .ic-product-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 10px;
+      background: #f8fafc;
+    }
+    .ic-product-row img { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; background: #fff; }
+    .ic-product-info { flex: 1; }
+    .ic-product-name { font-weight: 600; color: #1e293b; font-size: 0.92rem; }
+    .ic-product-inv  { font-size: 0.78rem; color: #64748b; margin-top: 2px; }
+    .ic-product-remove {
+      border: none;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 1.1rem;
+      cursor: pointer;
+      padding: 4px 8px;
+    }
+    .ic-product-remove:hover { color: #b91c1c; }
+    .ic-products-hint { color: #94a3b8; font-size: 0.88rem; font-style: italic; }
+
+    /* Organic metrics */
+    .ic-metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .ic-metric-tile {
+      background: #f8fafc;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 12px;
+      text-align: center;
+    }
+    .ic-metric-num { font-size: 1.3rem; font-weight: 700; color: #1e293b; }
+    .ic-metric-label { font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+
+    .ic-organic-form {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: 12px;
+      padding: 16px;
+      background: #f8fafc;
+      border-radius: 10px;
+      margin-bottom: 14px;
+    }
+    .ic-organic-form .ic-field.submit { display: flex; align-items: flex-end; }
+
+    .ic-history-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+    .ic-history-table th {
+      text-align: left;
+      padding: 8px 10px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      border-bottom: 2px solid #e2e8f0;
+      white-space: nowrap;
+    }
+    .ic-history-table td { padding: 9px 10px; border-bottom: 1px solid #f1f5f9; white-space: nowrap; }
+    .ic-history-del { border: none; background: transparent; color: #94a3b8; cursor: pointer; }
+    .ic-history-del:hover { color: #b91c1c; }
+    .ic-source-tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 99px;
+      background: #f1f5f9;
+      color: #64748b;
+      font-size: 0.72rem;
+      font-weight: 600;
+    }
+
+    .ic-action-bar {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      padding-bottom: 40px;
+    }
+    .btn-danger {
+      background: #fff;
+      border: 1.5px solid #fecaca;
+      color: #b91c1c;
+    }
+    .btn-danger:hover { background: #fef2f2; }
+
+    .ic-saved-flash { color: #15803d; font-weight: 600; font-size: 0.88rem; align-self: center; opacity: 0; transition: opacity 0.3s; }
+    .ic-saved-flash.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main class="container" style="padding-top:28px;max-width:1000px">
+
+    <div class="ic-page-header">
+      <div>
+        <a href="/influencers.html" class="ic-back">← All Campaigns</a>
+        <div class="ic-page-title" style="margin-top:6px">
+          <span id="ic-title">New Campaign</span>
+          <span class="ic-badge planned" id="ic-status-badge" style="display:none">planned</span>
+        </div>
+      </div>
+      <div class="ic-status-btns" id="ic-status-btns" style="display:none">
+        <button class="ic-status-btn" data-status="planned">Planned</button>
+        <button class="ic-status-btn" data-status="live">Live</button>
+        <button class="ic-status-btn" data-status="completed">Completed</button>
+      </div>
+    </div>
+
+    <!-- Campaign setup -->
+    <div class="ic-card">
+      <div class="ic-card-title">Campaign Details</div>
+      <div class="ic-grid">
+        <div class="ic-field"><label>Creator Name *</label><input id="f-creator-name" type="text" placeholder="e.g. Sarah Jones" /></div>
+        <div class="ic-field"><label>Instagram / TikTok Handle</label><input id="f-creator-handle" type="text" placeholder="@handle" /></div>
+        <div class="ic-field"><label>Post Date &amp; Time</label><input id="f-post-datetime" type="datetime-local" /></div>
+        <div class="ic-field">
+          <label>Content Type</label>
+          <select id="f-content-type">
+            <option value="">—</option>
+            <option>Reel</option>
+            <option>Story</option>
+            <option>Carousel</option>
+            <option>TikTok</option>
+            <option>YouTube</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div class="ic-field"><label>CTA Used</label><input id="f-cta" type="text" placeholder="e.g. Link in bio" /></div>
+        <div class="ic-field"><label>Hook</label><input id="f-hook" type="text" placeholder="Opening hook of the content" /></div>
+        <div class="ic-field"><label>Ad Live Start</label><input id="f-ad-start" type="date" /></div>
+        <div class="ic-field"><label>Ad Live End</label><input id="f-ad-end" type="date" /></div>
+        <div class="ic-field"><label>Influencer Fee ($)</label><input id="f-fee" type="number" min="0" step="0.01" placeholder="0.00" /></div>
+        <div class="ic-field"><label>Influencer Code</label><input id="f-code" type="text" placeholder="e.g. SARAH15" /></div>
+        <div class="ic-field"><label>Reporting Window (days)</label><input id="f-window" type="number" min="1" max="90" value="14" /></div>
+        <div class="ic-field"><label>Post URL</label><input id="f-post-url" type="url" placeholder="https://instagram.com/p/..." /></div>
+        <div class="ic-field wide"><label>Notes</label><textarea id="f-notes" rows="2" placeholder="Anything worth remembering about this collab..."></textarea></div>
+      </div>
+    </div>
+
+    <!-- Featured products -->
+    <div class="ic-card" id="ic-products-card">
+      <div class="ic-card-title">Products Featured</div>
+      <div id="ic-products-locked" class="ic-products-hint">Save the campaign first, then add featured products.</div>
+      <div id="ic-products-body" style="display:none">
+        <div class="ic-search-wrap">
+          <input id="ic-product-search" type="text" placeholder="Search Shopify products to add..." autocomplete="off" />
+          <div class="ic-dropdown" id="ic-product-dropdown"></div>
+        </div>
+        <div class="ic-product-list" id="ic-product-list"></div>
+      </div>
+    </div>
+
+    <!-- Organic performance -->
+    <div class="ic-card" id="ic-organic-card" style="display:none">
+      <div class="ic-card-title">
+        Organic Performance
+        <button class="btn" id="ic-toggle-organic-form" style="font-size:0.84rem">+ Record Snapshot</button>
+      </div>
+
+      <div class="ic-metrics-grid" id="ic-metrics-grid"></div>
+
+      <div class="ic-organic-form" id="ic-organic-form" style="display:none">
+        <div class="ic-field"><label>Reach</label><input id="m-reach" type="number" min="0" /></div>
+        <div class="ic-field"><label>Plays / Views</label><input id="m-views" type="number" min="0" /></div>
+        <div class="ic-field"><label>Impressions</label><input id="m-impressions" type="number" min="0" /></div>
+        <div class="ic-field"><label>Likes</label><input id="m-likes" type="number" min="0" /></div>
+        <div class="ic-field"><label>Comments</label><input id="m-comments" type="number" min="0" /></div>
+        <div class="ic-field"><label>Shares</label><input id="m-shares" type="number" min="0" /></div>
+        <div class="ic-field"><label>Saves</label><input id="m-saves" type="number" min="0" /></div>
+        <div class="ic-field"><label>Profile Visits</label><input id="m-profile-visits" type="number" min="0" /></div>
+        <div class="ic-field"><label>Link Clicks</label><input id="m-link-clicks" type="number" min="0" /></div>
+        <div class="ic-field submit"><button class="btn btn-primary" id="ic-save-organic" style="width:100%">Save Snapshot</button></div>
+      </div>
+
+      <div style="overflow-x:auto">
+        <table class="ic-history-table" id="ic-history-table" style="display:none">
+          <thead>
+            <tr>
+              <th>Captured</th><th>Source</th><th>Reach</th><th>Views</th><th>Likes</th>
+              <th>Comments</th><th>Shares</th><th>Saves</th><th>Profile Visits</th><th>Link Clicks</th><th>Eng. Rate</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="ic-history-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="ic-action-bar">
+      <span class="ic-saved-flash" id="ic-saved-flash">✓ Saved</span>
+      <button class="btn btn-danger" id="ic-delete" style="display:none">Delete Campaign</button>
+      <button class="btn btn-primary" id="ic-save">Save Campaign</button>
+    </div>
+
+  </main>
+  <script src="nav.js"></script>
+  <script src="influencer-campaign.js"></script>
+</body>
+</html>

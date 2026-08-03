@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Influencer Campaigns – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    .inf-page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .inf-page-title { font-size: 1.6rem; font-weight: 700; color: #1e293b; }
+    .inf-page-title span { color: #64748b; font-size: 1rem; font-weight: 400; margin-left: 8px; }
+
+    .inf-stats-row { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .inf-stat {
+      background: #fff;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 14px 20px;
+      min-width: 130px;
+      text-align: center;
+    }
+    .inf-stat-num { font-size: 1.8rem; font-weight: 700; color: #1e293b; }
+    .inf-stat-label { font-size: 0.78rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+    .inf-stat.blue .inf-stat-num   { color: #2563eb; }
+    .inf-stat.green .inf-stat-num  { color: #15803d; }
+    .inf-stat.purple .inf-stat-num { color: #7c3aed; }
+
+    .inf-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+    .inf-filter-tabs { display: flex; gap: 6px; background: #f1f5f9; border-radius: 10px; padding: 4px; }
+    .inf-tab {
+      padding: 7px 16px;
+      border-radius: 8px;
+      border: none;
+      background: transparent;
+      color: #64748b;
+      font-size: 0.88rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .inf-tab.active { background: #fff; color: #1e293b; box-shadow: 0 1px 4px rgba(0,0,0,0.10); font-weight: 600; }
+    .inf-tab:hover:not(.active) { color: #1e293b; }
+
+    .inf-table-wrap { overflow-x: auto; }
+    .inf-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .inf-table th {
+      text-align: left;
+      padding: 10px 14px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border-bottom: 2px solid #e2e8f0;
+      white-space: nowrap;
+    }
+    .inf-table td { padding: 13px 14px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    .inf-table tr.inf-data-row:hover td { background: #f8fafc; cursor: pointer; }
+
+    .inf-month-row td {
+      background: #f1f5f9;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 8px 14px;
+    }
+
+    .inf-creator { font-weight: 700; color: #1e293b; }
+    .inf-handle  { font-size: 0.82rem; color: #64748b; margin-top: 2px; }
+
+    .inf-products { display: flex; align-items: center; gap: 4px; }
+    .inf-product-thumb {
+      width: 32px; height: 32px;
+      border-radius: 6px;
+      object-fit: cover;
+      border: 1.5px solid #e2e8f0;
+      background: #f8fafc;
+    }
+    .inf-product-more {
+      width: 32px; height: 32px;
+      border-radius: 6px;
+      background: #f1f5f9;
+      color: #64748b;
+      font-size: 0.72rem;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .inf-no-products { color: #cbd5e1; font-style: italic; font-size: 0.85rem; }
+
+    .inf-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 99px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      white-space: nowrap;
+      text-transform: capitalize;
+    }
+    .inf-badge.planned   { background: #f1f5f9; color: #475569; }
+    .inf-badge.live      { background: #fef3c7; color: #92400e; }
+    .inf-badge.completed { background: #dcfce7; color: #15803d; }
+    .inf-badge.archived  { background: #f1f5f9; color: #94a3b8; }
+
+    .inf-date { color: #64748b; font-size: 0.85rem; white-space: nowrap; }
+    .inf-fee  { font-weight: 600; color: #1e293b; white-space: nowrap; }
+    .inf-metric { color: #334155; white-space: nowrap; }
+    .inf-metric small { color: #94a3b8; }
+
+    .inf-open-btn {
+      padding: 6px 14px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 8px;
+      background: #fff;
+      color: #4f46e5;
+      font-size: 0.83rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .inf-open-btn:hover { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+
+    .inf-empty { text-align: center; padding: 60px 20px; color: #94a3b8; font-size: 1rem; }
+    .inf-empty-icon { font-size: 2.5rem; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main class="container" style="padding-top:28px">
+
+    <div class="inf-page-header">
+      <div>
+        <div class="inf-page-title">Influencer Campaigns <span id="inf-total-count"></span></div>
+      </div>
+      <a href="/influencer-campaign.html" class="btn btn-primary">+ New Campaign</a>
+    </div>
+
+    <div class="inf-stats-row">
+      <div class="inf-stat blue"><div class="inf-stat-num" id="stat-live">—</div><div class="inf-stat-label">Live</div></div>
+      <div class="inf-stat"><div class="inf-stat-num" id="stat-planned">—</div><div class="inf-stat-label">Planned</div></div>
+      <div class="inf-stat green"><div class="inf-stat-num" id="stat-completed">—</div><div class="inf-stat-label">Completed</div></div>
+      <div class="inf-stat purple"><div class="inf-stat-num" id="stat-invested">—</div><div class="inf-stat-label">Total Fees</div></div>
+    </div>
+
+    <div class="inf-toolbar">
+      <div class="inf-filter-tabs">
+        <button class="inf-tab active" data-status="all">All</button>
+        <button class="inf-tab" data-status="planned">Planned</button>
+        <button class="inf-tab" data-status="live">Live</button>
+        <button class="inf-tab" data-status="completed">Completed</button>
+      </div>
+    </div>
+
+    <div class="inf-table-wrap">
+      <table class="inf-table">
+        <thead>
+          <tr>
+            <th>Creator</th>
+            <th>Post Date</th>
+            <th>Products</th>
+            <th>Content</th>
+            <th>Fee</th>
+            <th>Reach</th>
+            <th>Eng. Rate</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="inf-tbody">
+          <tr><td colspan="9" class="inf-empty"><div class="inf-empty-icon">📣</div>Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </main>
+  <script src="nav.js"></script>
+  <script src="influencers.js"></script>
+</body>
+</html>

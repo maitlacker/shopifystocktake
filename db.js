@@ -917,6 +917,129 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_incorrect_order_notes_order
       ON incorrect_order_notes(order_id, added_at DESC);
+
+    CREATE TABLE IF NOT EXISTS influencer_campaigns (
+      id                    SERIAL PRIMARY KEY,
+      creator_name          TEXT NOT NULL,
+      creator_handle        TEXT,
+      post_datetime         TIMESTAMPTZ,
+      cta_used              TEXT,
+      hook                  TEXT,
+      ad_live_start         DATE,
+      ad_live_end           DATE,
+      influencer_fee        NUMERIC(10,2) NOT NULL DEFAULT 0,
+      discount_code         TEXT,
+      reporting_window_days INT NOT NULL DEFAULT 14,
+      post_url              TEXT,
+      content_type          TEXT,
+      status                TEXT NOT NULL DEFAULT 'planned',
+      notes                 TEXT,
+      created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_by            TEXT,
+      updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by            TEXT,
+      deleted_at            TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_influencer_campaigns_status
+      ON influencer_campaigns(status, post_datetime DESC);
+
+    CREATE TABLE IF NOT EXISTS influencer_campaign_products (
+      id            SERIAL PRIMARY KEY,
+      campaign_id   INT NOT NULL REFERENCES influencer_campaigns(id) ON DELETE CASCADE,
+      product_id    BIGINT NOT NULL,
+      product_title TEXT NOT NULL,
+      image_url     TEXT,
+      UNIQUE(campaign_id, product_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS influencer_inventory_snapshots (
+      id                 SERIAL PRIMARY KEY,
+      campaign_id        INT NOT NULL REFERENCES influencer_campaigns(id) ON DELETE CASCADE,
+      product_id         BIGINT NOT NULL,
+      variant_id         BIGINT NOT NULL,
+      variant_title      TEXT,
+      sku                TEXT,
+      snapshot_date      DATE NOT NULL,
+      inventory_quantity INT NOT NULL,
+      UNIQUE(campaign_id, variant_id, snapshot_date)
+    );
+
+    CREATE TABLE IF NOT EXISTS influencer_organic_metrics (
+      id              SERIAL PRIMARY KEY,
+      campaign_id     INT NOT NULL REFERENCES influencer_campaigns(id) ON DELETE CASCADE,
+      source          TEXT NOT NULL DEFAULT 'manual',
+      captured_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      captured_by     TEXT,
+      reach           INT,
+      views           INT,
+      impressions     INT,
+      likes           INT,
+      comments        INT,
+      shares          INT,
+      saves           INT,
+      profile_visits  INT,
+      link_clicks     INT,
+      engagement_rate NUMERIC(6,3),
+      raw_json        JSONB
+    );
+    CREATE INDEX IF NOT EXISTS idx_influencer_organic_campaign
+      ON influencer_organic_metrics(campaign_id, captured_at DESC);
+
+    CREATE TABLE IF NOT EXISTS influencer_campaign_ads (
+      id                 SERIAL PRIMARY KEY,
+      campaign_id        INT NOT NULL REFERENCES influencer_campaigns(id) ON DELETE CASCADE,
+      ad_id              TEXT NOT NULL,
+      ad_name            TEXT,
+      adset_id           TEXT,
+      adset_name         TEXT,
+      campaign_meta_id   TEXT,
+      campaign_meta_name TEXT,
+      creative_id        TEXT,
+      creative_thumb_url TEXT,
+      UNIQUE(campaign_id, ad_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS influencer_ad_insights_daily (
+      id                  SERIAL PRIMARY KEY,
+      ad_id               TEXT NOT NULL,
+      date                DATE NOT NULL,
+      spend               NUMERIC(10,2) DEFAULT 0,
+      impressions         INT DEFAULT 0,
+      clicks              INT DEFAULT 0,
+      reach               INT DEFAULT 0,
+      frequency           NUMERIC(8,3),
+      purchases           INT DEFAULT 0,
+      purchase_value      NUMERIC(12,2) DEFAULT 0,
+      video_3s_views      INT,
+      thruplays           INT,
+      video_p100          INT,
+      ctr                 NUMERIC(8,4),
+      cpc                 NUMERIC(10,4),
+      cpm                 NUMERIC(10,4),
+      attribution_setting TEXT,
+      synced_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(ad_id, date)
+    );
+
+    CREATE TABLE IF NOT EXISTS influencer_sales_cache (
+      campaign_id      INT PRIMARY KEY REFERENCES influencer_campaigns(id) ON DELETE CASCADE,
+      computed_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      window_start     TIMESTAMPTZ,
+      window_end       TIMESTAMPTZ,
+      summary          JSONB,
+      product_perf     JSONB,
+      combos           JSONB,
+      code_attribution JSONB,
+      baseline         JSONB
+    );
+
+    CREATE TABLE IF NOT EXISTS influencer_insights (
+      id          SERIAL PRIMARY KEY,
+      campaign_id INT REFERENCES influencer_campaigns(id) ON DELETE CASCADE,
+      content     TEXT NOT NULL,
+      model_used  TEXT,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 }
 

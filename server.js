@@ -2252,6 +2252,110 @@ app.get('/api/products/search', async (req, res) => {
   res.json(formatted);
 });
 
+// ── Stocktake search (live — no cache required) ────────────────────
+app.get('/api/stocktake/search-live', requireAuth, async (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (q.length < 2) return res.json([]);
+  try {
+    const h = { 'X-Shopify-Access-Token': SHOPIFY_TOKEN };
+    const f = 'id,title,images,variants,status';
+    // Parallel: title search + exact SKU variant lookup
+    const [titleResp, skuResp] = await Promise.all([
+      fetch(`https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products.json?q=${encodeURIComponent(q)}&limit=10&status=active&fields=${f}`, { headers: h }),
+      fetch(`https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/variants.json?sku=${encodeURIComponent(q)}&limit=5&fields=id,sku,product_id,title,inventory_quantity`, { headers: h }),
+    ]);
+    const [{ products: titleProds = [] }, { variants: skuVars = [] }] = await Promise.all([titleResp.json(), skuResp.json()]);
+
+    // Fetch products for any SKU hits not already in title results
+    const titleIds = new Set(titleProds.map(p => p.id));
+    const extraIds = [...new Set(skuVars.map(v => v.product_id).filter(id => id && !titleIds.has(id)))];
+    let extraProds = [];
+    if (extraIds.length) {
+      const r = await fetch(`https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products.json?ids=${extraIds.join(',')}&fields=${f}`, { headers: h });
+      const { products = [] } = await r.json();
+      extraProds = products.filter(p => p.status === 'active');
+    }
+
+    const all = [...titleProds.filter(p => p.status === 'active'), ...extraProds].slice(0, 15);
+    const ids = all.map(p => p.id);
+    const { rows: lastChecks } = ids.length
+      ? await pool.query(
+          `SELECT DISTINCT ON (product_id) product_id AS "productId", initials, created_at AS "timestamp"
+           FROM stocktake_history WHERE product_id = ANY($1::bigint[])
+           ORDER BY product_id, created_at DESC`, [ids])
+      : { rows: [] };
+    const lcMap = {};
+    lastChecks.forEach(r => { lcMap[String(r.productId)] = r; });
+
+    res.json(all.map(p => ({
+      id: p.id, title: p.title,
+      image: p.images && p.images[0] ? p.images[0].src : null,
+      variants: (p.variants || []).map(v => ({ id: v.id, title: v.title, sku: v.sku || '', inventory_quantity: v.inventory_quantity || 0 })),
+      lastCheck: lcMap[String(p.id)] || null,
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Product shelf-count (standalone) ───────────────────────────────
+app.get('/api/products/:id/shelf-count', requireAuth, async (req, res) => {
+  const shopifyId = Number(req.params.id);
+  if (!shopifyId) return res.status(400).json({ error: 'Product ID required' });
+  try {
+    const prodRes = await fetch(
+      `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products/${shopifyId}.json?fields=id,title,variants`,
+      { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } }
+    );
+    if (!prodRes.ok) return res.status(502).json({ error: `Shopify ${prodRes.status}` });
+    const { product } = await prodRes.json();
+    const variantIds = new Set((product.variants || []).map(v => v.id));
+
+    const committedMap = {}, orderQtyMap = {};
+    let ordersUrl = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json` +
+      `?status=open&fulfillment_status=unfulfilled,partial&limit=250&fields=id,order_number,line_items`;
+    while (ordersUrl) {
+      const r = await fetch(ordersUrl, { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } });
+      if (!r.ok) break;
+      const { orders } = await r.json();
+      for (const o of (orders || [])) {
+        for (const item of (o.line_items || [])) {
+          if (!variantIds.has(item.variant_id)) continue;
+          const qty = item.fulfillable_quantity ?? item.quantity;
+          if (qty <= 0) continue;
+          committedMap[item.variant_id] = (committedMap[item.variant_id] || 0) + qty;
+          if (!orderQtyMap[o.order_number]) orderQtyMap[o.order_number] = {};
+          orderQtyMap[o.order_number][item.variant_id] = (orderQtyMap[o.order_number][item.variant_id] || 0) + qty;
+        }
+      }
+      const link = r.headers.get('link');
+      ordersUrl = null;
+      if (link) { const m = link.match(/<([^>]+)>;\s*rel="next"/); if (m) ordersUrl = m[1]; }
+    }
+
+    const wmsPickedMap = {};
+    const unfulfilledNums = Object.keys(orderQtyMap).map(Number);
+    if (unfulfilledNums.length && variantIds.size) {
+      const { rows } = await pool.query(
+        `SELECT DISTINCT order_number, variant_id FROM picking_item_states
+         WHERE picked=true AND order_number=ANY($1::int[]) AND variant_id=ANY($2::bigint[])`,
+        [unfulfilledNums, [...variantIds]]
+      );
+      for (const row of rows) {
+        const varId = Number(row.variant_id);
+        const qty   = (orderQtyMap[Number(row.order_number)] || {})[varId] || 0;
+        wmsPickedMap[varId] = (wmsPickedMap[varId] || 0) + qty;
+      }
+    }
+
+    const variants = (product.variants || []).map(v => {
+      const available  = v.inventory_quantity || 0;
+      const committed  = committedMap[v.id] || 0;
+      const wms_picked = wmsPickedMap[v.id] || 0;
+      return { id: v.id, title: v.title, sku: v.sku, available, committed, wms_picked, on_hand: available + committed, true_shelf: available + committed - wms_picked };
+    });
+    res.json({ variants, product_title: product.title });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Stocktake history routes ───────────────────────────────────────
 app.post('/api/stocktake/submit', async (req, res) => {
   const { productId, productTitle, initials, variants = [] } = req.body;
@@ -7536,6 +7640,214 @@ app.post('/api/incorrect-orders/:id/notify', requireAuth, async (req, res) => {
     });
     if (!sr.ok) throw new Error(`Slack responded ${sr.status}`);
     await pool.query('UPDATE incorrect_orders SET slack_notified_at=NOW() WHERE id=$1', [r.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Influencer Reporting (Marketing) ────────────────────────────────
+
+// List campaigns with product summaries + latest organic snapshot
+app.get('/api/influencer-campaigns', requireAuth, async (req, res) => {
+  const { status } = req.query;
+  const params = [];
+  let where = 'WHERE c.deleted_at IS NULL';
+  if (status && status !== 'all') { where += ' AND c.status = $1'; params.push(status); }
+  try {
+    const { rows } = await pool.query(
+      `SELECT c.*,
+        COALESCE(p.products, '[]') AS products,
+        o.latest_organic
+       FROM influencer_campaigns c
+       LEFT JOIN LATERAL (
+         SELECT json_agg(json_build_object(
+           'product_id', cp.product_id, 'product_title', cp.product_title, 'image_url', cp.image_url
+         )) AS products
+         FROM influencer_campaign_products cp WHERE cp.campaign_id = c.id
+       ) p ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT row_to_json(m) AS latest_organic
+         FROM influencer_organic_metrics m
+         WHERE m.campaign_id = c.id
+         ORDER BY m.captured_at DESC LIMIT 1
+       ) o ON TRUE
+       ${where}
+       ORDER BY c.post_datetime DESC NULLS FIRST, c.id DESC`,
+      params
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/influencer-campaigns', requireAuth, async (req, res) => {
+  const { creator_name, creator_handle, post_datetime, cta_used, hook,
+          ad_live_start, ad_live_end, influencer_fee, discount_code,
+          reporting_window_days, post_url, content_type, status, notes } = req.body;
+  if (!creator_name) return res.status(400).json({ error: 'Creator name required' });
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO influencer_campaigns
+        (creator_name, creator_handle, post_datetime, cta_used, hook,
+         ad_live_start, ad_live_end, influencer_fee, discount_code,
+         reporting_window_days, post_url, content_type, status, notes,
+         created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15) RETURNING *`,
+      [creator_name, creator_handle || null, post_datetime || null,
+       cta_used || null, hook || null, ad_live_start || null, ad_live_end || null,
+       influencer_fee || 0, discount_code || null, reporting_window_days || 14,
+       post_url || null, content_type || null, status || 'planned', notes || null,
+       req.user.email]
+    );
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/influencer-campaigns/:id', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM influencer_campaigns WHERE id=$1 AND deleted_at IS NULL`,
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    const campaign = rows[0];
+
+    const [products, organic, snapshots] = await Promise.all([
+      pool.query(
+        'SELECT * FROM influencer_campaign_products WHERE campaign_id=$1 ORDER BY id',
+        [req.params.id]
+      ),
+      pool.query(
+        'SELECT * FROM influencer_organic_metrics WHERE campaign_id=$1 ORDER BY captured_at DESC',
+        [req.params.id]
+      ),
+      pool.query(
+        `SELECT DISTINCT ON (variant_id) *
+         FROM influencer_inventory_snapshots
+         WHERE campaign_id=$1
+         ORDER BY variant_id, snapshot_date ASC`,
+        [req.params.id]
+      ),
+    ]);
+
+    campaign.products           = products.rows;
+    campaign.organic_metrics    = organic.rows;
+    campaign.starting_inventory = snapshots.rows;
+    res.json(campaign);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/influencer-campaigns/:id', requireAuth, async (req, res) => {
+  const { creator_name, creator_handle, post_datetime, cta_used, hook,
+          ad_live_start, ad_live_end, influencer_fee, discount_code,
+          reporting_window_days, post_url, content_type, status, notes } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `UPDATE influencer_campaigns SET
+        creator_name=$1, creator_handle=$2, post_datetime=$3, cta_used=$4, hook=$5,
+        ad_live_start=$6, ad_live_end=$7, influencer_fee=$8, discount_code=$9,
+        reporting_window_days=$10, post_url=$11, content_type=$12, status=$13,
+        notes=$14, updated_at=NOW(), updated_by=$15
+       WHERE id=$16 AND deleted_at IS NULL RETURNING *`,
+      [creator_name, creator_handle || null, post_datetime || null,
+       cta_used || null, hook || null, ad_live_start || null, ad_live_end || null,
+       influencer_fee || 0, discount_code || null, reporting_window_days || 14,
+       post_url || null, content_type || null, status || 'planned', notes || null,
+       req.user.email, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/influencer-campaigns/:id', requireAuth, async (req, res) => {
+  try {
+    await pool.query(
+      'UPDATE influencer_campaigns SET deleted_at=NOW(), updated_by=$1 WHERE id=$2',
+      [req.user.email, req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Add a featured product — also captures today's inventory snapshot for its variants
+app.post('/api/influencer-campaigns/:id/products', requireAuth, async (req, res) => {
+  const { product_id, product_title, image_url } = req.body;
+  if (!product_id || !product_title) {
+    return res.status(400).json({ error: 'product_id and product_title required' });
+  }
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO influencer_campaign_products (campaign_id, product_id, product_title, image_url)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (campaign_id, product_id) DO UPDATE SET product_title=EXCLUDED.product_title
+       RETURNING *`,
+      [req.params.id, product_id, product_title, image_url || null]
+    );
+
+    // Snapshot current variant inventory (best-available "starting inventory")
+    try {
+      const r = await fetch(
+        `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products/${product_id}.json?fields=id,variants`,
+        { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } }
+      );
+      const data = await r.json();
+      const today = new Date().toISOString().split('T')[0];
+      for (const v of (data.product?.variants || [])) {
+        await pool.query(
+          `INSERT INTO influencer_inventory_snapshots
+            (campaign_id, product_id, variant_id, variant_title, sku, snapshot_date, inventory_quantity)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)
+           ON CONFLICT (campaign_id, variant_id, snapshot_date) DO NOTHING`,
+          [req.params.id, product_id, v.id, v.title, v.sku || null, today, v.inventory_quantity || 0]
+        );
+      }
+    } catch (snapErr) {
+      console.error('[influencer] Inventory snapshot failed:', snapErr.message);
+    }
+
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/influencer-campaigns/:id/products/:productId', requireAuth, async (req, res) => {
+  try {
+    await pool.query(
+      'DELETE FROM influencer_campaign_products WHERE campaign_id=$1 AND product_id=$2',
+      [req.params.id, req.params.productId]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Record an organic metrics snapshot (manual entry for now; screenshot/API later)
+app.post('/api/influencer-campaigns/:id/organic', requireAuth, async (req, res) => {
+  const { source, reach, views, impressions, likes, comments, shares, saves,
+          profile_visits, link_clicks, engagement_rate } = req.body;
+  const num = (v) => (v === '' || v === null || v === undefined) ? null : parseInt(v, 10);
+  try {
+    let er = engagement_rate ? parseFloat(engagement_rate) : null;
+    if (er === null && reach) {
+      const eng = (num(likes) || 0) + (num(comments) || 0) + (num(shares) || 0) + (num(saves) || 0);
+      if (eng > 0) er = Math.round((eng / num(reach)) * 100000) / 1000;
+    }
+    const { rows } = await pool.query(
+      `INSERT INTO influencer_organic_metrics
+        (campaign_id, source, captured_by, reach, views, impressions, likes,
+         comments, shares, saves, profile_visits, link_clicks, engagement_rate)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [req.params.id, source || 'manual', req.user.email,
+       num(reach), num(views), num(impressions), num(likes), num(comments),
+       num(shares), num(saves), num(profile_visits), num(link_clicks), er]
+    );
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/influencer-campaigns/:id/organic/:metricId', requireAuth, async (req, res) => {
+  try {
+    await pool.query(
+      'DELETE FROM influencer_organic_metrics WHERE campaign_id=$1 AND id=$2',
+      [req.params.id, req.params.metricId]
+    );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
