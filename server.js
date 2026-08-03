@@ -2259,12 +2259,52 @@ app.get('/api/stocktake/search-live', requireAuth, async (req, res) => {
   try {
     const h = { 'X-Shopify-Access-Token': SHOPIFY_TOKEN };
     const f = 'id,title,images,variants,status';
-    // Parallel: title search + exact SKU variant lookup
-    const [titleResp, skuResp] = await Promise.all([
-      fetch(`https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products.json?q=${encodeURIComponent(q)}&limit=10&status=active&fields=${f}`, { headers: h }),
-      fetch(`https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/variants.json?sku=${encodeURIComponent(q)}&limit=5&fields=id,sku,product_id,title,inventory_quantity`, { headers: h }),
+
+    // Title search via GraphQL — REST products.json has no text-search param
+    const safeQ = q.replace(/["\\():*]/g, ' ').replace(/\s+/g, ' ').trim();
+    const searchProducts = async (searchQuery) => {
+      const gql = `{
+        products(first: 12, query: "${searchQuery}", sortKey: TITLE) {
+          edges { node {
+            legacyResourceId title
+            featuredImage { url }
+            variants(first: 100) { edges { node {
+              legacyResourceId title sku inventoryQuantity
+            } } }
+          } }
+        }
+      }`;
+      const r = await fetch(`https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/graphql.json`, {
+        method: 'POST',
+        headers: { ...h, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: gql }),
+      });
+      const json = await r.json();
+      if (json.errors) throw new Error(`Shopify GraphQL: ${json.errors[0]?.message}`);
+      return (json.data?.products?.edges || []).map(({ node }) => ({
+        id: Number(node.legacyResourceId),
+        title: node.title,
+        status: 'active',
+        images: node.featuredImage ? [{ src: node.featuredImage.url }] : [],
+        variants: (node.variants?.edges || []).map(({ node: v }) => ({
+          id: Number(v.legacyResourceId),
+          title: v.title,
+          sku: v.sku,
+          inventory_quantity: v.inventoryQuantity,
+        })),
+      }));
+    };
+
+    // Parallel: title contains-search + exact SKU variant lookup
+    let [titleProds, skuData] = await Promise.all([
+      searchProducts(`status:active AND title:*${safeQ}*`),
+      fetch(`https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/variants.json?sku=${encodeURIComponent(q)}&limit=5&fields=id,sku,product_id,title,inventory_quantity`, { headers: h }).then(r => r.json()),
     ]);
-    const [{ products: titleProds = [] }, { variants: skuVars = [] }] = await Promise.all([titleResp.json(), skuResp.json()]);
+    // Fallback: free-text search (word-prefix matching, like the Shopify admin search box)
+    if (!titleProds.length && safeQ) {
+      titleProds = await searchProducts(`status:active AND ${safeQ}`);
+    }
+    const skuVars = skuData.variants || [];
 
     // Fetch products for any SKU hits not already in title results
     const titleIds = new Set(titleProds.map(p => p.id));
