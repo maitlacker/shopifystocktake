@@ -870,6 +870,8 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_srf_audit_receipt
       ON stock_receipt_audit(receipt_id, changed_at DESC);
 
+    ALTER TABLE stock_receipt_sizes ADD COLUMN IF NOT EXISTS weight_grams NUMERIC(8,1);
+
     ALTER TABLE stock_receipts ADD COLUMN IF NOT EXISTS deleted_at  TIMESTAMPTZ;
     ALTER TABLE stock_receipts ADD COLUMN IF NOT EXISTS deleted_by  TEXT;
     ALTER TABLE stock_receipts ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;

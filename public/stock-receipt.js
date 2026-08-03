@@ -351,7 +351,7 @@ function renderSizeGrid(sizes) {
   let totalQty  = 0;
   sizes.forEach(s => { totalQty += s.qty || 0; });
 
-  const headerCols = ['Size', 'Qty', ...mFields].map(c => `<th>${escHtml(c)}</th>`).join('');
+  const headerCols = ['Size', 'Qty', 'Weight (g)', ...mFields].map(c => `<th>${escHtml(c)}</th>`).join('');
 
   const rows = sizes.map((s, idx) => {
     const m = typeof s.measurements === 'string' ? JSON.parse(s.measurements) : (s.measurements || {});
@@ -366,9 +366,15 @@ function renderSizeGrid(sizes) {
       ? `<input type="number" value="${s.qty ?? ''}" readonly />`
       : `<input type="number" class="qty-input" data-sidx="${idx}" value="${s.qty ?? ''}" min="0" step="1" oninput="updateTotal()" />`;
 
+    const wv = s.weight_grams != null ? s.weight_grams : '';
+    const weightCell = ro
+      ? `<input type="number" value="${escHtml(String(wv))}" readonly />`
+      : `<input type="number" class="weight-input" data-sidx="${idx}" value="${escHtml(String(wv))}" min="0" step="0.1" placeholder="g" />`;
+
     return `<tr>
       <td class="srf-size-label">${escHtml(s.size_label)}</td>
       <td>${qtyCell}</td>
+      <td>${weightCell}</td>
       ${mCells}
     </tr>`;
   }).join('');
@@ -381,6 +387,7 @@ function renderSizeGrid(sizes) {
         <tr>
           <td>Total</td>
           <td id="size-total" style="font-weight:700">${totalQty}</td>
+          <td></td>
           ${mFields.map(() => '<td></td>').join('')}
         </tr>
       </tfoot>
@@ -403,7 +410,9 @@ function buildSizeGridData() {
       const el = document.querySelector(`.meas-input[data-sidx="${idx}"][data-field="${field}"]`);
       if (el && el.value !== '') measurements[field] = Number(el.value);
     });
-    return { size_label: s.size_label, qty, measurements };
+    const wEl = document.querySelector(`.weight-input[data-sidx="${idx}"]`);
+    const weight_grams = wEl ? (wEl.value !== '' ? Number(wEl.value) : null) : (s.weight_grams ?? null);
+    return { size_label: s.size_label, qty, measurements, weight_grams };
   });
 }
 

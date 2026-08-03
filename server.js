@@ -6937,9 +6937,9 @@ app.put('/api/stock-receipts/:id', requireAuth, async (req, res) => {
       for (let i = 0; i < body.sizes.length; i++) {
         const s = body.sizes[i];
         await pool.query(
-          `INSERT INTO stock_receipt_sizes (receipt_id, size_label, sort_order, qty, measurements)
-           VALUES ($1,$2,$3,$4,$5)`,
-          [id, s.size_label, i, s.qty ?? null, JSON.stringify(s.measurements || {})]
+          `INSERT INTO stock_receipt_sizes (receipt_id, size_label, sort_order, qty, measurements, weight_grams)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [id, s.size_label, i, s.qty ?? null, JSON.stringify(s.measurements || {}), s.weight_grams ?? null]
         );
       }
       auditEntries.push({ field_name: 'sizes', old_value: null, new_value: `${body.sizes.length} rows` });
