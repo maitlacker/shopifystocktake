@@ -8,6 +8,13 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+  <style>
+    .shelf-true { font-weight: 700; font-size: 1rem; color: #1e293b; }
+    .shelf-breakdown { font-size: 0.72rem; color: #94a3b8; margin-top: 2px; white-space: nowrap; }
+    .shelf-loading { color: #94a3b8; font-size: 0.9rem; }
+    .shelf-loading .spin { display: inline-block; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
 </head>
 <body>
 
@@ -19,8 +26,7 @@
       <input id="initials-input" type="text" maxlength="4" placeholder="e.g. JD" autocomplete="off"
         style="width:64px;padding:7px 10px;font-size:0.95rem;font-weight:700;border:2px solid #e2e8f0;border-radius:8px;color:#1a1a2e;outline:none;text-transform:uppercase;touch-action:manipulation;" />
     </label>
-    <span id="cache-status" class="cache-status">Inventory not loaded</span>
-    <button id="btn-pdf" class="btn btn-primary" disabled>Export Discrepancy Report (PDF)</button>
+    <button id="btn-pdf" class="btn btn-primary">Export Discrepancy Report (PDF)</button>
   </div>
 
   <main>
@@ -30,9 +36,7 @@
         id="search-input"
         placeholder="Search by style name or SKU..."
         autocomplete="off"
-        disabled
       />
-      <span id="search-hint" class="search-hint">Load inventory first</span>
     </div>
 
     <div id="results"></div>
