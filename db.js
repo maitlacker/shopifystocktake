@@ -920,6 +920,23 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_incorrect_order_notes_order
       ON incorrect_order_notes(order_id, added_at DESC);
 
+    CREATE TABLE IF NOT EXISTS barcoding_suppliers (
+      prefix                 TEXT PRIMARY KEY,
+      supplier_name          TEXT,
+      default_categorisation TEXT,
+      notes                  TEXT,
+      updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by             TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS barcoding_products (
+      product_id     BIGINT PRIMARY KEY,
+      product_title  TEXT,
+      categorisation TEXT,
+      updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by     TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS influencer_campaigns (
       id                    SERIAL PRIMARY KEY,
       creator_name          TEXT NOT NULL,

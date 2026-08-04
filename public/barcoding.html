@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Barcoding – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    .bc-page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .bc-page-title { font-size: 1.6rem; font-weight: 700; color: #1e293b; }
+    .bc-sub { color: #64748b; font-size: 0.88rem; margin-bottom: 20px; }
+
+    .bc-stats-row { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
+    .bc-stat {
+      background: #fff;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 14px 20px;
+      min-width: 118px;
+      text-align: center;
+    }
+    .bc-stat-num { font-size: 1.7rem; font-weight: 700; color: #1e293b; }
+    .bc-stat-label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+    .bc-stat.purple .bc-stat-num { color: #7c3aed; }
+    .bc-stat.blue .bc-stat-num   { color: #2563eb; }
+    .bc-stat.amber .bc-stat-num  { color: #d97706; }
+    .bc-stat.green .bc-stat-num  { color: #15803d; }
+
+    .bc-card {
+      background: #fff;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 22px;
+      margin-bottom: 22px;
+    }
+    .bc-card-title { font-size: 1.05rem; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
+    .bc-card-sub   { font-size: 0.84rem; color: #64748b; margin-bottom: 16px; }
+
+    .bc-table-wrap { overflow-x: auto; }
+    .bc-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .bc-table th {
+      text-align: left;
+      padding: 9px 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border-bottom: 2px solid #e2e8f0;
+      white-space: nowrap;
+    }
+    .bc-table td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+
+    .bc-prefix-code {
+      font-family: ui-monospace, monospace;
+      font-weight: 700;
+      background: #f1f5f9;
+      border-radius: 6px;
+      padding: 3px 9px;
+      color: #334155;
+      white-space: nowrap;
+    }
+    .bc-supplier-input {
+      width: 100%;
+      min-width: 160px;
+      padding: 7px 10px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      outline: none;
+      box-sizing: border-box;
+    }
+    .bc-supplier-input:focus { border-color: #4f46e5; }
+    .bc-supplier-input.saved { border-color: #86efac; }
+
+    .bc-seg { display: inline-flex; gap: 0; border: 1.5px solid #e2e8f0; border-radius: 9px; overflow: hidden; }
+    .bc-seg button {
+      border: none;
+      background: #fff;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #94a3b8;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .bc-seg button + button { border-left: 1.5px solid #e2e8f0; }
+    .bc-seg button.on-exclusive { background: #ede9fe; color: #6d28d9; }
+    .bc-seg button.on-ots       { background: #dbeafe; color: #1d4ed8; }
+    .bc-seg button.on-mixed     { background: #f1f5f9; color: #475569; }
+
+    /* Style categorisation pills */
+    .bc-pills { display: inline-flex; gap: 6px; }
+    .bc-pill {
+      border: 1.5px solid #e2e8f0;
+      border-radius: 99px;
+      background: #fff;
+      padding: 5px 14px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #94a3b8;
+      cursor: pointer;
+      transition: all 0.12s;
+      white-space: nowrap;
+    }
+    .bc-pill:hover { border-color: #cbd5e1; color: #475569; }
+    .bc-pill.ex-on  { background: #7c3aed; border-color: #7c3aed; color: #fff; }
+    .bc-pill.ots-on { background: #2563eb; border-color: #2563eb; color: #fff; }
+    .bc-pill.ex-auto  { background: #ede9fe; border-color: #ede9fe; color: #6d28d9; }
+    .bc-pill.ots-auto { background: #dbeafe; border-color: #dbeafe; color: #1d4ed8; }
+    .bc-auto-tag { font-size: 0.68rem; color: #94a3b8; margin-left: 6px; text-transform: uppercase; letter-spacing: 0.03em; }
+
+    .bc-thumb { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; background: #f1f5f9; }
+    .bc-style-name { font-weight: 600; color: #1e293b; }
+    .bc-style-meta { font-size: 0.78rem; color: #94a3b8; margin-top: 2px; }
+
+    .bc-status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+    .bc-status-badge.draft    { background: #fef3c7; color: #92400e; }
+    .bc-status-badge.archived { background: #f1f5f9; color: #94a3b8; }
+
+    .bc-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .bc-filter-tabs { display: flex; gap: 6px; background: #f1f5f9; border-radius: 10px; padding: 4px; }
+    .bc-tab {
+      padding: 7px 14px;
+      border-radius: 8px;
+      border: none;
+      background: transparent;
+      color: #64748b;
+      font-size: 0.86rem;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .bc-tab.active { background: #fff; color: #1e293b; box-shadow: 0 1px 4px rgba(0,0,0,0.10); font-weight: 600; }
+    .bc-search {
+      flex: 1;
+      min-width: 180px;
+      padding: 9px 14px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 9px;
+      font-size: 0.9rem;
+      outline: none;
+    }
+    .bc-search:focus { border-color: #4f46e5; }
+    .bc-select {
+      padding: 9px 12px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 9px;
+      font-size: 0.88rem;
+      background: #fff;
+      outline: none;
+    }
+
+    .bc-export-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .bc-export-info { flex: 1; min-width: 200px; }
+    .bc-export-name { font-weight: 600; color: #1e293b; }
+    .bc-export-meta { font-size: 0.8rem; color: #64748b; margin-top: 2px; }
+    .bc-export-row.gs1 { background: #faf5ff; border-color: #e9d5ff; }
+
+    .bc-empty { text-align: center; padding: 50px 20px; color: #94a3b8; }
+    .bc-loading { text-align: center; padding: 60px; color: #94a3b8; }
+    .bc-count-note { font-size: 0.82rem; color: #94a3b8; margin: 8px 2px 0; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main class="container" style="padding-top:28px">
+
+    <div class="bc-page-header">
+      <div class="bc-page-title">Barcoding — GTIN Prep</div>
+      <button class="btn" id="bc-refresh">↻ Refresh from Shopify</button>
+    </div>
+    <div class="bc-sub">
+      Categorise every style as <strong>Exclusive</strong> (we create the GTIN via GS1) or
+      <strong>Off The Shelf</strong> (supplier provides the GTIN), then export the lists.
+    </div>
+
+    <div id="bc-loading" class="bc-loading">Loading full catalogue from Shopify — this can take a moment…</div>
+
+    <div id="bc-body" style="display:none">
+
+      <div class="bc-stats-row">
+        <div class="bc-stat"><div class="bc-stat-num" id="stat-styles">—</div><div class="bc-stat-label">Styles</div></div>
+        <div class="bc-stat"><div class="bc-stat-num" id="stat-skus">—</div><div class="bc-stat-label">SKUs</div></div>
+        <div class="bc-stat purple"><div class="bc-stat-num" id="stat-exclusive">—</div><div class="bc-stat-label">Exclusive</div></div>
+        <div class="bc-stat blue"><div class="bc-stat-num" id="stat-ots">—</div><div class="bc-stat-label">Off The Shelf</div></div>
+        <div class="bc-stat amber"><div class="bc-stat-num" id="stat-unassigned">—</div><div class="bc-stat-label">Unassigned</div></div>
+        <div class="bc-stat green"><div class="bc-stat-num" id="stat-barcoded">—</div><div class="bc-stat-label">SKUs w/ Barcode</div></div>
+      </div>
+
+      <!-- Suppliers -->
+      <div class="bc-card">
+        <div class="bc-card-title">Suppliers (SKU Prefixes)</div>
+        <div class="bc-card-sub">
+          Every prefix found before the first “-” in your SKUs. Name each supplier, and optionally set a
+          default categorisation — all of that supplier’s styles inherit it unless individually overridden below.
+        </div>
+        <div class="bc-table-wrap">
+          <table class="bc-table">
+            <thead>
+              <tr>
+                <th>Prefix</th>
+                <th>Supplier Name</th>
+                <th style="text-align:center">Styles</th>
+                <th style="text-align:center">SKUs</th>
+                <th>Default Categorisation</th>
+                <th style="text-align:center">Unassigned</th>
+              </tr>
+            </thead>
+            <tbody id="bc-suppliers-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Styles -->
+      <div class="bc-card">
+        <div class="bc-card-title">Styles</div>
+        <div class="bc-card-sub">
+          Click <strong>Exclusive</strong> or <strong>Off The Shelf</strong> to set a style manually.
+          Tinted pills marked “auto” are inherited from the supplier default — click the active pill to
+          pin/unpin it, or the other pill to override.
+        </div>
+        <div class="bc-toolbar">
+          <div class="bc-filter-tabs">
+            <button class="bc-tab active" data-filter="all">All</button>
+            <button class="bc-tab" data-filter="unassigned">Unassigned</button>
+            <button class="bc-tab" data-filter="exclusive">Exclusive</button>
+            <button class="bc-tab" data-filter="off_the_shelf">Off The Shelf</button>
+          </div>
+          <select class="bc-select" id="bc-supplier-filter"><option value="">All suppliers</option></select>
+          <input class="bc-search" id="bc-style-search" type="text" placeholder="Search styles or SKU prefix…" />
+        </div>
+        <div class="bc-table-wrap">
+          <table class="bc-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Style</th>
+                <th>Supplier</th>
+                <th style="text-align:center">SKUs</th>
+                <th style="text-align:center">Barcodes</th>
+                <th>Categorisation</th>
+              </tr>
+            </thead>
+            <tbody id="bc-styles-tbody"></tbody>
+          </table>
+        </div>
+        <div class="bc-count-note" id="bc-styles-count"></div>
+      </div>
+
+      <!-- Exports -->
+      <div class="bc-card">
+        <div class="bc-card-title">Exports</div>
+        <div class="bc-card-sub">One row per SKU. Exclusive list is formatted for GS1 GTIN creation; Off The Shelf lists include a blank GTIN column for the supplier to complete.</div>
+        <div id="bc-exports"></div>
+      </div>
+
+    </div>
+  </main>
+  <script src="nav.js"></script>
+  <script src="barcoding.js"></script>
+</body>
+</html>

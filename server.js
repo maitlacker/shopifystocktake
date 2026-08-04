@@ -7684,6 +7684,225 @@ app.post('/api/incorrect-orders/:id/notify', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Barcoding / GTIN Prep (Scanner) ─────────────────────────────────
+
+// Separate cache from productsCache: includes draft + archived products
+// (physical stock needing barcodes can sit on non-active products).
+let barcodingCache = { products: null, fetchedAt: 0 };
+
+async function fetchBarcodingProducts(force) {
+  const MAX_AGE = 10 * 60 * 1000;
+  if (!force && barcodingCache.products && Date.now() - barcodingCache.fetchedAt < MAX_AGE) {
+    return barcodingCache.products;
+  }
+  const products = [];
+  let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products.json?limit=250&fields=id,title,status,images,variants`;
+  while (url) {
+    const res = await fetch(url, { headers: shopifyHeaders() });
+    if (!res.ok) throw new Error(`Shopify API error ${res.status}`);
+    const data = await res.json();
+    products.push(...data.products);
+    const link = res.headers.get('link');
+    const next = link && link.match(/<([^>]+)>;\s*rel="next"/);
+    url = next ? next[1] : null;
+  }
+  // Exclude internal adjustment products; keep archived only if stock remains
+  // (physical stock is what needs a barcode — archived styles with zero stock
+  // would otherwise flood the page with ~2,500 dead styles / 400+ junk prefixes)
+  const filtered = products.filter(p => {
+    if (/x-redo/i.test(p.title)) return false;
+    if (p.status !== 'archived') return true;
+    return (p.variants || []).some(v => (v.inventory_quantity || 0) > 0);
+  });
+  barcodingCache = { products: filtered, fetchedAt: Date.now() };
+  return filtered;
+}
+
+// Everything before the first dash; fallback to first 2 chars for dash-less SKUs
+function barcodingPrefix(sku) {
+  const s = String(sku || '').trim().toUpperCase();
+  if (!s) return null;
+  const dash = s.indexOf('-');
+  if (dash > 0) return s.slice(0, dash);
+  return s.length >= 2 ? s.slice(0, 2) : s;
+}
+
+function barcodingProductPrefix(variants) {
+  // Most common prefix across the product's variant SKUs
+  const counts = {};
+  for (const v of (variants || [])) {
+    const pre = barcodingPrefix(v.sku);
+    if (pre) counts[pre] = (counts[pre] || 0) + 1;
+  }
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  return entries.length ? entries[0][0] : '(NO SKU)';
+}
+
+async function buildBarcodingOverview(force) {
+  const [shopifyProducts, supplierRows, productRows] = await Promise.all([
+    fetchBarcodingProducts(force),
+    pool.query('SELECT * FROM barcoding_suppliers'),
+    pool.query('SELECT * FROM barcoding_products'),
+  ]);
+  const supplierMap = {};
+  supplierRows.rows.forEach(r => { supplierMap[r.prefix] = r; });
+  const manualMap = {};
+  productRows.rows.forEach(r => { manualMap[String(r.product_id)] = r.categorisation; });
+
+  const products = shopifyProducts.map(p => {
+    const prefix   = barcodingProductPrefix(p.variants);
+    const supplier = supplierMap[prefix];
+    const manual   = manualMap[String(p.id)] || null;
+    const effective = manual || (supplier && supplier.default_categorisation) || null;
+    const variants  = (p.variants || []).map(v => ({
+      id: v.id, sku: v.sku || '', title: v.title, barcode: v.barcode || '',
+      price: v.price,
+    }));
+    return {
+      product_id: p.id,
+      title: p.title,
+      status: p.status,
+      image: p.images && p.images[0] ? p.images[0].src : null,
+      prefix,
+      sku_count: variants.filter(v => v.sku).length,
+      barcode_count: variants.filter(v => v.barcode).length,
+      manual_categorisation: manual,
+      effective,
+      source: manual ? 'manual' : (effective ? 'supplier_default' : null),
+      variants,
+    };
+  });
+
+  // Prefix summary
+  const prefixMap = {};
+  for (const p of products) {
+    if (!prefixMap[p.prefix]) {
+      const s = supplierMap[p.prefix] || {};
+      prefixMap[p.prefix] = {
+        prefix: p.prefix,
+        supplier_name: s.supplier_name || null,
+        default_categorisation: s.default_categorisation || null,
+        style_count: 0, sku_count: 0,
+        exclusive_styles: 0, ots_styles: 0, unassigned_styles: 0,
+      };
+    }
+    const row = prefixMap[p.prefix];
+    row.style_count++;
+    row.sku_count += p.sku_count;
+    if (p.effective === 'exclusive') row.exclusive_styles++;
+    else if (p.effective === 'off_the_shelf') row.ots_styles++;
+    else row.unassigned_styles++;
+  }
+  const prefixes = Object.values(prefixMap).sort((a, b) => a.prefix.localeCompare(b.prefix));
+
+  return { fetched_at: new Date(barcodingCache.fetchedAt).toISOString(), prefixes, products };
+}
+
+app.get('/api/barcoding/overview', requireAuth, async (req, res) => {
+  try {
+    const overview = await buildBarcodingOverview(req.query.refresh === '1');
+    // Trim variants from the overview payload — the page works at style level
+    res.json({
+      ...overview,
+      products: overview.products.map(({ variants, ...rest }) => rest),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/barcoding/suppliers/:prefix', requireAuth, async (req, res) => {
+  const { supplier_name, default_categorisation, notes } = req.body;
+  const cat = ['exclusive', 'off_the_shelf'].includes(default_categorisation) ? default_categorisation : null;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO barcoding_suppliers (prefix, supplier_name, default_categorisation, notes, updated_by)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (prefix) DO UPDATE SET
+         supplier_name = EXCLUDED.supplier_name,
+         default_categorisation = EXCLUDED.default_categorisation,
+         notes = EXCLUDED.notes,
+         updated_at = NOW(), updated_by = EXCLUDED.updated_by
+       RETURNING *`,
+      [req.params.prefix.toUpperCase(), supplier_name || null, cat, notes || null, req.user.email]
+    );
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/barcoding/products/:productId', requireAuth, async (req, res) => {
+  const { categorisation, product_title } = req.body;
+  try {
+    if (!categorisation) {
+      // Clear manual override — falls back to supplier default
+      await pool.query('DELETE FROM barcoding_products WHERE product_id=$1', [req.params.productId]);
+      return res.json({ ok: true, cleared: true });
+    }
+    if (!['exclusive', 'off_the_shelf'].includes(categorisation)) {
+      return res.status(400).json({ error: 'Invalid categorisation' });
+    }
+    const { rows } = await pool.query(
+      `INSERT INTO barcoding_products (product_id, product_title, categorisation, updated_by)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (product_id) DO UPDATE SET
+         product_title = EXCLUDED.product_title,
+         categorisation = EXCLUDED.categorisation,
+         updated_at = NOW(), updated_by = EXCLUDED.updated_by
+       RETURNING *`,
+      [req.params.productId, product_title || null, categorisation, req.user.email]
+    );
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// CSV export — type=exclusive (GS1 prep) or type=off_the_shelf (&prefix=XX for one supplier)
+app.get('/api/barcoding/export', requireAuth, async (req, res) => {
+  const type = req.query.type;
+  const prefix = (req.query.prefix || '').toUpperCase();
+  if (!['exclusive', 'off_the_shelf'].includes(type)) {
+    return res.status(400).json({ error: 'type must be exclusive or off_the_shelf' });
+  }
+  try {
+    const { prefixes, products } = await buildBarcodingOverview(false);
+    const supplierNames = {};
+    prefixes.forEach(px => { supplierNames[px.prefix] = px.supplier_name || px.prefix; });
+
+    let matching = products.filter(p => p.effective === type);
+    if (prefix) matching = matching.filter(p => p.prefix === prefix);
+
+    const csvEsc = (v) => {
+      const s = String(v ?? '');
+      return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    // Title convention: "Style Name - Colour"
+    const splitTitle = (title) => {
+      const i = title.lastIndexOf(' - ');
+      return i > 0 ? [title.slice(0, i), title.slice(i + 3)] : [title, ''];
+    };
+
+    const header = type === 'exclusive'
+      ? ['SKU', 'Style Name', 'Colour', 'Size', 'RRP', 'Supplier', 'Prefix', 'Product Status', 'Existing Barcode']
+      : ['SKU', 'Style Name', 'Colour', 'Size', 'RRP', 'GTIN'];
+
+    const lines = [header.join(',')];
+    for (const p of matching) {
+      const [styleName, colour] = splitTitle(p.title);
+      for (const v of p.variants) {
+        if (!v.sku) continue;
+        const size = v.title === 'Default Title' ? '' : v.title;
+        const row = type === 'exclusive'
+          ? [v.sku, styleName, colour, size, v.price, supplierNames[p.prefix] || p.prefix, p.prefix, p.status, v.barcode]
+          : [v.sku, styleName, colour, size, v.price, v.barcode || ''];
+        lines.push(row.map(csvEsc).join(','));
+      }
+    }
+
+    const label = type === 'exclusive' ? 'exclusive-gs1' : `off-the-shelf${prefix ? '-' + prefix : ''}`;
+    const stamp = new Date().toISOString().split('T')[0];
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="barcoding-${label}-${stamp}.csv"`);
+    res.send('\uFEFF' + lines.join('\r\n'));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Influencer Reporting (Marketing) ────────────────────────────────
 
 // List campaigns with product summaries + latest organic snapshot
