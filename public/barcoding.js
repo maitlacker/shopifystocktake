@@ -60,11 +60,16 @@
         const on = (px.default_categorisation || null) === val;
         return `<button data-prefix="${escHtml(px.prefix)}" data-val="${val ?? ''}" class="${on ? cls : ''}">${label}</button>`;
       };
+      const nameCell = px.crm_supplier_id
+        ? `<span style="font-weight:600;color:#1e293b">${escHtml(px.supplier_name)}</span>
+           <a href="/suppliers.html" title="Linked from Production → Suppliers"
+              style="font-size:0.68rem;color:#15803d;background:#dcfce7;border-radius:99px;padding:2px 8px;margin-left:6px;text-decoration:none;font-weight:700">CRM</a>`
+        : `<input class="bc-supplier-input" data-prefix="${escHtml(px.prefix)}"
+                  value="${escHtml(px.supplier_name || '')}" placeholder="Supplier name… (or set prefix on the supplier in Production → Suppliers)" />`;
       return `
         <tr>
           <td><span class="bc-prefix-code">${escHtml(px.prefix)}</span></td>
-          <td><input class="bc-supplier-input" data-prefix="${escHtml(px.prefix)}"
-                     value="${escHtml(px.supplier_name || '')}" placeholder="Supplier name…" /></td>
+          <td>${nameCell}</td>
           <td style="text-align:center">${fmtNum(px.style_count)}</td>
           <td style="text-align:center">${fmtNum(px.sku_count)}</td>
           <td>

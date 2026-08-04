@@ -14,19 +14,22 @@ async function loadSuppliers() {
     renderTable();
   } catch (err) {
     document.getElementById('sup-tbody').innerHTML =
-      `<tr class="empty-row"><td colspan="7">Error loading suppliers: ${escHtml(err.message)}</td></tr>`;
+      `<tr class="empty-row"><td colspan="10">Error loading suppliers: ${escHtml(err.message)}</td></tr>`;
   }
 }
 
 function renderTable() {
   const tbody = document.getElementById('sup-tbody');
   if (!suppliers.length) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="9">No suppliers yet — click <strong>+ Add Supplier</strong> to get started.</td></tr>`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="10">No suppliers yet — click <strong>+ Add Supplier</strong> to get started.</td></tr>`;
     return;
   }
   tbody.innerHTML = suppliers.map(s => `
     <tr>
       <td><strong>${escHtml(s.company_name)}</strong></td>
+      <td>${s.sku_prefixes
+        ? s.sku_prefixes.split(',').map(px => `<span style="font-family:ui-monospace,monospace;font-weight:700;background:#f1f5f9;border-radius:6px;padding:2px 8px;margin-right:4px;white-space:nowrap;display:inline-block;margin-bottom:2px">${escHtml(px)}</span>`).join('')
+        : '—'}</td>
       <td>${escHtml(s.location || '—')}</td>
       <td><span class="sup-currency-badge">${escHtml(s.currency)}</span></td>
       <td>${escHtml(s.contact_name || '—')}</td>
@@ -56,6 +59,7 @@ function openModal(id) {
   document.getElementById('sup-email').value     = s ? (s.email || '') : '';
   document.getElementById('sup-lead-sea').value  = s && s.lead_time_sea != null ? s.lead_time_sea : '';
   document.getElementById('sup-lead-air').value  = s && s.lead_time_air != null ? s.lead_time_air : '';
+  document.getElementById('sup-sku-prefixes').value = s ? (s.sku_prefixes || '') : '';
   document.getElementById('sup-notes').value     = s ? (s.notes || '') : '';
   document.getElementById('sup-modal').classList.add('open');
   document.getElementById('sup-company').focus();
@@ -80,6 +84,7 @@ async function saveSupplier() {
     phone:       document.getElementById('sup-phone').value.trim() || null,
     email:       document.getElementById('sup-email').value.trim() || null,
     notes:       document.getElementById('sup-notes').value.trim() || null,
+    skuPrefixes: document.getElementById('sup-sku-prefixes').value.trim() || null,
     leadTimeSea: rawSea ? parseInt(rawSea) : null,
     leadTimeAir: rawAir ? parseInt(rawAir) : null,
   };

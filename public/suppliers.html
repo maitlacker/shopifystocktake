@@ -61,6 +61,7 @@
         <thead>
           <tr>
             <th>Company</th>
+            <th>SKU Prefixes</th>
             <th>Location</th>
             <th>Currency</th>
             <th>Contact</th>
@@ -127,6 +128,10 @@
             <label>Lead Time AIR (weeks)</label>
             <input type="number" id="sup-lead-air" min="1" max="52" placeholder="e.g. 2" />
           </div>
+        </div>
+        <div class="sup-field">
+          <label>SKU Prefixes</label>
+          <input type="text" id="sup-sku-prefixes" placeholder="e.g. FA, DF (comma-separated — everything before the first dash in the SKU)" style="text-transform:uppercase" />
         </div>
         <div class="sup-field">
           <label>Notes</label>
