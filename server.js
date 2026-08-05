@@ -6988,6 +6988,39 @@ app.post('/api/stock-receipts/:id/complete', requireAuth, async (req, res) => {
       [id, user]
     );
 
+    // Cross-reference production orders — mark matching PO(s) as received
+    let receivedPOs = [];
+    try {
+      const r = existingRes.rows[0];
+      let poResult = { rows: [] };
+      if (r.po_id) {
+        poResult = await pool.query(
+          `UPDATE production_orders SET status='received', updated_at=NOW()
+           WHERE id=$1 AND status NOT IN ('received','cancelled')
+           RETURNING id, po_number`,
+          [r.po_id]
+        );
+      } else if (r.po_number) {
+        poResult = await pool.query(
+          `UPDATE production_orders SET status='received', updated_at=NOW()
+           WHERE UPPER(TRIM(po_number))=UPPER(TRIM($1)) AND status NOT IN ('received','cancelled')
+           RETURNING id, po_number`,
+          [r.po_number]
+        );
+      }
+      receivedPOs = poResult.rows;
+      for (const po of receivedPOs) {
+        await pool.query(
+          `INSERT INTO stock_receipt_audit (receipt_id, action, field_name, new_value, changed_by)
+           VALUES ($1,'updated','production_order',$2,$3)`,
+          [id, `PO ${po.po_number || po.id} marked received`, user]
+        );
+        console.log(`[srf] Receipt #${id} complete → PO ${po.po_number || po.id} marked received`);
+      }
+    } catch (poErr) {
+      console.error('[srf] PO cross-reference failed:', poErr.message);
+    }
+
     // Slack notification — fire and forget, no crash if env var missing
     const slackWebhook = process.env.SLACK_SRF_WEBHOOK_URL;
     if (slackWebhook) {
@@ -7014,6 +7047,10 @@ app.post('/api/stock-receipts/:id/complete', requireAuth, async (req, res) => {
                 { type: 'mrkdwn', text: `*Date:*\n${r.receipt_date ? String(r.receipt_date).slice(0,10) : '—'}` },
               ],
             },
+            ...(receivedPOs.length ? [{
+              type: 'section',
+              text: { type: 'mrkdwn', text: `📦 *PO ${receivedPOs.map(po => po.po_number || po.id).join(', ')} marked as Received*` },
+            }] : []),
             {
               type: 'actions',
               elements: [{
