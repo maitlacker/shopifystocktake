@@ -785,8 +785,13 @@ async function initDb() {
       ('Bottoms', '["Waist","Hip","Thigh","Inseam","Rise"]', 2),
       ('Jeans', '["Waist","Hip","Thigh","Inseam","Rise"]', 3),
       ('Accessories', '["Width","Height","Depth"]', 4),
-      ('Shoes', '["Insole Length"]', 5)
+      ('Shoes', '["Insole Length","Width"]', 5)
     ON CONFLICT (name) DO NOTHING;
+
+    -- Add Width to Shoes on DBs seeded before it existed
+    UPDATE srf_form_types
+      SET measurement_fields = '["Insole Length","Width"]'
+      WHERE name = 'Shoes' AND NOT (measurement_fields ? 'Width');
 
     CREATE TABLE IF NOT EXISTS stock_receipts (
       id                     SERIAL PRIMARY KEY,
