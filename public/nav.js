@@ -37,7 +37,7 @@
       ],
     },
     {
-      label: 'Scanner',
+      label: 'Barcoding',
       children: [
         { label: 'Barcoding',        href: '/barcoding.html' },
         { label: 'Scan Label',       href: '/label-scanner.html' },
