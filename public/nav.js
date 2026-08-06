@@ -39,7 +39,7 @@
     {
       label: 'Barcoding',
       children: [
-        { label: 'Barcoding',        href: '/barcoding.html' },
+        { label: 'Barcode Setup',    href: '/barcoding.html' },
         { label: 'Scan Label',       href: '/label-scanner.html' },
         { label: 'Reference Images', href: '/label-reference.html' },
         { label: 'Scan History',     href: '/scan-history.html' },
