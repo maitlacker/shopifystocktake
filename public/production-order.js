@@ -22,6 +22,16 @@ const PANTS_SIZES   = ['6','7','8','9','10','11','12','14','16','18'];
   await loadSuppliers();
   if (poId) {
     await loadPO(poId);
+  } else {
+    // New PO — prefill the next sequential number (editable = override)
+    try {
+      const r = await fetch('/api/production-orders/next-number');
+      if (r.ok) {
+        const { next } = await r.json();
+        const el = document.getElementById('po-number');
+        if (!el.value.trim()) el.value = next;
+      }
+    } catch (_) {}
   }
 })();
 

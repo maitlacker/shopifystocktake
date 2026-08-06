@@ -1790,6 +1790,35 @@ app.post('/api/warehouse/layout', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Next sequential PO number: starts at 20001, always above any numeric PO already used
+async function nextPoNumber(client) {
+  const { rows } = await client.query(
+    `SELECT GREATEST(
+       COALESCE((SELECT MAX(po_number::bigint) FROM production_orders WHERE po_number ~ '^\\d+$'), 0),
+       20000
+     ) + 1 AS next`
+  );
+  return String(rows[0].next);
+}
+
+// Returns the conflicting PO row if the number is taken, else null
+async function findPoNumberConflict(client, poNumber, excludeId) {
+  if (!poNumber) return null;
+  const params = [poNumber];
+  let sql = `SELECT id, po_number, supplier_name, status FROM production_orders
+             WHERE UPPER(TRIM(po_number)) = UPPER(TRIM($1))`;
+  if (excludeId) { sql += ' AND id <> $2'; params.push(excludeId); }
+  const { rows } = await pool.query(sql + ' LIMIT 1', params);
+  return rows[0] || null;
+}
+
+// NOTE: must register before /api/production-orders/:id
+app.get('/api/production-orders/next-number', async (req, res) => {
+  try {
+    res.json({ next: await nextPoNumber(pool) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/production-orders/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   try {
@@ -1823,13 +1852,25 @@ app.post('/api/production-orders', async (req, res) => {
           poType, launchType, collectionName } = req.body;
   const client = await pool.connect();
   try {
+    // Blank number → auto-generate; provided number (override) must be unused
+    let finalPoNumber = (poNumber || '').trim();
+    if (finalPoNumber) {
+      const conflict = await findPoNumberConflict(pool, finalPoNumber, null);
+      if (conflict) {
+        // finally-block releases the client
+        return res.status(409).json({
+          error: `PO number "${finalPoNumber}" is already used by PO #${conflict.id} (${conflict.supplier_name || 'no supplier'}, ${conflict.status})`,
+        });
+      }
+    }
     await client.query('BEGIN');
+    if (!finalPoNumber) finalPoNumber = await nextPoNumber(client);
     const { rows:[po] } = await client.query(
       `INSERT INTO production_orders
          (po_number,supplier_id,supplier_name,order_date,delivery_date,freight_mode,
           currency,exchange_rate,shipping_cost,include_gst,notes,po_type,launch_type,collection_name)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
-      [poNumber, supplierId||null, supplierName||'', orderDate, deliveryDate||null,
+      [finalPoNumber, supplierId||null, supplierName||'', orderDate, deliveryDate||null,
        freightMode||'sea', currency||'AUD', exchangeRate||1, shippingCost||0, includeGst||false, notes||null,
        poType||'restock', launchType||'', collectionName||null]
     );
@@ -1849,6 +1890,14 @@ app.put('/api/production-orders/:id', async (req, res) => {
           poType, launchType, collectionName } = req.body;
   const client = await pool.connect();
   try {
+    // Overridden PO numbers must not collide with any other PO
+    const conflict = await findPoNumberConflict(pool, (poNumber || '').trim(), id);
+    if (conflict) {
+      // finally-block releases the client
+      return res.status(409).json({
+        error: `PO number "${(poNumber || '').trim()}" is already used by PO #${conflict.id} (${conflict.supplier_name || 'no supplier'}, ${conflict.status})`,
+      });
+    }
     await client.query('BEGIN');
     const { rows:[po] } = await client.query(
       `UPDATE production_orders SET
