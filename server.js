@@ -6850,6 +6850,52 @@ app.post('/api/stock-receipts', requireAuth, async (req, res) => {
   }
 });
 
+// One-off backfill: mark POs received where a completed receipt already references them.
+// Visit without params for a dry run; add ?apply=1 to write the changes.
+// NOTE: must register before /api/stock-receipts/:id or ":id" swallows the path.
+app.get('/api/stock-receipts/backfill-po-received', requireAuth, async (req, res) => {
+  const apply = req.query.apply === '1';
+  try {
+    const matchSql = `
+      SELECT po.id, po.po_number, po.supplier_name, po.status,
+        (SELECT json_agg(json_build_object('receipt_id', sr.id, 'style', sr.style_name, 'completed_at', sr.completed_at))
+         FROM stock_receipts sr
+         WHERE sr.status='complete' AND sr.deleted_at IS NULL
+           AND (sr.po_id = po.id OR (sr.po_number IS NOT NULL AND TRIM(sr.po_number) <> ''
+                AND UPPER(TRIM(sr.po_number)) = UPPER(TRIM(po.po_number))))
+        ) AS matching_receipts
+      FROM production_orders po
+      WHERE po.status NOT IN ('received','cancelled')
+        AND EXISTS (
+          SELECT 1 FROM stock_receipts sr
+          WHERE sr.status='complete' AND sr.deleted_at IS NULL
+            AND (sr.po_id = po.id OR (sr.po_number IS NOT NULL AND TRIM(sr.po_number) <> ''
+                 AND UPPER(TRIM(sr.po_number)) = UPPER(TRIM(po.po_number))))
+        )
+      ORDER BY po.po_number`;
+    const { rows: matches } = await pool.query(matchSql);
+
+    if (!apply) {
+      return res.json({
+        mode: 'dry_run',
+        would_mark_received: matches.length,
+        pos: matches,
+        hint: matches.length ? 'Re-run with ?apply=1 to mark these POs as received' : 'Nothing to change',
+      });
+    }
+
+    const ids = matches.map(m => m.id);
+    if (ids.length) {
+      await pool.query(
+        `UPDATE production_orders SET status='received', updated_at=NOW() WHERE id = ANY($1::int[])`,
+        [ids]
+      );
+    }
+    console.log(`[srf] Backfill: ${ids.length} POs marked received by ${req.user?.email}`);
+    res.json({ mode: 'applied', marked_received: ids.length, pos: matches });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/stock-receipts/:id', requireAuth, async (req, res) => {
   try {
     const id = Number(req.params.id);
