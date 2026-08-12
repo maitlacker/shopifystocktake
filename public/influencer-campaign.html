@@ -148,6 +148,29 @@
     .ic-product-info { flex: 1; }
     .ic-product-name { font-weight: 600; color: #1e293b; font-size: 0.92rem; }
     .ic-product-inv  { font-size: 0.78rem; color: #64748b; margin-top: 2px; }
+    .ic-size-worn { display: flex; flex-direction: column; gap: 3px; }
+    .ic-size-worn span {
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .ic-size-worn input {
+      width: 76px;
+      padding: 7px 10px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #1e293b;
+      text-align: center;
+      outline: none;
+      background: #fff;
+      transition: border-color 0.2s;
+    }
+    .ic-size-worn input:focus { border-color: #4f46e5; }
+
     .ic-product-remove {
       border: none;
       background: transparent;
@@ -270,7 +293,12 @@
         <div class="ic-field"><label>CTA Used</label><input id="f-cta" type="text" placeholder="e.g. Link in bio" /></div>
         <div class="ic-field"><label>Hook</label><input id="f-hook" type="text" placeholder="Opening hook of the content" /></div>
         <div class="ic-field"><label>Ad Live Start</label><input id="f-ad-start" type="date" /></div>
-        <div class="ic-field"><label>Ad Live End</label><input id="f-ad-end" type="date" /></div>
+        <div class="ic-field"><label>Ad Live End</label>
+          <input id="f-ad-end" type="date" />
+          <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:0.82rem;color:#475569;cursor:pointer;text-transform:none;letter-spacing:0">
+            <input id="f-ad-ongoing" type="checkbox" style="width:auto;accent-color:#4f46e5" /> Ongoing — no end date
+          </label>
+        </div>
         <div class="ic-field"><label>Influencer Fee ($)</label><input id="f-fee" type="number" min="0" step="0.01" placeholder="0.00" /></div>
         <div class="ic-field"><label>Influencer Code</label><input id="f-code" type="text" placeholder="e.g. SARAH15" /></div>
         <div class="ic-field"><label>Reporting Window (days)</label><input id="f-window" type="number" min="1" max="90" value="14" /></div>
@@ -304,7 +332,6 @@
       <div class="ic-organic-form" id="ic-organic-form" style="display:none">
         <div class="ic-field"><label>Reach</label><input id="m-reach" type="number" min="0" /></div>
         <div class="ic-field"><label>Plays / Views</label><input id="m-views" type="number" min="0" /></div>
-        <div class="ic-field"><label>Impressions</label><input id="m-impressions" type="number" min="0" /></div>
         <div class="ic-field"><label>Likes</label><input id="m-likes" type="number" min="0" /></div>
         <div class="ic-field"><label>Comments</label><input id="m-comments" type="number" min="0" /></div>
         <div class="ic-field"><label>Shares</label><input id="m-shares" type="number" min="0" /></div>

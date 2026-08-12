@@ -8090,19 +8090,21 @@ app.get('/api/influencer-campaigns', requireAuth, async (req, res) => {
 
 app.post('/api/influencer-campaigns', requireAuth, async (req, res) => {
   const { creator_name, creator_handle, post_datetime, cta_used, hook,
-          ad_live_start, ad_live_end, influencer_fee, discount_code,
+          ad_live_start, ad_live_end, ad_live_ongoing, influencer_fee, discount_code,
           reporting_window_days, post_url, content_type, status, notes } = req.body;
   if (!creator_name) return res.status(400).json({ error: 'Creator name required' });
   try {
+    const ongoing = !!ad_live_ongoing;
     const { rows } = await pool.query(
       `INSERT INTO influencer_campaigns
         (creator_name, creator_handle, post_datetime, cta_used, hook,
-         ad_live_start, ad_live_end, influencer_fee, discount_code,
+         ad_live_start, ad_live_end, ad_live_ongoing, influencer_fee, discount_code,
          reporting_window_days, post_url, content_type, status, notes,
          created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15) RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16) RETURNING *`,
       [creator_name, creator_handle || null, post_datetime || null,
-       cta_used || null, hook || null, ad_live_start || null, ad_live_end || null,
+       cta_used || null, hook || null, ad_live_start || null,
+       ongoing ? null : (ad_live_end || null), ongoing,
        influencer_fee || 0, discount_code || null, reporting_window_days || 14,
        post_url || null, content_type || null, status || 'planned', notes || null,
        req.user.email]
@@ -8147,18 +8149,20 @@ app.get('/api/influencer-campaigns/:id', requireAuth, async (req, res) => {
 
 app.put('/api/influencer-campaigns/:id', requireAuth, async (req, res) => {
   const { creator_name, creator_handle, post_datetime, cta_used, hook,
-          ad_live_start, ad_live_end, influencer_fee, discount_code,
+          ad_live_start, ad_live_end, ad_live_ongoing, influencer_fee, discount_code,
           reporting_window_days, post_url, content_type, status, notes } = req.body;
   try {
+    const ongoing = !!ad_live_ongoing;
     const { rows } = await pool.query(
       `UPDATE influencer_campaigns SET
         creator_name=$1, creator_handle=$2, post_datetime=$3, cta_used=$4, hook=$5,
-        ad_live_start=$6, ad_live_end=$7, influencer_fee=$8, discount_code=$9,
-        reporting_window_days=$10, post_url=$11, content_type=$12, status=$13,
-        notes=$14, updated_at=NOW(), updated_by=$15
-       WHERE id=$16 AND deleted_at IS NULL RETURNING *`,
+        ad_live_start=$6, ad_live_end=$7, ad_live_ongoing=$8, influencer_fee=$9, discount_code=$10,
+        reporting_window_days=$11, post_url=$12, content_type=$13, status=$14,
+        notes=$15, updated_at=NOW(), updated_by=$16
+       WHERE id=$17 AND deleted_at IS NULL RETURNING *`,
       [creator_name, creator_handle || null, post_datetime || null,
-       cta_used || null, hook || null, ad_live_start || null, ad_live_end || null,
+       cta_used || null, hook || null, ad_live_start || null,
+       ongoing ? null : (ad_live_end || null), ongoing,
        influencer_fee || 0, discount_code || null, reporting_window_days || 14,
        post_url || null, content_type || null, status || 'planned', notes || null,
        req.user.email, req.params.id]
@@ -8214,6 +8218,20 @@ app.post('/api/influencer-campaigns/:id/products', requireAuth, async (req, res)
       console.error('[influencer] Inventory snapshot failed:', snapErr.message);
     }
 
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Update per-product details (e.g. the size the influencer is wearing)
+app.put('/api/influencer-campaigns/:id/products/:productId', requireAuth, async (req, res) => {
+  const { size_worn } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `UPDATE influencer_campaign_products SET size_worn=$1
+       WHERE campaign_id=$2 AND product_id=$3 RETURNING *`,
+      [(size_worn || '').trim() || null, req.params.id, req.params.productId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
     res.json(rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

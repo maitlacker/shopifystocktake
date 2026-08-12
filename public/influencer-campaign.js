@@ -39,7 +39,8 @@
       cta_used:              F('f-cta').value.trim() || null,
       hook:                  F('f-hook').value.trim() || null,
       ad_live_start:         F('f-ad-start').value || null,
-      ad_live_end:           F('f-ad-end').value || null,
+      ad_live_end:           F('f-ad-ongoing').checked ? null : (F('f-ad-end').value || null),
+      ad_live_ongoing:       F('f-ad-ongoing').checked,
       influencer_fee:        parseFloat(F('f-fee').value || 0),
       discount_code:         F('f-code').value.trim() || null,
       reporting_window_days: parseInt(F('f-window').value || 14, 10),
@@ -65,6 +66,8 @@
     F('f-hook').value          = c.hook || '';
     F('f-ad-start').value      = c.ad_live_start ? c.ad_live_start.split('T')[0] : '';
     F('f-ad-end').value        = c.ad_live_end ? c.ad_live_end.split('T')[0] : '';
+    F('f-ad-ongoing').checked  = !!c.ad_live_ongoing;
+    syncOngoing();
     F('f-fee').value           = c.influencer_fee || '';
     F('f-code').value          = c.discount_code || '';
     F('f-window').value        = c.reporting_window_days || 14;
@@ -90,6 +93,16 @@
     renderProducts(c.products || []);
     renderOrganic(c.organic_metrics || []);
   }
+
+  /* ── Ongoing ads toggle ───────────────────────────────────────── */
+  function syncOngoing() {
+    const ongoing = F('f-ad-ongoing').checked;
+    const endEl = F('f-ad-end');
+    endEl.disabled = ongoing;
+    if (ongoing) endEl.value = '';
+    endEl.style.opacity = ongoing ? '0.45' : '';
+  }
+  F('f-ad-ongoing').addEventListener('change', syncOngoing);
 
   /* ── Save / delete ────────────────────────────────────────────── */
   async function save() {
@@ -229,9 +242,32 @@
             <div class="ic-product-name">${escHtml(p.product_title)}</div>
             <div class="ic-product-inv">${invLabel}</div>
           </div>
+          <label class="ic-size-worn">
+            <span>Size worn</span>
+            <input type="text" maxlength="10" data-id="${p.product_id}" value="${escHtml(p.size_worn || '')}" placeholder="e.g. 14" />
+          </label>
           <button class="ic-product-remove" data-id="${p.product_id}" title="Remove">✕</button>
         </div>`;
     }).join('');
+
+    list.querySelectorAll('.ic-size-worn input').forEach(input => {
+      input.addEventListener('change', async () => {
+        try {
+          const res = await fetch(`/api/influencer-campaigns/${campaignId}/products/${input.dataset.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ size_worn: input.value }),
+          });
+          if (!res.ok) throw new Error((await res.json()).error || 'Save failed');
+          const p = (campaign.products || []).find(x => String(x.product_id) === String(input.dataset.id));
+          if (p) p.size_worn = input.value.trim() || null;
+          input.style.borderColor = '#86efac';
+          setTimeout(() => { input.style.borderColor = ''; }, 1500);
+        } catch (err) {
+          alert(`Failed to save size: ${err.message}`);
+        }
+      });
+    });
 
     list.querySelectorAll('.ic-product-remove').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -254,7 +290,6 @@
       source:         'manual',
       reach:          val('m-reach'),
       views:          val('m-views'),
-      impressions:    val('m-impressions'),
       likes:          val('m-likes'),
       comments:       val('m-comments'),
       shares:         val('m-shares'),
@@ -275,7 +310,7 @@
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Save failed');
-      ['m-reach','m-views','m-impressions','m-likes','m-comments','m-shares','m-saves','m-profile-visits','m-link-clicks']
+      ['m-reach','m-views','m-likes','m-comments','m-shares','m-saves','m-profile-visits','m-link-clicks']
         .forEach(id => { F(id).value = ''; });
       F('ic-organic-form').style.display = 'none';
       await loadCampaign();
@@ -299,7 +334,7 @@
 
     const latest = entries[0];
     const tiles = [
-      ['Reach', latest.reach], ['Views', latest.views], ['Impressions', latest.impressions],
+      ['Reach', latest.reach], ['Views', latest.views],
       ['Likes', latest.likes], ['Comments', latest.comments], ['Shares', latest.shares],
       ['Saves', latest.saves], ['Profile Visits', latest.profile_visits],
       ['Link Clicks', latest.link_clicks],

@@ -979,8 +979,12 @@ async function initDb() {
       product_id    BIGINT NOT NULL,
       product_title TEXT NOT NULL,
       image_url     TEXT,
+      size_worn     TEXT,
       UNIQUE(campaign_id, product_id)
     );
+
+    ALTER TABLE influencer_campaigns ADD COLUMN IF NOT EXISTS ad_live_ongoing BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE influencer_campaign_products ADD COLUMN IF NOT EXISTS size_worn TEXT;
 
     CREATE TABLE IF NOT EXISTS influencer_inventory_snapshots (
       id                 SERIAL PRIMARY KEY,
