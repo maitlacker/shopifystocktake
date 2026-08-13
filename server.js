@@ -8304,6 +8304,114 @@ app.delete('/api/influencer-campaigns/:id/organic/:metricId', requireAuth, async
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Browse Meta ads for linking (searchable, with creative thumbnails)
+app.get('/api/influencer-ads/browse', requireAuth, async (req, res) => {
+  try {
+    const ads = await metaAds.browseAds((req.query.q || '').trim());
+    res.json(ads);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Link a Meta ad to a campaign — backfills 90 days of daily insights
+app.post('/api/influencer-campaigns/:id/ads', requireAuth, async (req, res) => {
+  const { ad_id, ad_name, adset_id, adset_name, campaign_meta_id, campaign_meta_name,
+          creative_id, creative_thumb_url } = req.body;
+  if (!ad_id) return res.status(400).json({ error: 'ad_id required' });
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO influencer_campaign_ads
+        (campaign_id, ad_id, ad_name, adset_id, adset_name, campaign_meta_id, campaign_meta_name, creative_id, creative_thumb_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (campaign_id, ad_id) DO UPDATE SET ad_name=EXCLUDED.ad_name
+       RETURNING *`,
+      [req.params.id, ad_id, ad_name || null, adset_id || null, adset_name || null,
+       campaign_meta_id || null, campaign_meta_name || null, creative_id || null, creative_thumb_url || null]
+    );
+    try {
+      await metaAds.syncInfluencerAdInsights([ad_id], 90);
+    } catch (syncErr) {
+      console.error('[influencer] Ad backfill failed:', syncErr.message);
+      return res.json({ ...rows[0], sync_warning: syncErr.message });
+    }
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/influencer-campaigns/:id/ads/:adId', requireAuth, async (req, res) => {
+  try {
+    await pool.query(
+      'DELETE FROM influencer_campaign_ads WHERE campaign_id=$1 AND ad_id=$2',
+      [req.params.id, req.params.adId]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Linked ads with lifetime aggregates + combined totals (?refresh=1 re-syncs 90 days)
+app.get('/api/influencer-campaigns/:id/ads', requireAuth, async (req, res) => {
+  try {
+    const { rows: links } = await pool.query(
+      'SELECT * FROM influencer_campaign_ads WHERE campaign_id=$1 ORDER BY id', [req.params.id]
+    );
+    if (!links.length) return res.json({ ads: [], totals: null });
+
+    let syncWarning = null;
+    if (req.query.refresh === '1') {
+      try { await metaAds.syncInfluencerAdInsights(links.map(l => l.ad_id), 90); }
+      catch (e) { syncWarning = e.message; }
+    }
+
+    const { rows: agg } = await pool.query(
+      `SELECT ad_id,
+         SUM(spend) AS spend, SUM(impressions) AS impressions, SUM(clicks) AS clicks,
+         SUM(reach) AS reach, SUM(purchases) AS purchases, SUM(purchase_value) AS purchase_value,
+         SUM(video_3s_views) AS video_3s_views, SUM(thruplays) AS thruplays,
+         MIN(date) AS first_date, MAX(date) AS last_date
+       FROM influencer_ad_insights_daily
+       WHERE ad_id = ANY($1::text[])
+       GROUP BY ad_id`,
+      [links.map(l => l.ad_id)]
+    );
+    const aggMap = {};
+    agg.forEach(a => { aggMap[a.ad_id] = a; });
+
+    const derive = (a) => {
+      const spend = parseFloat(a.spend || 0), impr = parseInt(a.impressions || 0),
+            clicks = parseInt(a.clicks || 0), pv = parseFloat(a.purchase_value || 0),
+            v3s = parseInt(a.video_3s_views || 0), thru = parseInt(a.thruplays || 0);
+      return {
+        spend, impressions: impr, clicks,
+        reach: parseInt(a.reach || 0),
+        purchases: parseInt(a.purchases || 0),
+        purchase_value: pv,
+        roas: spend > 0 ? pv / spend : null,
+        ctr: impr > 0 ? (clicks / impr) * 100 : null,
+        cpc: clicks > 0 ? spend / clicks : null,
+        cpm: impr > 0 ? (spend / impr) * 1000 : null,
+        frequency: parseInt(a.reach || 0) > 0 ? impr / parseInt(a.reach) : null,
+        thumb_stop: impr > 0 && v3s ? (v3s / impr) * 100 : null,
+        hold_rate: v3s > 0 && thru ? (thru / v3s) * 100 : null,
+        first_date: a.first_date || null, last_date: a.last_date || null,
+      };
+    };
+
+    const ads = links.map(l => ({
+      ...l,
+      metrics: aggMap[l.ad_id] ? derive(aggMap[l.ad_id]) : null,
+    }));
+
+    // Combined totals across all linked ads
+    const sum = (k) => agg.reduce((s, a) => s + parseFloat(a[k] || 0), 0);
+    const totals = agg.length ? derive({
+      spend: sum('spend'), impressions: sum('impressions'), clicks: sum('clicks'),
+      reach: sum('reach'), purchases: sum('purchases'), purchase_value: sum('purchase_value'),
+      video_3s_views: sum('video_3s_views'), thruplays: sum('thruplays'),
+    }) : null;
+
+    res.json({ ads, totals, sync_warning: syncWarning });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Sales analysis: direct (discount code) + indirect (featured garments by size)
 // Window: post date (or ad start) → ad end / post + reporting window; "now" if ongoing.
 app.get('/api/influencer-campaigns/:id/sales', requireAuth, async (req, res) => {

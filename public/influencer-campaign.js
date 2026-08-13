@@ -93,12 +93,14 @@
     F('ic-products-locked').style.display = 'none';
     F('ic-products-body').style.display = '';
     F('ic-organic-card').style.display = '';
+    F('ic-ads-card').style.display = '';
     F('ic-sales-card').style.display = '';
 
     renderProducts(c.products || []);
     renderOrganic(c.organic_metrics || []);
 
     if (!salesLoaded) { salesLoaded = true; loadSales(false); }
+    if (!adsLoaded)   { adsLoaded = true; loadAds(false); }
   }
 
   /* ── Ongoing ads toggle ───────────────────────────────────────── */
@@ -392,6 +394,155 @@
       });
     });
   }
+
+  /* ── Paid ads ─────────────────────────────────────────────────── */
+  let adsLoaded = false;
+  let linkedAdIds = new Set();
+
+  function pct(v)  { return v == null ? '—' : v.toFixed(1) + '%'; }
+  function x2(v)   { return v == null ? '—' : v.toFixed(2); }
+
+  async function loadAds(force) {
+    if (!campaignId) return;
+    const body = F('ic-ads-body');
+    if (force) body.innerHTML = '<div class="ic-products-hint">Refreshing ad insights from Meta…</div>';
+    try {
+      const res = await fetch(`/api/influencer-campaigns/${campaignId}/ads${force ? '?refresh=1' : ''}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Load failed');
+      linkedAdIds = new Set((data.ads || []).map(a => a.ad_id));
+      renderAds(data);
+      if (data.sync_warning) {
+        body.insertAdjacentHTML('afterbegin',
+          `<div class="ic-products-hint" style="color:#d97706;margin-bottom:10px">⚠ Meta sync issue: ${escHtml(data.sync_warning)}</div>`);
+      }
+    } catch (err) {
+      body.innerHTML = `<div class="ic-products-hint" style="color:#b91c1c">Failed to load ads: ${escHtml(err.message)}</div>`;
+    }
+  }
+
+  function renderAds(data) {
+    const body = F('ic-ads-body');
+    if (!data.ads.length) {
+      body.innerHTML = '<div class="ic-products-hint">No ads linked yet — click “+ Link Ads” to attach the Meta ads using this creator’s content.</div>';
+      return;
+    }
+
+    const money = (v) => v == null ? '—' : fmtMoney(v);
+    const int   = (v) => v == null ? '—' : Number(v).toLocaleString('en-AU');
+    const row = (label, m, adId) => `
+      <tr>
+        <td>${label}</td>
+        <td>${money(m?.spend)}</td>
+        <td>${int(m?.purchases)}</td>
+        <td>${money(m?.purchase_value)}</td>
+        <td>${m?.roas != null ? x2(m.roas) + 'x' : '—'}</td>
+        <td>${pct(m?.ctr)}</td>
+        <td>${money(m?.cpc)}</td>
+        <td>${money(m?.cpm)}</td>
+        <td>${m?.frequency != null ? x2(m.frequency) : '—'}</td>
+        <td>${pct(m?.thumb_stop)}</td>
+        <td>${pct(m?.hold_rate)}</td>
+        <td>${adId ? `<button class="ic-ad-unlink" data-ad="${escHtml(adId)}" title="Unlink ad">✕</button>` : ''}</td>
+      </tr>`;
+
+    let html = `<div style="overflow-x:auto"><table class="ic-ads-table">
+      <thead><tr>
+        <th>Ad</th><th>Spend</th><th>Purch.</th><th>Revenue</th><th>ROAS</th>
+        <th>CTR</th><th>CPC</th><th>CPM</th><th>Freq</th><th>Thumb-Stop</th><th>Hold</th><th></th>
+      </tr></thead>
+      <tbody>`;
+    for (const a of data.ads) {
+      const label = `
+        <div class="ic-ad-cell">
+          ${a.creative_thumb_url ? `<img src="${escHtml(a.creative_thumb_url)}" alt="" />` : ''}
+          <div>
+            <div class="nm">${escHtml(a.ad_name || a.ad_id)}</div>
+            <div class="mt">${escHtml(a.campaign_meta_name || '')}${a.adset_name ? ' · ' + escHtml(a.adset_name) : ''}</div>
+          </div>
+        </div>`;
+      html += row(label, a.metrics, a.ad_id);
+    }
+    html += '</tbody>';
+    if (data.totals && data.ads.length > 1) {
+      html += `<tfoot>${row('<strong>Combined</strong>', data.totals, null)}</tfoot>`;
+    }
+    html += '</table></div>';
+    body.innerHTML = html;
+
+    body.querySelectorAll('.ic-ad-unlink').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Unlink this ad from the campaign?')) return;
+        await fetch(`/api/influencer-campaigns/${campaignId}/ads/${btn.dataset.ad}`, { method: 'DELETE' });
+        await loadAds(false);
+      });
+    });
+  }
+
+  /* Ad picker */
+  F('ic-link-ads').addEventListener('click', () => {
+    const picker = F('ic-ad-picker');
+    const opening = picker.style.display === 'none';
+    picker.style.display = opening ? '' : 'none';
+    if (opening) { F('ic-ad-search').focus(); browseAds(''); }
+  });
+
+  const browseAds = debounce(async (q) => {
+    const results = F('ic-ad-results');
+    results.innerHTML = '<div class="ic-adpick-msg">Loading ads from Meta…</div>';
+    try {
+      const res = await fetch(`/api/influencer-ads/browse${q ? '?q=' + encodeURIComponent(q) : ''}`);
+      const ads = await res.json();
+      if (!res.ok) throw new Error(ads.error || 'Browse failed');
+      if (!ads.length) { results.innerHTML = '<div class="ic-adpick-msg">No ads found.</div>'; return; }
+      results.innerHTML = ads.map((a, i) => {
+        const linked = linkedAdIds.has(a.ad_id);
+        const statusCls = ['ACTIVE','PAUSED','ADSET_PAUSED','CAMPAIGN_PAUSED'].includes(a.status) ? a.status : 'other';
+        return `
+          <div class="ic-adpick-row">
+            ${a.creative_thumb_url ? `<img src="${escHtml(a.creative_thumb_url)}" alt="" />` : '<span style="width:40px;height:40px;border-radius:6px;background:#f1f5f9;display:inline-block"></span>'}
+            <div class="ic-adpick-info">
+              <div class="ic-adpick-name">${escHtml(a.ad_name)}</div>
+              <div class="ic-adpick-meta">${escHtml(a.campaign_meta_name || '')}${a.adset_name ? ' · ' + escHtml(a.adset_name) : ''}</div>
+            </div>
+            <span class="ic-ad-status ${statusCls}">${escHtml((a.status || '').replace(/_/g, ' '))}</span>
+            ${linked
+              ? '<button class="btn" disabled style="font-size:0.8rem;opacity:0.5">Linked ✓</button>'
+              : `<button class="btn btn-primary ic-adpick-link" data-idx="${i}" style="font-size:0.8rem">Link</button>`}
+          </div>`;
+      }).join('');
+
+      results.querySelectorAll('.ic-adpick-link').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const a = ads[Number(btn.dataset.idx)];
+          btn.disabled = true;
+          btn.textContent = 'Linking…';
+          try {
+            const res = await fetch(`/api/influencer-campaigns/${campaignId}/ads`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(a),
+            });
+            const saved = await res.json();
+            if (!res.ok) throw new Error(saved.error || 'Link failed');
+            if (saved.sync_warning) alert(`Ad linked, but insights backfill hit an issue: ${saved.sync_warning}`);
+            linkedAdIds.add(a.ad_id);
+            btn.outerHTML = '<button class="btn" disabled style="font-size:0.8rem;opacity:0.5">Linked ✓</button>';
+            await loadAds(false);
+          } catch (err) {
+            btn.disabled = false;
+            btn.textContent = 'Link';
+            alert(`Failed to link ad: ${err.message}`);
+          }
+        });
+      });
+    } catch (err) {
+      results.innerHTML = `<div class="ic-adpick-msg" style="color:#b91c1c">${escHtml(err.message)}</div>`;
+    }
+  }, 350);
+
+  F('ic-ad-search').addEventListener('input', (e) => browseAds(e.target.value.trim()));
+  F('ic-refresh-ads').addEventListener('click', () => loadAds(true));
 
   /* ── Sales performance ────────────────────────────────────────── */
   let salesLoaded = false;

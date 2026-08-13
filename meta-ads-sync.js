@@ -146,6 +146,118 @@ async function syncDateRange(daysBack = 30) {
   return { rows: allRows.length, inserted, updated, daysBack };
 }
 
+// ── Ad browsing + ad-level insights (influencer campaign linking) ──
+
+// List individual ads with creative thumbnails, optionally filtered by name
+async function browseAds(q) {
+  const token = await getAccessToken();
+  if (!token) throw new Error('Meta not connected — connect Meta Ads on the Syncing page');
+  const adAccountId = process.env.META_AD_ACCOUNT_ID;
+  if (!adAccountId) throw new Error('META_AD_ACCOUNT_ID env var not set');
+
+  const fields = 'id,name,status,effective_status,adset{id,name},campaign{id,name},creative{id,thumbnail_url}';
+  let url = `${BASE_URL}/act_${adAccountId}/ads?fields=${encodeURIComponent(fields)}&limit=100&access_token=${token}`;
+  if (q) {
+    const filtering = JSON.stringify([{ field: 'name', operator: 'CONTAIN', value: q }]);
+    url += `&filtering=${encodeURIComponent(filtering)}`;
+  }
+
+  const ads = [];
+  let nextUrl = url;
+  let pages = 0;
+  while (nextUrl && pages < 5) { // cap at 500 ads per browse
+    const res  = await fetch(nextUrl);
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      if (data.error?.code === 190) { await saveAccessToken(''); throw new Error('Meta token expired — reconnect on the Syncing page'); }
+      throw new Error(data.error?.message || `Meta API error ${res.status}`);
+    }
+    ads.push(...(data.data || []));
+    nextUrl = data.paging?.next || null;
+    pages++;
+  }
+
+  return ads.map(a => ({
+    ad_id: a.id,
+    ad_name: a.name,
+    status: a.effective_status || a.status,
+    adset_id: a.adset?.id || null,
+    adset_name: a.adset?.name || null,
+    campaign_meta_id: a.campaign?.id || null,
+    campaign_meta_name: a.campaign?.name || null,
+    creative_id: a.creative?.id || null,
+    creative_thumb_url: a.creative?.thumbnail_url || null,
+  }));
+}
+
+// Daily ad-level insights for specific ads → influencer_ad_insights_daily
+async function syncInfluencerAdInsights(adIds, daysBack = 7) {
+  if (!_pool || !adIds || !adIds.length) return { rows: 0 };
+  const token = await getAccessToken();
+  if (!token) throw new Error('Meta not connected');
+  const adAccountId = process.env.META_AD_ACCOUNT_ID;
+  if (!adAccountId) throw new Error('META_AD_ACCOUNT_ID env var not set');
+
+  const since = new Date();
+  since.setDate(since.getDate() - daysBack);
+  const sinceStr = since.toISOString().slice(0, 10);
+  const untilStr = new Date().toISOString().slice(0, 10);
+
+  const fields = 'ad_id,ad_name,spend,impressions,clicks,reach,frequency,actions,action_values,' +
+    'video_play_actions,video_thruplay_watched_actions,video_p100_watched_actions,ctr,cpc,cpm,attribution_setting';
+  const num = (arr) => parseFloat((arr || []).find(x => x.action_type === 'video_view')?.value || 0) || null;
+
+  let total = 0;
+  // Meta filtering IN caps out — batch 40 ads per call
+  for (let i = 0; i < adIds.length; i += 40) {
+    const batch = adIds.slice(i, i + 40);
+    const filtering = JSON.stringify([{ field: 'ad.id', operator: 'IN', value: batch }]);
+    let url = `${BASE_URL}/act_${adAccountId}/insights?level=ad&fields=${encodeURIComponent(fields)}` +
+      `&filtering=${encodeURIComponent(filtering)}` +
+      `&time_range={"since":"${sinceStr}","until":"${untilStr}"}&time_increment=1&limit=500&access_token=${token}`;
+
+    while (url) {
+      const res  = await fetch(url);
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        if (data.error?.code === 190) { await saveAccessToken(''); throw new Error('Meta token expired — reconnect on the Syncing page'); }
+        throw new Error(data.error?.message || `Meta API error ${res.status}`);
+      }
+      for (const row of (data.data || [])) {
+        const purchases     = parseFloat((row.actions || []).find(a => a.action_type === 'purchase')?.value || 0);
+        const purchaseValue = parseFloat((row.action_values || []).find(a => a.action_type === 'purchase')?.value || 0);
+        await _pool.query(
+          `INSERT INTO influencer_ad_insights_daily
+             (ad_id, date, spend, impressions, clicks, reach, frequency,
+              purchases, purchase_value, video_3s_views, thruplays, video_p100,
+              ctr, cpc, cpm, attribution_setting, synced_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NOW())
+           ON CONFLICT (ad_id, date) DO UPDATE SET
+             spend=EXCLUDED.spend, impressions=EXCLUDED.impressions, clicks=EXCLUDED.clicks,
+             reach=EXCLUDED.reach, frequency=EXCLUDED.frequency, purchases=EXCLUDED.purchases,
+             purchase_value=EXCLUDED.purchase_value, video_3s_views=EXCLUDED.video_3s_views,
+             thruplays=EXCLUDED.thruplays, video_p100=EXCLUDED.video_p100,
+             ctr=EXCLUDED.ctr, cpc=EXCLUDED.cpc, cpm=EXCLUDED.cpm,
+             attribution_setting=EXCLUDED.attribution_setting, synced_at=NOW()`,
+          [row.ad_id, row.date_start,
+           parseFloat(row.spend || 0), parseInt(row.impressions || 0), parseInt(row.clicks || 0),
+           parseInt(row.reach || 0), parseFloat(row.frequency || 0) || null,
+           purchases, purchaseValue,
+           num(row.video_play_actions),
+           num(row.video_thruplay_watched_actions),
+           num(row.video_p100_watched_actions),
+           parseFloat(row.ctr || 0) || null, parseFloat(row.cpc || 0) || null, parseFloat(row.cpm || 0) || null,
+           row.attribution_setting || null]
+        );
+        total++;
+      }
+      url = data.paging?.next || null;
+    }
+  }
+  console.log(`[meta-ads] Influencer ad insights: ${total} daily rows for ${adIds.length} ads`);
+  return { rows: total };
+}
+
 // ── Status helpers ─────────────────────────────────────────────────
 async function getConnectionStatus() {
   const token = await getAccessToken();
@@ -186,6 +298,13 @@ function startCron(pool) {
       isRunning = false;
       lastRun   = new Date();
     }
+    // Refresh insights for ads linked to influencer campaigns
+    try {
+      const { rows } = await _pool.query('SELECT DISTINCT ad_id FROM influencer_campaign_ads');
+      if (rows.length) await syncInfluencerAdInsights(rows.map(r => r.ad_id), 7);
+    } catch (err) {
+      console.error('[meta-ads] Influencer ad sync error:', err.message);
+    }
   });
   console.log(`[meta-ads] Cron scheduled: ${schedule}`);
 }
@@ -194,4 +313,4 @@ function getStatus() {
   return { isRunning, lastRun: lastRun?.toISOString() || null, lastResult };
 }
 
-module.exports = { startCron, syncDateRange, getConnectionStatus, getLastSync, handleOAuthCallback, getStatus };
+module.exports = { startCron, syncDateRange, getConnectionStatus, getLastSync, handleOAuthCallback, getStatus, browseAds, syncInfluencerAdInsights };

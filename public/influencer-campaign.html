@@ -234,6 +234,42 @@
       font-weight: 600;
     }
 
+    /* Paid ads */
+    .ic-adpick-list { max-height: 340px; overflow-y: auto; border: 1.5px solid #e2e8f0; border-radius: 10px; margin-bottom: 16px; }
+    .ic-adpick-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 12px; border-bottom: 1px solid #f1f5f9;
+    }
+    .ic-adpick-row:last-child { border-bottom: none; }
+    .ic-adpick-row img { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; background: #f1f5f9; }
+    .ic-adpick-info { flex: 1; min-width: 0; }
+    .ic-adpick-name { font-size: 0.88rem; font-weight: 600; color: #1e293b; }
+    .ic-adpick-meta { font-size: 0.76rem; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ic-ad-status {
+      display: inline-block; padding: 2px 8px; border-radius: 99px;
+      font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+    }
+    .ic-ad-status.ACTIVE { background: #dcfce7; color: #15803d; }
+    .ic-ad-status.PAUSED, .ic-ad-status.ADSET_PAUSED, .ic-ad-status.CAMPAIGN_PAUSED { background: #fef3c7; color: #92400e; }
+    .ic-ad-status.other { background: #f1f5f9; color: #64748b; }
+    .ic-adpick-msg { padding: 16px; color: #94a3b8; font-size: 0.88rem; text-align: center; }
+
+    .ic-ads-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+    .ic-ads-table th {
+      text-align: right; padding: 8px 10px; font-size: 0.7rem; font-weight: 600;
+      color: #64748b; text-transform: uppercase; border-bottom: 2px solid #e2e8f0; white-space: nowrap;
+    }
+    .ic-ads-table th:first-child { text-align: left; }
+    .ic-ads-table td { padding: 9px 10px; border-bottom: 1px solid #f1f5f9; text-align: right; white-space: nowrap; }
+    .ic-ads-table td:first-child { text-align: left; white-space: normal; }
+    .ic-ads-table tfoot td { font-weight: 700; border-top: 2px solid #e2e8f0; border-bottom: none; background: #f8fafc; }
+    .ic-ad-cell { display: flex; align-items: center; gap: 8px; min-width: 200px; }
+    .ic-ad-cell img { width: 34px; height: 34px; border-radius: 6px; object-fit: cover; background: #f1f5f9; }
+    .ic-ad-cell .nm { font-weight: 600; color: #1e293b; font-size: 0.84rem; }
+    .ic-ad-cell .mt { font-size: 0.72rem; color: #94a3b8; }
+    .ic-ad-unlink { border: none; background: transparent; color: #94a3b8; cursor: pointer; font-size: 1rem; }
+    .ic-ad-unlink:hover { color: #b91c1c; }
+
     /* Sales performance */
     .ic-sales-window { font-size: 0.84rem; color: #64748b; margin-bottom: 16px; }
     .ic-sales-section-title {
@@ -388,6 +424,26 @@
           <tbody id="ic-history-tbody"></tbody>
         </table>
       </div>
+    </div>
+
+    <!-- Paid ads performance -->
+    <div class="ic-card" id="ic-ads-card" style="display:none">
+      <div class="ic-card-title">
+        Paid Ads Performance
+        <span style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" id="ic-refresh-ads" style="font-size:0.84rem">↻ Refresh</button>
+          <button class="btn btn-primary" id="ic-link-ads" style="font-size:0.84rem">+ Link Ads</button>
+        </span>
+      </div>
+
+      <div id="ic-ad-picker" style="display:none">
+        <div class="ic-search-wrap" style="margin-bottom:10px">
+          <input id="ic-ad-search" type="text" placeholder="Search your Meta ads by name…" autocomplete="off" />
+        </div>
+        <div id="ic-ad-results" class="ic-adpick-list"></div>
+      </div>
+
+      <div id="ic-ads-body"><div class="ic-products-hint">No ads linked yet — click “+ Link Ads” to attach the Meta ads using this creator’s content.</div></div>
     </div>
 
     <!-- Sales performance -->
