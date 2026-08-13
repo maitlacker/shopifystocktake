@@ -234,6 +234,42 @@
       font-weight: 600;
     }
 
+    /* Sales performance */
+    .ic-sales-window { font-size: 0.84rem; color: #64748b; margin-bottom: 16px; }
+    .ic-sales-section-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 20px 0 10px;
+    }
+    .ic-sales-section-title:first-child { margin-top: 0; }
+    .ic-direct-orders { width: 100%; border-collapse: collapse; font-size: 0.84rem; margin-top: 10px; }
+    .ic-direct-orders th {
+      text-align: left; padding: 7px 10px; font-size: 0.72rem; font-weight: 600;
+      color: #64748b; text-transform: uppercase; border-bottom: 2px solid #e2e8f0; white-space: nowrap;
+    }
+    .ic-direct-orders td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+
+    .ic-size-table { border-collapse: collapse; font-size: 0.86rem; min-width: 320px; }
+    .ic-size-table th {
+      text-align: left; padding: 7px 12px; font-size: 0.72rem; font-weight: 600;
+      color: #64748b; text-transform: uppercase; border-bottom: 2px solid #e2e8f0; white-space: nowrap;
+    }
+    .ic-size-table td { padding: 7px 12px; border-bottom: 1px solid #f1f5f9; white-space: nowrap; }
+    .ic-size-table tr.worn td { background: #faf5ff; font-weight: 600; }
+    .ic-worn-tag {
+      font-size: 0.68rem; font-weight: 700; color: #6d28d9; background: #ede9fe;
+      border-radius: 99px; padding: 2px 8px; margin-left: 8px; white-space: nowrap;
+    }
+    .ic-size-table tfoot td { font-weight: 700; border-top: 2px solid #e2e8f0; border-bottom: none; }
+
+    .ic-sales-product { margin-bottom: 22px; }
+    .ic-sales-product-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .ic-sales-product-head img { width: 38px; height: 38px; border-radius: 8px; object-fit: cover; background: #f1f5f9; }
+    .ic-sales-product-head .name { font-weight: 700; color: #1e293b; }
+
     .ic-action-bar {
       display: flex;
       gap: 10px;
@@ -352,6 +388,16 @@
           <tbody id="ic-history-tbody"></tbody>
         </table>
       </div>
+    </div>
+
+    <!-- Sales performance -->
+    <div class="ic-card" id="ic-sales-card" style="display:none">
+      <div class="ic-card-title">
+        Sales Performance
+        <button class="btn" id="ic-refresh-sales" style="font-size:0.84rem">↻ Refresh</button>
+      </div>
+      <div class="ic-sales-window" id="ic-sales-window"></div>
+      <div id="ic-sales-body"><div class="ic-products-hint">Loading sales data…</div></div>
     </div>
 
     <div class="ic-action-bar">

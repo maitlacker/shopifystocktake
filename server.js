@@ -8280,6 +8280,138 @@ app.delete('/api/influencer-campaigns/:id/organic/:metricId', requireAuth, async
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Sales analysis: direct (discount code) + indirect (featured garments by size)
+// Window: post date (or ad start) → ad end / post + reporting window; "now" if ongoing.
+app.get('/api/influencer-campaigns/:id/sales', requireAuth, async (req, res) => {
+  const DAY = 86400000;
+  try {
+    const { rows: crows } = await pool.query(
+      'SELECT * FROM influencer_campaigns WHERE id=$1 AND deleted_at IS NULL', [req.params.id]
+    );
+    if (!crows.length) return res.status(404).json({ error: 'Not found' });
+    const c = crows[0];
+
+    const { rows: products } = await pool.query(
+      'SELECT * FROM influencer_campaign_products WHERE campaign_id=$1 ORDER BY id', [req.params.id]
+    );
+    if (!products.length) return res.json({ no_products: true });
+    if (!c.post_datetime && !c.ad_live_start) return res.json({ no_window: true });
+
+    // Serve cached result unless a refresh is requested
+    if (req.query.refresh !== '1') {
+      const { rows: cached } = await pool.query(
+        `SELECT summary, computed_at FROM influencer_sales_cache
+         WHERE campaign_id=$1 AND computed_at > NOW() - INTERVAL '30 minutes'`,
+        [req.params.id]
+      );
+      if (cached.length && cached[0].summary) {
+        return res.json({ ...cached[0].summary, cached: true, computed_at: cached[0].computed_at });
+      }
+    }
+
+    // Reporting window
+    const now   = new Date();
+    const start = new Date(c.post_datetime || c.ad_live_start);
+    let end;
+    if (c.ad_live_ongoing) {
+      end = now;
+    } else {
+      const candidates = [new Date(start.getTime() + (c.reporting_window_days || 14) * DAY)];
+      if (c.ad_live_end) {
+        const adEnd = new Date(c.ad_live_end);
+        adEnd.setHours(23, 59, 59, 999);
+        candidates.push(adEnd);
+      }
+      end = new Date(Math.max(...candidates.map(d => d.getTime())));
+    }
+    if (end > now) end = now;
+    let windowCapped = false;
+    if (end.getTime() - start.getTime() > 90 * DAY) { end = new Date(start.getTime() + 90 * DAY); windowCapped = true; }
+
+    // Scan window orders
+    const orders = [];
+    let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json` +
+      `?status=any&created_at_min=${start.toISOString()}&created_at_max=${end.toISOString()}` +
+      `&limit=250&fields=id,name,created_at,cancelled_at,total_price,discount_codes,line_items`;
+    while (url) {
+      const r = await fetch(url, { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } });
+      if (r.status === 429) {
+        await new Promise(w => setTimeout(w, parseFloat(r.headers.get('retry-after') || '2') * 1000));
+        continue;
+      }
+      if (!r.ok) throw new Error(`Shopify orders API ${r.status}`);
+      const data = await r.json();
+      orders.push(...(data.orders || []));
+      const link = r.headers.get('link');
+      const next = link && link.match(/<([^>]+)>;\s*rel="next"/);
+      url = next ? next[1] : null;
+    }
+
+    const code = (c.discount_code || '').trim().toUpperCase();
+    const direct = { order_count: 0, revenue: 0, units: 0, orders: [] };
+    const perProduct = {};
+    products.forEach(p => {
+      perProduct[String(p.product_id)] = {
+        product_id: p.product_id, title: p.product_title, image_url: p.image_url,
+        size_worn: p.size_worn, sizes: {}, total_units: 0, total_revenue: 0,
+      };
+    });
+
+    let scanned = 0;
+    for (const o of orders) {
+      if (o.cancelled_at) continue;
+      scanned++;
+
+      if (code && (o.discount_codes || []).some(d => (d.code || '').trim().toUpperCase() === code)) {
+        direct.order_count++;
+        direct.revenue += parseFloat(o.total_price || 0);
+        direct.units   += (o.line_items || []).reduce((s, li) => s + (li.quantity || 0), 0);
+        if (direct.orders.length < 50) {
+          direct.orders.push({
+            name: o.name, created_at: o.created_at,
+            total: parseFloat(o.total_price || 0),
+            items: (o.line_items || []).map(li => `${li.title}${li.variant_title ? ' (' + li.variant_title + ')' : ''} ×${li.quantity}`).join(', '),
+          });
+        }
+      }
+
+      for (const li of (o.line_items || [])) {
+        const pp = perProduct[String(li.product_id || '')];
+        if (!pp) continue;
+        const size = li.variant_title || '—';
+        if (!pp.sizes[size]) pp.sizes[size] = { units: 0, revenue: 0 };
+        const rev = parseFloat(li.price || 0) * (li.quantity || 0);
+        pp.sizes[size].units   += li.quantity || 0;
+        pp.sizes[size].revenue += rev;
+        pp.total_units   += li.quantity || 0;
+        pp.total_revenue += rev;
+      }
+    }
+
+    const payload = {
+      window_start: start.toISOString(),
+      window_end: end.toISOString(),
+      window_ongoing: !!c.ad_live_ongoing,
+      window_capped: windowCapped,
+      orders_scanned: scanned,
+      discount_code: c.discount_code || null,
+      direct,
+      products: Object.values(perProduct),
+    };
+
+    await pool.query(
+      `INSERT INTO influencer_sales_cache (campaign_id, computed_at, window_start, window_end, summary)
+       VALUES ($1, NOW(), $2, $3, $4)
+       ON CONFLICT (campaign_id) DO UPDATE SET
+         computed_at = NOW(), window_start = EXCLUDED.window_start,
+         window_end = EXCLUDED.window_end, summary = EXCLUDED.summary`,
+      [req.params.id, payload.window_start, payload.window_end, JSON.stringify(payload)]
+    );
+
+    res.json(payload);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 

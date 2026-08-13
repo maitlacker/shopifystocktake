@@ -89,9 +89,12 @@
     F('ic-products-locked').style.display = 'none';
     F('ic-products-body').style.display = '';
     F('ic-organic-card').style.display = '';
+    F('ic-sales-card').style.display = '';
 
     renderProducts(c.products || []);
     renderOrganic(c.organic_metrics || []);
+
+    if (!salesLoaded) { salesLoaded = true; loadSales(false); }
   }
 
   /* ── Ongoing ads toggle ───────────────────────────────────────── */
@@ -373,6 +376,130 @@
       });
     });
   }
+
+  /* ── Sales performance ────────────────────────────────────────── */
+  let salesLoaded = false;
+
+  function fmtMoney(n) {
+    return '$' + Number(n || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function sizeSort(a, b) {
+    const na = parseFloat(a), nb = parseFloat(b);
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    const order = ['XXS','XS','S','M','L','XL','XXL','XXXL'];
+    const ia = order.indexOf(String(a).toUpperCase()), ib = order.indexOf(String(b).toUpperCase());
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    return String(a).localeCompare(String(b));
+  }
+
+  async function loadSales(force) {
+    if (!campaignId) return;
+    const body = F('ic-sales-body');
+    body.innerHTML = '<div class="ic-products-hint">Loading sales data — scanning orders…</div>';
+    try {
+      const res = await fetch(`/api/influencer-campaigns/${campaignId}/sales${force ? '?refresh=1' : ''}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Load failed');
+      renderSales(data);
+    } catch (err) {
+      body.innerHTML = `<div class="ic-products-hint" style="color:#b91c1c">Failed to load sales: ${escHtml(err.message)}</div>`;
+    }
+  }
+
+  function renderSales(d) {
+    const winEl = F('ic-sales-window');
+    const body  = F('ic-sales-body');
+
+    if (d.no_products) {
+      winEl.textContent = '';
+      body.innerHTML = '<div class="ic-products-hint">Add featured products to see sales data.</div>';
+      return;
+    }
+    if (d.no_window) {
+      winEl.textContent = '';
+      body.innerHTML = '<div class="ic-products-hint">Set a post date (or ad live start) to define the reporting window.</div>';
+      return;
+    }
+
+    const fd = (iso) => new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+    winEl.innerHTML =
+      `Window: <strong>${fd(d.window_start)}</strong> → <strong>${d.window_ongoing ? 'now (ongoing)' : fd(d.window_end)}</strong>` +
+      ` · ${Number(d.orders_scanned).toLocaleString('en-AU')} orders scanned` +
+      (d.window_capped ? ' · <span style="color:#d97706">capped at 90 days</span>' : '') +
+      (d.cached ? ` · cached ${new Date(d.computed_at).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' })}` : '');
+
+    let html = '';
+
+    /* Direct — influencer code */
+    html += '<div class="ic-sales-section-title">Direct Sales — Influencer Code' +
+      (d.discount_code ? ` (${escHtml(d.discount_code)})` : '') + '</div>';
+    if (!d.discount_code) {
+      html += '<div class="ic-products-hint">No influencer code set on this campaign — add one in Campaign Details to track direct sales.</div>';
+    } else {
+      const dir = d.direct;
+      const aov = dir.order_count ? dir.revenue / dir.order_count : 0;
+      html += `
+        <div class="ic-metrics-grid" style="margin-bottom:6px">
+          <div class="ic-metric-tile"><div class="ic-metric-num">${dir.order_count}</div><div class="ic-metric-label">Orders</div></div>
+          <div class="ic-metric-tile"><div class="ic-metric-num">${fmtMoney(dir.revenue)}</div><div class="ic-metric-label">Revenue</div></div>
+          <div class="ic-metric-tile"><div class="ic-metric-num">${dir.units}</div><div class="ic-metric-label">Units</div></div>
+          <div class="ic-metric-tile"><div class="ic-metric-num">${fmtMoney(aov)}</div><div class="ic-metric-label">Avg Order</div></div>
+        </div>`;
+      if (dir.orders.length) {
+        html += `<div style="overflow-x:auto"><table class="ic-direct-orders">
+          <thead><tr><th>Order</th><th>Date</th><th>Items</th><th style="text-align:right">Total</th></tr></thead>
+          <tbody>${dir.orders.map(o => `
+            <tr>
+              <td style="font-weight:600">${escHtml(o.name)}</td>
+              <td style="white-space:nowrap">${fd(o.created_at)}</td>
+              <td>${escHtml(o.items)}</td>
+              <td style="text-align:right;white-space:nowrap">${fmtMoney(o.total)}</td>
+            </tr>`).join('')}
+          </tbody></table></div>`;
+        if (dir.order_count > dir.orders.length) {
+          html += `<div class="ic-products-hint" style="margin-top:6px">Showing first ${dir.orders.length} of ${dir.order_count} orders.</div>`;
+        }
+      } else {
+        html += '<div class="ic-products-hint">No orders used this code in the window.</div>';
+      }
+    }
+
+    /* Indirect — featured garments by size */
+    html += '<div class="ic-sales-section-title">All Sales of Featured Garments — by Size</div>';
+    for (const p of d.products) {
+      const sizes = Object.keys(p.sizes).sort(sizeSort);
+      const worn  = (p.size_worn || '').trim().toUpperCase();
+      html += `
+        <div class="ic-sales-product">
+          <div class="ic-sales-product-head">
+            ${p.image_url ? `<img src="${escHtml(p.image_url)}" alt="" />` : ''}
+            <span class="name">${escHtml(p.title)}</span>
+            ${p.size_worn ? `<span class="ic-worn-tag">wearing ${escHtml(p.size_worn)}</span>` : ''}
+          </div>`;
+      if (!sizes.length) {
+        html += '<div class="ic-products-hint">No sales in the window.</div></div>';
+        continue;
+      }
+      html += `<div style="overflow-x:auto"><table class="ic-size-table">
+        <thead><tr><th>Size</th><th style="text-align:right">Units</th><th style="text-align:right">Revenue</th></tr></thead>
+        <tbody>${sizes.map(s => {
+          const row = p.sizes[s];
+          const isWorn = worn && s.trim().toUpperCase() === worn;
+          return `<tr${isWorn ? ' class="worn"' : ''}>
+            <td>${escHtml(s)}${isWorn ? '<span class="ic-worn-tag">size worn</span>' : ''}</td>
+            <td style="text-align:right">${row.units}</td>
+            <td style="text-align:right">${fmtMoney(row.revenue)}</td>
+          </tr>`;
+        }).join('')}</tbody>
+        <tfoot><tr><td>Total</td><td style="text-align:right">${p.total_units}</td><td style="text-align:right">${fmtMoney(p.total_revenue)}</td></tr></tfoot>
+      </table></div></div>`;
+    }
+
+    body.innerHTML = html;
+  }
+
+  F('ic-refresh-sales').addEventListener('click', () => loadSales(true));
 
   /* ── Load ─────────────────────────────────────────────────────── */
   async function loadCampaign() {
