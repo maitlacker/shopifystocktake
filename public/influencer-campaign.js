@@ -429,6 +429,28 @@
       (d.window_capped ? ' · <span style="color:#d97706">capped at 90 days</span>' : '') +
       (d.cached ? ` · cached ${new Date(d.computed_at).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' })}` : '');
 
+    // Items cell — featured (promoted) garments render in purple
+    const itemsHtml = (items) => {
+      if (typeof items === 'string') return escHtml(items); // pre-update cached shape
+      return (items || []).map(it =>
+        it.featured
+          ? `<span style="color:#6d28d9;font-weight:600">${escHtml(it.label)}</span>`
+          : escHtml(it.label)
+      ).join(', ');
+    };
+
+    const ordersTable = (orders) => `
+      <div style="overflow-x:auto"><table class="ic-direct-orders">
+        <thead><tr><th>Order</th><th>Date</th><th>Items</th><th style="text-align:right">Total</th></tr></thead>
+        <tbody>${orders.map(o => `
+          <tr>
+            <td style="font-weight:600">${escHtml(o.name)}</td>
+            <td style="white-space:nowrap">${fd(o.created_at)}</td>
+            <td>${itemsHtml(o.items)}</td>
+            <td style="text-align:right;white-space:nowrap">${fmtMoney(o.total)}</td>
+          </tr>`).join('')}
+        </tbody></table></div>`;
+
     let html = '';
 
     /* Direct — influencer code */
@@ -447,16 +469,7 @@
           <div class="ic-metric-tile"><div class="ic-metric-num">${fmtMoney(aov)}</div><div class="ic-metric-label">Avg Order</div></div>
         </div>`;
       if (dir.orders.length) {
-        html += `<div style="overflow-x:auto"><table class="ic-direct-orders">
-          <thead><tr><th>Order</th><th>Date</th><th>Items</th><th style="text-align:right">Total</th></tr></thead>
-          <tbody>${dir.orders.map(o => `
-            <tr>
-              <td style="font-weight:600">${escHtml(o.name)}</td>
-              <td style="white-space:nowrap">${fd(o.created_at)}</td>
-              <td>${escHtml(o.items)}</td>
-              <td style="text-align:right;white-space:nowrap">${fmtMoney(o.total)}</td>
-            </tr>`).join('')}
-          </tbody></table></div>`;
+        html += ordersTable(dir.orders);
         if (dir.order_count > dir.orders.length) {
           html += `<div class="ic-products-hint" style="margin-top:6px">Showing first ${dir.orders.length} of ${dir.order_count} orders.</div>`;
         }
@@ -493,7 +506,14 @@
           </tr>`;
         }).join('')}</tbody>
         <tfoot><tr><td>Total</td><td style="text-align:right">${p.total_units}</td><td style="text-align:right">${fmtMoney(p.total_revenue)}</td></tr></tfoot>
-      </table></div></div>`;
+      </table></div>`;
+      if (p.orders && p.orders.length) {
+        html += ordersTable(p.orders);
+        if (p.order_count > p.orders.length) {
+          html += `<div class="ic-products-hint" style="margin-top:6px">Showing first ${p.orders.length} of ${p.order_count} orders.</div>`;
+        }
+      }
+      html += '</div>';
     }
 
     body.innerHTML = html;

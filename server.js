@@ -8348,12 +8348,14 @@ app.get('/api/influencer-campaigns/:id/sales', requireAuth, async (req, res) => 
     }
 
     const code = (c.discount_code || '').trim().toUpperCase();
+    const featuredIds = new Set(products.map(p => String(p.product_id)));
     const direct = { order_count: 0, revenue: 0, units: 0, orders: [] };
     const perProduct = {};
     products.forEach(p => {
       perProduct[String(p.product_id)] = {
         product_id: p.product_id, title: p.product_title, image_url: p.image_url,
         size_worn: p.size_worn, sizes: {}, total_units: 0, total_revenue: 0,
+        order_count: 0, orders: [],
       };
     });
 
@@ -8362,19 +8364,25 @@ app.get('/api/influencer-campaigns/:id/sales', requireAuth, async (req, res) => 
       if (o.cancelled_at) continue;
       scanned++;
 
+      // Structured items — `featured` marks garments promoted by the influencer
+      const orderItems = (o.line_items || []).map(li => ({
+        label: `${li.title}${li.variant_title ? ' (' + li.variant_title + ')' : ''} ×${li.quantity}`,
+        featured: featuredIds.has(String(li.product_id || '')),
+      }));
+      const orderInfo = {
+        name: o.name, created_at: o.created_at,
+        total: parseFloat(o.total_price || 0),
+        items: orderItems,
+      };
+
       if (code && (o.discount_codes || []).some(d => (d.code || '').trim().toUpperCase() === code)) {
         direct.order_count++;
         direct.revenue += parseFloat(o.total_price || 0);
         direct.units   += (o.line_items || []).reduce((s, li) => s + (li.quantity || 0), 0);
-        if (direct.orders.length < 50) {
-          direct.orders.push({
-            name: o.name, created_at: o.created_at,
-            total: parseFloat(o.total_price || 0),
-            items: (o.line_items || []).map(li => `${li.title}${li.variant_title ? ' (' + li.variant_title + ')' : ''} ×${li.quantity}`).join(', '),
-          });
-        }
+        if (direct.orders.length < 50) direct.orders.push(orderInfo);
       }
 
+      const productsInOrder = new Set();
       for (const li of (o.line_items || [])) {
         const pp = perProduct[String(li.product_id || '')];
         if (!pp) continue;
@@ -8385,6 +8393,12 @@ app.get('/api/influencer-campaigns/:id/sales', requireAuth, async (req, res) => 
         pp.sizes[size].revenue += rev;
         pp.total_units   += li.quantity || 0;
         pp.total_revenue += rev;
+        productsInOrder.add(String(li.product_id));
+      }
+      for (const pid of productsInOrder) {
+        const pp = perProduct[pid];
+        pp.order_count++;
+        if (pp.orders.length < 25) pp.orders.push(orderInfo);
       }
     }
 
