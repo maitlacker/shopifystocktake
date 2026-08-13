@@ -8182,6 +8182,30 @@ app.delete('/api/influencer-campaigns/:id', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.post('/api/influencer-campaigns/:id/archive', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `UPDATE influencer_campaigns SET archived_at=NOW(), archived_by=$1, updated_at=NOW(), updated_by=$1
+       WHERE id=$2 AND deleted_at IS NULL RETURNING *`,
+      [req.user.email, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/influencer-campaigns/:id/unarchive', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `UPDATE influencer_campaigns SET archived_at=NULL, archived_by=NULL, updated_at=NOW(), updated_by=$1
+       WHERE id=$2 AND deleted_at IS NULL RETURNING *`,
+      [req.user.email, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Add a featured product — also captures today's inventory snapshot for its variants
 app.post('/api/influencer-campaigns/:id/products', requireAuth, async (req, res) => {
   const { product_id, product_title, image_url } = req.body;

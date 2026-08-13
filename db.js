@@ -985,6 +985,8 @@ async function initDb() {
 
     ALTER TABLE influencer_campaigns ADD COLUMN IF NOT EXISTS ad_live_ongoing BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE influencer_campaign_products ADD COLUMN IF NOT EXISTS size_worn TEXT;
+    ALTER TABLE influencer_campaigns ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+    ALTER TABLE influencer_campaigns ADD COLUMN IF NOT EXISTS archived_by TEXT;
 
     CREATE TABLE IF NOT EXISTS influencer_inventory_snapshots (
       id                 SERIAL PRIMARY KEY,

@@ -76,9 +76,13 @@
 
     F('ic-title').textContent = c.creator_name || 'Campaign';
     const badge = F('ic-status-badge');
-    badge.textContent = c.status;
-    badge.className   = `ic-badge ${c.status}`;
+    badge.textContent = c.archived_at ? 'archived' : c.status;
+    badge.className   = `ic-badge ${c.archived_at ? 'archived' : c.status}`;
     badge.style.display = '';
+
+    const archBtn = F('ic-archive');
+    archBtn.style.display = '';
+    archBtn.textContent = c.archived_at ? 'Unarchive' : 'Archive';
 
     F('ic-status-btns').style.display = '';
     document.querySelectorAll('.ic-status-btn').forEach(b => {
@@ -153,6 +157,18 @@
   }
 
   F('ic-save').addEventListener('click', save);
+
+  F('ic-archive').addEventListener('click', async () => {
+    if (!campaignId || !campaign) return;
+    const action = campaign.archived_at ? 'unarchive' : 'archive';
+    const res = await fetch(`/api/influencer-campaigns/${campaignId}/${action}`, { method: 'POST' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      alert(`Failed to ${action}: ${body.error || res.status}`);
+      return;
+    }
+    await loadCampaign();
+  });
 
   F('ic-delete').addEventListener('click', async () => {
     if (!campaignId) return;

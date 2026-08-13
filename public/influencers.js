@@ -31,13 +31,14 @@
   }
 
   function renderStats(rows) {
-    const by = (s) => rows.filter(r => r.status === s).length;
+    const active = rows.filter(r => !r.archived_at);
+    const by = (s) => active.filter(r => r.status === s).length;
     document.getElementById('stat-live').textContent      = by('live');
     document.getElementById('stat-planned').textContent   = by('planned');
     document.getElementById('stat-completed').textContent = by('completed');
-    const invested = rows.reduce((sum, r) => sum + parseFloat(r.influencer_fee || 0), 0);
+    const invested = active.reduce((sum, r) => sum + parseFloat(r.influencer_fee || 0), 0);
     document.getElementById('stat-invested').textContent  = fmtMoney(invested);
-    document.getElementById('inf-total-count').textContent = `(${rows.length})`;
+    document.getElementById('inf-total-count').textContent = `(${active.length})`;
   }
 
   function productsCell(products) {
@@ -56,7 +57,11 @@
 
   function render() {
     const tbody = document.getElementById('inf-tbody');
-    const rows = activeTab === 'all' ? allRows : allRows.filter(r => r.status === activeTab);
+    const rows = activeTab === 'archived'
+      ? allRows.filter(r => r.archived_at)
+      : (activeTab === 'all'
+          ? allRows.filter(r => !r.archived_at)
+          : allRows.filter(r => r.status === activeTab && !r.archived_at));
 
     if (!rows.length) {
       tbody.innerHTML = `<tr><td colspan="9" class="inf-empty"><div class="inf-empty-icon">📣</div>No campaigns${activeTab !== 'all' ? ' with this status' : ' yet — create your first one'}.</td></tr>`;
@@ -84,7 +89,9 @@
           <td class="inf-fee">${fmtMoney(r.influencer_fee)}</td>
           <td class="inf-metric">${fmtNum(org.reach)}</td>
           <td class="inf-metric">${org.engagement_rate != null ? org.engagement_rate + '%' : '—'}</td>
-          <td><span class="inf-badge ${escHtml(r.status)}">${escHtml(r.status)}</span></td>
+          <td>${r.archived_at
+            ? '<span class="inf-badge archived">archived</span>'
+            : `<span class="inf-badge ${escHtml(r.status)}">${escHtml(r.status)}</span>`}</td>
           <td><a class="inf-open-btn" href="/influencer-campaign.html?id=${r.id}" onclick="event.stopPropagation()">Open →</a></td>
         </tr>`;
     });
