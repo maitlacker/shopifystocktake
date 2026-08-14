@@ -781,7 +781,7 @@ async function initDb() {
       AND NOT EXISTS (SELECT 1 FROM srf_size_groups WHERE name='Jeans 6-18');
 
     INSERT INTO srf_form_types (name, measurement_fields, sort_order) VALUES
-      ('Tops/Dresses', '["Bust/Chest","Waist","Body Length","Hem Width","Sleeve Length","Shoulder Width"]', 1),
+      ('Tops/Dresses', '["Bust/Chest","Waist","Body Length","Hip Width","Sleeve Length","Shoulder Width"]', 1),
       ('Bottoms', '["Waist","Hip","Thigh","Inseam","Rise"]', 2),
       ('Jeans', '["Waist","Hip","Thigh","Inseam","Rise"]', 3),
       ('Accessories', '["Width","Height","Depth"]', 4),
@@ -795,8 +795,16 @@ async function initDb() {
 
     -- Add Waist to Tops/Dresses on DBs seeded before it existed
     UPDATE srf_form_types
-      SET measurement_fields = '["Bust/Chest","Waist","Body Length","Hem Width","Sleeve Length","Shoulder Width"]'
+      SET measurement_fields = '["Bust/Chest","Waist","Body Length","Hip Width","Sleeve Length","Shoulder Width"]'
       WHERE name = 'Tops/Dresses' AND NOT (measurement_fields ? 'Waist');
+
+    -- Rename Hem Width → Hip Width in the form type and in stored receipt measurements
+    UPDATE srf_form_types
+      SET measurement_fields = '["Bust/Chest","Waist","Body Length","Hip Width","Sleeve Length","Shoulder Width"]'
+      WHERE name = 'Tops/Dresses' AND measurement_fields ? 'Hem Width';
+    UPDATE stock_receipt_sizes
+      SET measurements = (measurements - 'Hem Width') || jsonb_build_object('Hip Width', measurements->'Hem Width')
+      WHERE measurements ? 'Hem Width';
 
     CREATE TABLE IF NOT EXISTS stock_receipts (
       id                     SERIAL PRIMARY KEY,
