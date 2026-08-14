@@ -184,7 +184,7 @@ function renderBody(r, sizes, photos, audit) {
           <input type="number" id="f-freight-price" value="${r.freight_price ?? ''}" placeholder="0.00" step="0.01" min="0"${ro_attr} oninput="calcFinal()" />
         </div>
         <div class="srf-field">
-          <label>Final Price ($) <span style="font-weight:400;color:#94a3b8;font-size:0.72rem">per unit</span></label>
+          <label>Final Cost Price ($) <span style="font-weight:400;color:#94a3b8;font-size:0.72rem">per unit</span></label>
           <input type="number" id="f-final-price" value="${r.final_price ?? ''}" placeholder="auto" step="0.01" min="0"${ro_attr} />
         </div>
       </div>

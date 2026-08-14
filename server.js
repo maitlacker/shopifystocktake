@@ -7499,7 +7499,7 @@ app.get('/api/stock-receipts/:id/pdf', requireAuth, async (req, res) => {
     field('COST PRICE',  r.cost_price       != null ? `$${Number(r.cost_price).toFixed(2)}`      : '—', ML,        c4 - 6, y);
     field('DISCOUNT',    r.discount_percent != null ? `${r.discount_percent}%`                   : '—', ML + c4,   c4 - 6, y);
     field('FREIGHT',     r.freight_price    != null ? `$${Number(r.freight_price).toFixed(2)}`   : '—', ML + c4*2, c4 - 6, y);
-    field('FINAL PRICE', r.final_price      != null ? `$${Number(r.final_price).toFixed(2)}`     : '—', ML + c4*3, c4 - 6, y);
+    field('FINAL COST PRICE', r.final_price != null ? `$${Number(r.final_price).toFixed(2)}`     : '—', ML + c4*3, c4 - 6, y);
     y += 34;
 
     const c2 = W / 2 - 6;
