@@ -1446,6 +1446,11 @@ app.post('/api/restock/analysis/refresh', async (req, res) => {
   res.json({ ok: true, message: 'Analysis started — check back in ~30 seconds' });
 });
 
+// GET /api/restock/analysis/status — is a run in progress / did the last one fail
+app.get('/api/restock/analysis/status', (req, res) => {
+  res.json(restockSync.getStatus());
+});
+
 // GET /api/restock/po-incoming-debug — how PO lines resolved in the last analysis,
 // plus every non-received PO line so draft/unlinked issues are visible
 app.get('/api/restock/po-incoming-debug', requireAuth, async (req, res) => {

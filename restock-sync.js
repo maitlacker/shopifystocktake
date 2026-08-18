@@ -26,6 +26,8 @@ const cron  = require('node-cron');
 
 let pool;
 let isRunning = false;
+let lastError = null;
+let lastRunAt = null;
 
 const SHOPIFY_SHOP  = process.env.SHOPIFY_SHOP;
 const SHOPIFY_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
@@ -378,16 +380,23 @@ async function runAnalysis() {
     // 4b. Confirmed production orders — real POs count as incoming stock.
     // Lines linked via the product picker resolve by product_id; manually-typed
     // lines are resolved later by name/SKU against the Shopify catalogue (step 7b).
-    const { rows: poLineRows } = await pool.query(`
-      SELECT po.id AS po_id, po.po_number, po.freight_mode, po.delivery_date, po.order_date,
-             s.lead_time_sea AS sup_sea_weeks, s.lead_time_air AS sup_air_weeks,
-             pol.product_id, pol.product_code, pol.product_name, pol.quantities, pol.total_qty
-      FROM production_order_lines pol
-      JOIN production_orders po ON po.id = pol.order_id
-      LEFT JOIN suppliers s ON s.id = po.supplier_id
-      WHERE po.status = 'confirmed'
-      ORDER BY po.delivery_date ASC NULLS LAST
-    `);
+    // Wrapped so a PO-integration failure can never kill the whole analysis.
+    let poLineRows = [];
+    try {
+      const poRes = await pool.query(`
+        SELECT po.id AS po_id, po.po_number, po.freight_mode, po.delivery_date, po.order_date,
+               s.lead_time_sea AS sup_sea_weeks, s.lead_time_air AS sup_air_weeks,
+               pol.product_id, pol.product_code, pol.product_name, pol.quantities, pol.total_qty
+        FROM production_order_lines pol
+        JOIN production_orders po ON po.id = pol.order_id
+        LEFT JOIN suppliers s ON s.id = po.supplier_id
+        WHERE po.status = 'confirmed'
+        ORDER BY po.delivery_date ASC NULLS LAST
+      `);
+      poLineRows = poRes.rows;
+    } catch (poErr) {
+      console.error('[restock] PO lines query failed — continuing without PO incoming:', poErr.message);
+    }
     const poResolutionDebug = {
       linked: 0, resolved_by_name: 0, resolved_by_sku: 0,
       overdue: [], unresolved: [],
@@ -421,6 +430,7 @@ async function runAnalysis() {
       };
     };
     const unlinkedPoLines = [];
+    try {
     for (const line of poLineRows) {
       const entry = poIncomingEntry(line);
       if (new Date(entry.expected_delivery).getTime() < OVERDUE_CUTOFF_MS) {
@@ -442,6 +452,9 @@ async function runAnalysis() {
         unlinkedPoLines.push(line);
       }
     }
+    } catch (poErr) {
+      console.error('[restock] PO incoming merge failed — continuing without:', poErr.message);
+    }
 
     // 5. Alert log (already-sent alerts per product+type)
     const { rows: alertRows } = await pool.query(
@@ -462,6 +475,7 @@ async function runAnalysis() {
     //     normalised title match (ignores spacing/punctuation, so
     //     "Skirt- Black" matches "Skirt - Black"), else variant SKU starts
     //     with product_code. Lines for styles not yet in Shopify stay unresolved.
+    try {
     if (unlinkedPoLines.length) {
       const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       const byTitle = {};
@@ -489,6 +503,9 @@ async function runAnalysis() {
           });
         }
       }
+    }
+    } catch (poErr) {
+      console.error('[restock] PO name/SKU resolution failed — continuing without:', poErr.message);
     }
     console.log(`[restock] PO incoming — linked: ${poResolutionDebug.linked}, ` +
       `by name: ${poResolutionDebug.resolved_by_name}, by SKU: ${poResolutionDebug.resolved_by_sku}, ` +
@@ -866,11 +883,18 @@ async function runAnalysis() {
     console.log(`[restock] Done — ${analysedProducts.length} products, ` +
       `${seaAlertCount} sea / ${airAlertCount} air / ${criticalAlertCount} critical alerts`);
 
+    lastError = null;
   } catch (err) {
     console.error('[restock] Analysis error:', err.message);
+    lastError = err.message;
   } finally {
     isRunning = false;
+    lastRunAt = new Date().toISOString();
   }
+}
+
+function getStatus() {
+  return { isRunning, lastError, lastRunAt };
 }
 
 // ── Cron ───────────────────────────────────────────────────────────
@@ -881,4 +905,4 @@ function startCron(dbPool) {
   console.log('[restock] cron started — daily at 9am AEST');
 }
 
-module.exports = { startCron, runAnalysis };
+module.exports = { startCron, runAnalysis, getStatus };

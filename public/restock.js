@@ -70,13 +70,32 @@ async function runAnalysis() {
   document.getElementById('rs-sync-info').textContent = 'Analysis running — takes ~30 seconds…';
 
   try {
-    await fetch('/api/restock/analysis/refresh', { method: 'POST' });
-    // Poll for updated generatedAt
-    const prevGenerated = allProducts.length ? (window._lastGeneratedAt || '') : '';
+    const kick = await fetch('/api/restock/analysis/refresh', { method: 'POST' });
+    if (!kick.ok) throw new Error(`Server responded ${kick.status} — is a deploy in progress? Try again in a minute.`);
+
+    // Poll the run status — surfaces real errors instead of a silent timeout
+    const prevGenerated = window._lastGeneratedAt || '';
     let attempts = 0;
     refreshPoller = setInterval(async () => {
       attempts++;
       try {
+        const sr = await fetch('/api/restock/analysis/status');
+        const status = sr.ok ? await sr.json() : {};
+        if (status.isRunning) {
+          document.getElementById('rs-sync-info').textContent =
+            `Analysis running… (${attempts * 5}s)`;
+          return;
+        }
+        if (status.lastError) {
+          clearInterval(refreshPoller);
+          refreshPoller = null;
+          btn.disabled = false;
+          btn.textContent = 'Run Analysis';
+          document.getElementById('rs-sync-info').textContent = 'Analysis failed';
+          alert(`Analysis failed: ${status.lastError}`);
+          return;
+        }
+        // Not running, no error — grab the fresh result
         const r = await fetch('/api/restock/analysis');
         if (r.ok) {
           const data = await r.json();
@@ -86,10 +105,12 @@ async function runAnalysis() {
             renderAnalysis(data);
             btn.disabled = false;
             btn.textContent = 'Run Analysis';
+            document.getElementById('rs-sync-info').textContent =
+              `Analysis updated ${new Date(data.generatedAt).toLocaleTimeString()}`;
           }
         }
       } catch (_) {}
-      if (attempts >= 24) { // 2-minute timeout
+      if (attempts >= 60) { // 5-minute timeout
         clearInterval(refreshPoller);
         refreshPoller = null;
         btn.disabled = false;
