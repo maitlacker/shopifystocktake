@@ -388,6 +388,14 @@ async function runAnalysis() {
       WHERE po.status = 'confirmed'
       ORDER BY po.delivery_date ASC NULLS LAST
     `);
+    const poResolutionDebug = {
+      linked: 0, resolved_by_name: 0, resolved_by_sku: 0,
+      overdue: [], unresolved: [],
+    };
+    // Deliveries more than 7 days past-due are NOT counted as incoming — that
+    // stock has almost certainly arrived and is already in Shopify inventory
+    // (counting it again would double-count). Mark the PO received to clear it.
+    const OVERDUE_CUTOFF_MS = Date.now() - 7 * 86400000;
     const poIncomingEntry = (line) => {
       let expected  = line.delivery_date;
       let estimated = false;
@@ -413,13 +421,23 @@ async function runAnalysis() {
       };
     };
     const unlinkedPoLines = [];
-    let poLinkedCount = 0;
     for (const line of poLineRows) {
+      const entry = poIncomingEntry(line);
+      if (new Date(entry.expected_delivery).getTime() < OVERDUE_CUTOFF_MS) {
+        poResolutionDebug.overdue.push({
+          po_number:     line.po_number,
+          product_name:  line.product_name,
+          delivery_date: entry.expected_delivery,
+          total_qty:     line.total_qty,
+          note:          'past-due — not counted as incoming; mark the PO received if it has arrived',
+        });
+        continue;
+      }
       if (line.product_id) {
         const key = String(line.product_id);
         if (!ordersByProduct[key]) ordersByProduct[key] = [];
-        ordersByProduct[key].push(poIncomingEntry(line));
-        poLinkedCount++;
+        ordersByProduct[key].push(entry);
+        poResolutionDebug.linked++;
       } else {
         unlinkedPoLines.push(line);
       }
@@ -441,18 +459,20 @@ async function runAnalysis() {
     const orders = await fetchOrdersSince(since);
 
     // 7b. Resolve unlinked PO lines against the catalogue:
-    //     exact title match (case-insensitive), else variant SKU starts with product_code.
-    const poResolutionDebug = { linked: poLinkedCount, resolved_by_name: 0, resolved_by_sku: 0, unresolved: [] };
+    //     normalised title match (ignores spacing/punctuation, so
+    //     "Skirt- Black" matches "Skirt - Black"), else variant SKU starts
+    //     with product_code. Lines for styles not yet in Shopify stay unresolved.
     if (unlinkedPoLines.length) {
+      const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       const byTitle = {};
-      for (const p of products) byTitle[p.title.toLowerCase().trim()] = p;
+      for (const p of products) byTitle[norm(p.title)] = p;
       const matchBySku = (code) => {
         const c = String(code || '').trim().toUpperCase();
         if (c.length < 3) return null;
         return products.find(p => (p.variants || []).some(v => v.sku && v.sku.toUpperCase().startsWith(c))) || null;
       };
       for (const line of unlinkedPoLines) {
-        const nameMatch = line.product_name ? byTitle[String(line.product_name).toLowerCase().trim()] : null;
+        const nameMatch = line.product_name ? byTitle[norm(line.product_name)] : null;
         const match = nameMatch || matchBySku(line.product_code);
         if (match) {
           const key = String(match.id);
