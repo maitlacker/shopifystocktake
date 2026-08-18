@@ -376,19 +376,19 @@ async function runAnalysis() {
     }
 
     // 4b. Confirmed production orders — real POs count as incoming stock.
-    // Delivery: PO's own delivery_date, else order_date + supplier/global lead time (flagged estimated).
+    // Lines linked via the product picker resolve by product_id; manually-typed
+    // lines are resolved later by name/SKU against the Shopify catalogue (step 7b).
     const { rows: poLineRows } = await pool.query(`
       SELECT po.id AS po_id, po.po_number, po.freight_mode, po.delivery_date, po.order_date,
              s.lead_time_sea AS sup_sea_weeks, s.lead_time_air AS sup_air_weeks,
-             pol.product_id, pol.quantities, pol.total_qty
+             pol.product_id, pol.product_code, pol.product_name, pol.quantities, pol.total_qty
       FROM production_order_lines pol
       JOIN production_orders po ON po.id = pol.order_id
       LEFT JOIN suppliers s ON s.id = po.supplier_id
-      WHERE po.status = 'confirmed' AND pol.product_id IS NOT NULL
+      WHERE po.status = 'confirmed'
       ORDER BY po.delivery_date ASC NULLS LAST
     `);
-    let poIncomingCount = 0;
-    for (const line of poLineRows) {
+    const poIncomingEntry = (line) => {
       let expected  = line.delivery_date;
       let estimated = false;
       if (!expected) {
@@ -400,9 +400,7 @@ async function runAnalysis() {
         expected  = d;
         estimated = true;
       }
-      const key = String(line.product_id);
-      if (!ordersByProduct[key]) ordersByProduct[key] = [];
-      ordersByProduct[key].push({
+      return {
         id:                 null,               // not a restock_orders row — no delete in planner
         po_id:              line.po_id,
         po_number:          line.po_number,
@@ -412,10 +410,20 @@ async function runAnalysis() {
         total_qty:          line.total_qty,
         qty_by_variant:     line.quantities || {},
         estimated_delivery: estimated,
-      });
-      poIncomingCount++;
+      };
+    };
+    const unlinkedPoLines = [];
+    let poLinkedCount = 0;
+    for (const line of poLineRows) {
+      if (line.product_id) {
+        const key = String(line.product_id);
+        if (!ordersByProduct[key]) ordersByProduct[key] = [];
+        ordersByProduct[key].push(poIncomingEntry(line));
+        poLinkedCount++;
+      } else {
+        unlinkedPoLines.push(line);
+      }
     }
-    console.log(`[restock] Incoming: ${orderRows.length} planner orders + ${poIncomingCount} confirmed PO lines`);
 
     // 5. Alert log (already-sent alerts per product+type)
     const { rows: alertRows } = await pool.query(
@@ -431,6 +439,40 @@ async function runAnalysis() {
     const since = new Date();
     since.setDate(since.getDate() - velocity_days);
     const orders = await fetchOrdersSince(since);
+
+    // 7b. Resolve unlinked PO lines against the catalogue:
+    //     exact title match (case-insensitive), else variant SKU starts with product_code.
+    const poResolutionDebug = { linked: poLinkedCount, resolved_by_name: 0, resolved_by_sku: 0, unresolved: [] };
+    if (unlinkedPoLines.length) {
+      const byTitle = {};
+      for (const p of products) byTitle[p.title.toLowerCase().trim()] = p;
+      const matchBySku = (code) => {
+        const c = String(code || '').trim().toUpperCase();
+        if (c.length < 3) return null;
+        return products.find(p => (p.variants || []).some(v => v.sku && v.sku.toUpperCase().startsWith(c))) || null;
+      };
+      for (const line of unlinkedPoLines) {
+        const nameMatch = line.product_name ? byTitle[String(line.product_name).toLowerCase().trim()] : null;
+        const match = nameMatch || matchBySku(line.product_code);
+        if (match) {
+          const key = String(match.id);
+          if (!ordersByProduct[key]) ordersByProduct[key] = [];
+          ordersByProduct[key].push(poIncomingEntry(line));
+          if (nameMatch) poResolutionDebug.resolved_by_name++;
+          else           poResolutionDebug.resolved_by_sku++;
+        } else {
+          poResolutionDebug.unresolved.push({
+            po_number:    line.po_number,
+            product_name: line.product_name,
+            product_code: line.product_code,
+            total_qty:    line.total_qty,
+          });
+        }
+      }
+    }
+    console.log(`[restock] PO incoming — linked: ${poResolutionDebug.linked}, ` +
+      `by name: ${poResolutionDebug.resolved_by_name}, by SKU: ${poResolutionDebug.resolved_by_sku}, ` +
+      `unresolved: ${poResolutionDebug.unresolved.length}`);
 
     // 8. Build per-variant sales maps — split at the half-period boundary
     const recentCutoff = new Date();
@@ -796,6 +838,7 @@ async function runAnalysis() {
         seaAlerts:      seaAlertCount,
         airAlerts:      airAlertCount,
         criticalAlerts: criticalAlertCount,
+        poIncoming:     poResolutionDebug,
         products:       analysedProducts,
       })]
     );

@@ -1446,6 +1446,33 @@ app.post('/api/restock/analysis/refresh', async (req, res) => {
   res.json({ ok: true, message: 'Analysis started — check back in ~30 seconds' });
 });
 
+// GET /api/restock/po-incoming-debug — how PO lines resolved in the last analysis,
+// plus every non-received PO line so draft/unlinked issues are visible
+app.get('/api/restock/po-incoming-debug', requireAuth, async (req, res) => {
+  try {
+    const [{ rows: cacheRows }, { rows: lineRows }] = await Promise.all([
+      pool.query(`SELECT value FROM app_settings WHERE key='restock_analysis'`),
+      pool.query(`
+        SELECT po.po_number, po.status AS po_status, po.delivery_date, po.freight_mode,
+               pol.product_id, pol.product_name, pol.product_code, pol.total_qty
+        FROM production_order_lines pol
+        JOIN production_orders po ON po.id = pol.order_id
+        WHERE po.status NOT IN ('received','cancelled')
+        ORDER BY po.po_number, pol.id`),
+    ]);
+    const analysis = cacheRows.length ? JSON.parse(cacheRows[0].value) : null;
+    res.json({
+      analysis_generated_at: analysis?.generatedAt || null,
+      resolution_last_run: analysis?.poIncoming || 'analysis has not run since this feature deployed — hit Run Analysis',
+      all_open_po_lines: lineRows.map(l => ({
+        ...l,
+        counted_as_incoming: l.po_status === 'confirmed',
+        linked_to_shopify: !!l.product_id,
+      })),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // GET /api/restock/orders
 app.get('/api/restock/orders', async (req, res) => {
   try {
