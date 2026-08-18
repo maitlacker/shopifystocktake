@@ -234,7 +234,7 @@ function formatSlackAlert(product, alertType, coverWeeks) {
 
   const incomingLines = product.incomingOrders.length
     ? product.incomingOrders.map(o =>
-        `📦 Incoming ${o.freightMode.toUpperCase()}: ${o.totalQty} units · due ${o.expectedDelivery}`
+        `📦 Incoming ${o.freightMode.toUpperCase()}${o.poNumber ? ` (PO ${o.poNumber})` : ''}: ${o.totalQty} units · due ${o.expectedDelivery}${o.estimatedDelivery ? ' (est.)' : ''}`
       ).join('\n')
     : '📦 No pending orders — order now';
 
@@ -289,7 +289,7 @@ function formatCriticalAlert(product, coverWeeks) {
 
   const incomingLines = product.incomingOrders.length
     ? product.incomingOrders.map(o =>
-        `📦 Incoming ${o.freightMode.toUpperCase()}: ${o.totalQty} units · due ${o.expectedDelivery}`
+        `📦 Incoming ${o.freightMode.toUpperCase()}${o.poNumber ? ` (PO ${o.poNumber})` : ''}: ${o.totalQty} units · due ${o.expectedDelivery}${o.estimatedDelivery ? ' (est.)' : ''}`
       ).join('\n')
     : '📦 *No orders placed* — immediate action required';
 
@@ -374,6 +374,48 @@ async function runAnalysis() {
       if (!ordersByProduct[key]) ordersByProduct[key] = [];
       ordersByProduct[key].push(o);
     }
+
+    // 4b. Confirmed production orders — real POs count as incoming stock.
+    // Delivery: PO's own delivery_date, else order_date + supplier/global lead time (flagged estimated).
+    const { rows: poLineRows } = await pool.query(`
+      SELECT po.id AS po_id, po.po_number, po.freight_mode, po.delivery_date, po.order_date,
+             s.lead_time_sea AS sup_sea_weeks, s.lead_time_air AS sup_air_weeks,
+             pol.product_id, pol.quantities, pol.total_qty
+      FROM production_order_lines pol
+      JOIN production_orders po ON po.id = pol.order_id
+      LEFT JOIN suppliers s ON s.id = po.supplier_id
+      WHERE po.status = 'confirmed' AND pol.product_id IS NOT NULL
+      ORDER BY po.delivery_date ASC NULLS LAST
+    `);
+    let poIncomingCount = 0;
+    for (const line of poLineRows) {
+      let expected  = line.delivery_date;
+      let estimated = false;
+      if (!expected) {
+        const leadDays = line.freight_mode === 'air'
+          ? (line.sup_air_weeks ? line.sup_air_weeks * 7 : air_lead_days)
+          : (line.sup_sea_weeks ? line.sup_sea_weeks * 7 : sea_lead_days);
+        const d = new Date(line.order_date);
+        d.setDate(d.getDate() + leadDays);
+        expected  = d;
+        estimated = true;
+      }
+      const key = String(line.product_id);
+      if (!ordersByProduct[key]) ordersByProduct[key] = [];
+      ordersByProduct[key].push({
+        id:                 null,               // not a restock_orders row — no delete in planner
+        po_id:              line.po_id,
+        po_number:          line.po_number,
+        source:             'production_order',
+        freight_mode:       line.freight_mode,
+        expected_delivery:  expected,
+        total_qty:          line.total_qty,
+        qty_by_variant:     line.quantities || {},
+        estimated_delivery: estimated,
+      });
+      poIncomingCount++;
+    }
+    console.log(`[restock] Incoming: ${orderRows.length} planner orders + ${poIncomingCount} confirmed PO lines`);
 
     // 5. Alert log (already-sent alerts per product+type)
     const { rows: alertRows } = await pool.query(
@@ -462,6 +504,10 @@ async function runAnalysis() {
       const incoming = ordersByProduct[String(product.id)] || [];
       const incomingOrders = incoming.map(o => ({
         orderId:          o.id,
+        poId:             o.po_id || null,
+        poNumber:         o.po_number || null,
+        source:           o.source || 'restock_order',
+        estimatedDelivery: !!o.estimated_delivery,
         freightMode:      o.freight_mode,
         expectedDelivery: o.expected_delivery instanceof Date
           ? o.expected_delivery.toISOString().slice(0, 10)

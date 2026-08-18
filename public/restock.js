@@ -397,11 +397,17 @@ function expandRow(p, expanded) {
   // Incoming PO summary
   const incomingHtml = p.incomingOrders.length
     ? '<div style="font-size:0.82rem;margin-bottom:10px">' +
-      p.incomingOrders.map(o =>
-        `<span style="color:#4f46e5">📦 <strong>${o.freightMode.toUpperCase()}</strong> · ${o.totalQty} units · due ${String(o.expectedDelivery).slice(0,10)}</span>` +
-        `<button onclick="deleteOrder(${o.orderId});event.stopPropagation()" title="Delete this order"
-           style="margin-left:8px;background:none;border:none;color:#ef4444;font-size:0.8rem;cursor:pointer;padding:0 4px;font-weight:700">✕</button>`
-      ).join('<span style="color:#cbd5e1">  &nbsp;</span>') + '</div>'
+      p.incomingOrders.map(o => {
+        const due = String(o.expectedDelivery).slice(0,10) + (o.estimatedDelivery ? ' (est.)' : '');
+        if (o.source === 'production_order') {
+          return `<span style="color:#4f46e5">📦 <strong>${o.freightMode.toUpperCase()}</strong> · ${o.totalQty} units · due ${due}</span>` +
+            `<a href="/production-order.html?id=${o.poId}" onclick="event.stopPropagation()"
+               style="margin-left:6px;color:#15803d;background:#dcfce7;border-radius:99px;padding:1px 8px;font-size:0.72rem;font-weight:700;text-decoration:none">PO ${escHtml(String(o.poNumber || ''))}</a>`;
+        }
+        return `<span style="color:#4f46e5">📦 <strong>${o.freightMode.toUpperCase()}</strong> · ${o.totalQty} units · due ${due}</span>` +
+          `<button onclick="deleteOrder(${o.orderId});event.stopPropagation()" title="Delete this order"
+             style="margin-left:8px;background:none;border:none;color:#ef4444;font-size:0.8rem;cursor:pointer;padding:0 4px;font-weight:700">✕</button>`;
+      }).join('<span style="color:#cbd5e1">  &nbsp;</span>') + '</div>'
     : '';
 
   // Config override form
