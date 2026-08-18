@@ -310,8 +310,13 @@ function productRow(p, expanded) {
     : `<span class="rs-days grey">—</span>`;
 
   const incomingStr = p.incomingOrders.length
-    ? `<span style="color:#4f46e5;font-weight:700">${p.incomingOrders.reduce((s,o)=>s+o.totalQty,0)} units</span>`
-    : `<span style="color:#cbd5e1">none</span>`;
+    ? `<span style="color:#4f46e5;font-weight:700">${p.incomingOrders.reduce((s,o)=>s+o.totalQty,0)} units</span>` +
+      (p.incomingOrders.length > 1
+        ? `<span style="color:#64748b;font-size:0.76rem"> · ${p.incomingOrders.length} deliveries</span>` : '') +
+      ((p.recentlyReceived || []).length ? ' <span title="PO received in the last 7 days — check stock updated">✅</span>' : '')
+    : ((p.recentlyReceived || []).length
+        ? '<span title="PO received in the last 7 days — check stock updated">✅ received</span>'
+        : '<span style="color:#cbd5e1">none</span>');
 
   const adjVel = p.adjustedDailyVel || 0;
   const adjLift = adjVel - (p.avgDailyVel || 0);
@@ -416,19 +421,33 @@ function expandRow(p, expanded) {
     </table>`;
 
   // Incoming PO summary
-  const incomingHtml = p.incomingOrders.length
-    ? '<div style="font-size:0.82rem;margin-bottom:10px">' +
-      p.incomingOrders.map(o => {
-        const due = String(o.expectedDelivery).slice(0,10) + (o.estimatedDelivery ? ' (est.)' : '');
-        if (o.source === 'production_order') {
-          return `<span style="color:#4f46e5">📦 <strong>${o.freightMode.toUpperCase()}</strong> · ${o.totalQty} units · due ${due}</span>` +
-            `<a href="/production-order.html?id=${o.poId}" onclick="event.stopPropagation()"
-               style="margin-left:6px;color:#15803d;background:#dcfce7;border-radius:99px;padding:1px 8px;font-size:0.72rem;font-weight:700;text-decoration:none">PO ${escHtml(String(o.poNumber || ''))}</a>`;
-        }
-        return `<span style="color:#4f46e5">📦 <strong>${o.freightMode.toUpperCase()}</strong> · ${o.totalQty} units · due ${due}</span>` +
-          `<button onclick="deleteOrder(${o.orderId});event.stopPropagation()" title="Delete this order"
-             style="margin-left:8px;background:none;border:none;color:#ef4444;font-size:0.8rem;cursor:pointer;padding:0 4px;font-weight:700">✕</button>`;
-      }).join('<span style="color:#cbd5e1">  &nbsp;</span>') + '</div>'
+  // Incoming deliveries — one line each, earliest first
+  const sortedIncoming = [...p.incomingOrders].sort((a, b) =>
+    String(a.expectedDelivery).localeCompare(String(b.expectedDelivery)));
+  const incomingLines = sortedIncoming.map((o, idx) => {
+    const due = String(o.expectedDelivery).slice(0,10) + (o.estimatedDelivery ? ' (est.)' : '');
+    const nth = sortedIncoming.length > 1
+      ? `<span style="color:#94a3b8;font-size:0.72rem;font-weight:700;margin-right:6px">#${idx + 1}</span>` : '';
+    const core = `${nth}<span style="color:#4f46e5">📦 <strong>${o.freightMode.toUpperCase()}</strong> · <strong>${o.totalQty}</strong> units · due ${due}</span>`;
+    if (o.source === 'production_order') {
+      return `<div style="padding:2px 0">${core}
+        <a href="/production-order.html?id=${o.poId}" onclick="event.stopPropagation()"
+           style="margin-left:6px;color:#15803d;background:#dcfce7;border-radius:99px;padding:1px 8px;font-size:0.72rem;font-weight:700;text-decoration:none">PO ${escHtml(String(o.poNumber || ''))}</a></div>`;
+    }
+    return `<div style="padding:2px 0">${core}
+      <button onclick="deleteOrder(${o.orderId});event.stopPropagation()" title="Delete this order"
+         style="margin-left:8px;background:none;border:none;color:#ef4444;font-size:0.8rem;cursor:pointer;padding:0 4px;font-weight:700">✕</button></div>`;
+  });
+
+  // Recently received POs — expect a Shopify stock increase of ~totalQty
+  const receivedLines = (p.recentlyReceived || []).map(r =>
+    `<div style="padding:2px 0;color:#15803d">✅ PO
+      <a href="/production-order.html?id=${r.poId}" onclick="event.stopPropagation()"
+         style="color:#15803d;font-weight:700">${escHtml(String(r.poNumber || ''))}</a>
+      received ${String(r.receivedAt).slice(0,10)} — expect Shopify stock <strong>+${r.totalQty}</strong> units (verify updated)</div>`);
+
+  const incomingHtml = (incomingLines.length || receivedLines.length)
+    ? `<div style="font-size:0.82rem;margin-bottom:10px">${incomingLines.join('')}${receivedLines.join('')}</div>`
     : '';
 
   // Config override form

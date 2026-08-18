@@ -456,6 +456,23 @@ async function runAnalysis() {
       console.error('[restock] PO incoming merge failed — continuing without:', poErr.message);
     }
 
+    // 4c. Recently received POs (last 7 days) — surface as "expect Shopify stock
+    // increase" flags so a missed inventory update is visible in the planner.
+    let recentReceivedRaw = [];
+    try {
+      const rr = await pool.query(`
+        SELECT po.id AS po_id, po.po_number, po.updated_at,
+               pol.product_id, pol.product_name, pol.product_code, pol.total_qty
+        FROM production_order_lines pol
+        JOIN production_orders po ON po.id = pol.order_id
+        WHERE po.status = 'received' AND po.updated_at > NOW() - INTERVAL '7 days'
+        ORDER BY po.updated_at DESC`);
+      recentReceivedRaw = rr.rows;
+    } catch (rrErr) {
+      console.error('[restock] Recently-received query failed:', rrErr.message);
+    }
+    const recentReceivedByProduct = {};
+
     // 5. Alert log (already-sent alerts per product+type)
     const { rows: alertRows } = await pool.query(
       'SELECT product_id, alert_type FROM restock_alerts_log'
@@ -506,6 +523,37 @@ async function runAnalysis() {
     }
     } catch (poErr) {
       console.error('[restock] PO name/SKU resolution failed — continuing without:', poErr.message);
+    }
+
+    // 7c. Resolve recently-received PO lines to products (same matching rules)
+    try {
+      const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const byTitle = {};
+      for (const p of products) byTitle[norm(p.title)] = p;
+      for (const line of recentReceivedRaw) {
+        let pid = line.product_id ? String(line.product_id) : null;
+        if (!pid && line.product_name) {
+          const m = byTitle[norm(line.product_name)];
+          if (m) pid = String(m.id);
+        }
+        if (!pid && line.product_code) {
+          const c = String(line.product_code).trim().toUpperCase();
+          if (c.length >= 3) {
+            const m = products.find(p => (p.variants || []).some(v => v.sku && v.sku.toUpperCase().startsWith(c)));
+            if (m) pid = String(m.id);
+          }
+        }
+        if (!pid) continue;
+        if (!recentReceivedByProduct[pid]) recentReceivedByProduct[pid] = [];
+        recentReceivedByProduct[pid].push({
+          poId:       line.po_id,
+          poNumber:   line.po_number,
+          totalQty:   line.total_qty,
+          receivedAt: line.updated_at instanceof Date ? line.updated_at.toISOString() : String(line.updated_at),
+        });
+      }
+    } catch (rrErr) {
+      console.error('[restock] Recently-received resolution failed:', rrErr.message);
     }
     console.log(`[restock] PO incoming — linked: ${poResolutionDebug.linked}, ` +
       `by name: ${poResolutionDebug.resolved_by_name}, by SKU: ${poResolutionDebug.resolved_by_sku}, ` +
@@ -768,6 +816,7 @@ async function runAnalysis() {
         airAlertSent,
         criticalAlertSent,
         incomingOrders,
+        recentlyReceived: recentReceivedByProduct[String(product.id)] || [],
         variants,
       };
 

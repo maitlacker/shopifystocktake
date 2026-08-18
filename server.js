@@ -7144,6 +7144,12 @@ app.post('/api/stock-receipts/:id/complete', requireAuth, async (req, res) => {
         );
         console.log(`[srf] Receipt #${id} complete → PO ${po.po_number || po.id} marked received`);
       }
+      // Refresh the restock analysis so the PO drops out of incoming and
+      // live Shopify stock is re-read — fire and forget
+      if (receivedPOs.length) {
+        restockSync.runAnalysis().catch(err =>
+          console.error('[srf] Post-receipt restock refresh failed:', err.message));
+      }
     } catch (poErr) {
       console.error('[srf] PO cross-reference failed:', poErr.message);
     }
