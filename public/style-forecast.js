@@ -161,8 +161,10 @@
 
     /* Reference period */
     F('sf-ref-badge').innerHTML = d.compare ? '<span class="sf-badge proxy">comparison style</span>' : '';
+    const ageHours = d.computed_at ? Math.round((Date.now() - new Date(d.computed_at)) / 3600000) : 0;
     F('sf-ref-sub').textContent =
-      `${new Date(d.window.start).toLocaleDateString('en-AU')} → ${new Date(d.window.end).toLocaleDateString('en-AU')} (${d.window.period_days} days)`;
+      `${new Date(d.window.start).toLocaleDateString('en-AU')} → ${new Date(d.window.end).toLocaleDateString('en-AU')} (${d.window.period_days} days)` +
+      (ageHours >= 1 ? ` · data scanned ${ageHours}h ago (auto-refreshes after 24h)` : ' · freshly scanned');
     F('sf-ref-tiles').innerHTML = `
       <div class="sf-tile"><div class="sf-tile-num">${fmtNum(d.ref_period.units)}</div><div class="sf-tile-label">Units Sold</div></div>
       <div class="sf-tile"><div class="sf-tile-num">${fmtMoney(d.ref_period.revenue)}</div><div class="sf-tile-label">Revenue</div></div>

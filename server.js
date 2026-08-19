@@ -7975,6 +7975,21 @@ async function computeStyleForecast(q, job) {
     let base = styleForecastCache[cacheKey] && (Date.now() - styleForecastCache[cacheKey].at < 30 * 60 * 1000)
       ? styleForecastCache[cacheKey].data : null;
 
+    // Persistent cache — survives deploys. Historical sales never change; the
+    // current-velocity/stock portion is acceptable up to 24h old for planning.
+    if (!base) {
+      const { rows: dbCache } = await pool.query(
+        `SELECT data, computed_at FROM style_forecast_cache
+         WHERE cache_key = $1 AND computed_at > NOW() - INTERVAL '24 hours'`,
+        [cacheKey]
+      );
+      if (dbCache.length) {
+        base = dbCache[0].data;
+        base.computed_at = dbCache[0].computed_at;
+        styleForecastCache[cacheKey] = { at: Date.now(), data: base };
+      }
+    }
+
     if (!base) {
       if (job) job.progress = 'Loading product details…';
       // Product (and optional comparison product) with current stock per size
@@ -8068,7 +8083,15 @@ async function computeStyleForecast(q, job) {
         daily_curve: dailyCurve,
         incoming: { by_size: incomingBySize, total: incomingTotal, pos: poRows.map(p => ({ po_number: p.po_number, delivery_date: p.delivery_date, total_qty: p.total_qty })) },
       };
+      base.computed_at = new Date().toISOString();
       styleForecastCache[cacheKey] = { at: Date.now(), data: base };
+      await pool.query(
+        `INSERT INTO style_forecast_cache (cache_key, data, computed_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (cache_key) DO UPDATE SET data = EXCLUDED.data, computed_at = NOW()`,
+        [cacheKey, JSON.stringify(base)]
+      );
+      await pool.query(`DELETE FROM style_forecast_cache WHERE computed_at < NOW() - INTERVAL '14 days'`);
     }
 
     // ── Model (computed fresh each request so growth %/event inputs apply) ──

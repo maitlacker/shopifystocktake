@@ -941,6 +941,12 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_incorrect_order_notes_order
       ON incorrect_order_notes(order_id, added_at DESC);
 
+    CREATE TABLE IF NOT EXISTS style_forecast_cache (
+      cache_key   TEXT PRIMARY KEY,
+      data        JSONB NOT NULL,
+      computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS barcoding_suppliers (
       prefix                 TEXT PRIMARY KEY,
       supplier_name          TEXT,
