@@ -89,23 +89,50 @@
 
   async function runForecast() {
     if (!targetProduct) { alert('Pick a style to forecast first.'); return; }
-    const params = new URLSearchParams({
+    const params = {
       product_id: targetProduct.id,
       start: F('sf-start').value,
       end: F('sf-end').value,
       growth: F('sf-growth').value || '0',
       event_start: F('sf-event-start').value,
-    });
-    if (F('sf-event-days').value) params.set('event_days', F('sf-event-days').value);
-    if (compareProduct) params.set('compare_product_id', compareProduct.id);
+    };
+    if (F('sf-event-days').value) params.event_days = F('sf-event-days').value;
+    if (compareProduct) params.compare_product_id = compareProduct.id;
 
     F('sf-results').style.display = 'none';
     F('sf-loading').style.display = '';
+    F('sf-loading').textContent = 'Starting forecast…';
     F('sf-run').disabled = true;
     try {
-      const res = await fetch(`/api/style-forecast?${params}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Forecast failed');
+      // Kick off the background job, then poll — BF-window scans take minutes
+      const kick = await fetch('/api/style-forecast/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      const { job, error } = await kick.json();
+      if (!kick.ok) throw new Error(error || 'Could not start forecast');
+
+      const data = await new Promise((resolve, reject) => {
+        let attempts = 0;
+        const poll = setInterval(async () => {
+          attempts++;
+          try {
+            const r = await fetch(`/api/style-forecast/job/${job}`);
+            const s = await r.json();
+            if (!r.ok) { clearInterval(poll); return reject(new Error(s.error || 'Job lost')); }
+            if (s.running) {
+              F('sf-loading').textContent = s.progress || 'Working…';
+              return;
+            }
+            clearInterval(poll);
+            if (s.error) return reject(new Error(s.error));
+            resolve(s.result);
+          } catch (_) {}
+          if (attempts >= 150) { clearInterval(poll); reject(new Error('Timed out after 10 minutes')); }
+        }, 4000);
+      });
+
       lastAnalysis = data;
       renderResults(data);
       F('sf-results').style.display = '';

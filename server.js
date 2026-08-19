@@ -7917,10 +7917,11 @@ app.post('/api/incorrect-orders/:id/notify', requireAuth, async (req, res) => {
 
 const styleForecastCache = {}; // key → { at, data }
 
-async function sfFetchOrderLines(startIso, endIso, productIds) {
+async function sfFetchOrderLines(startIso, endIso, productIds, onProgress) {
   // Returns line-item rows for the given products within the window
   const wanted = new Set(productIds.map(String));
   const rows = [];
+  let scanned = 0;
   let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json` +
     `?status=any&created_at_min=${startIso}&created_at_max=${endIso}` +
     `&limit=250&fields=id,created_at,cancelled_at,line_items`;
@@ -7932,6 +7933,8 @@ async function sfFetchOrderLines(startIso, endIso, productIds) {
     }
     if (!r.ok) throw new Error(`Shopify orders API ${r.status}`);
     const data = await r.json();
+    scanned += (data.orders || []).length;
+    if (onProgress) onProgress(scanned);
     for (const o of (data.orders || [])) {
       if (o.cancelled_at) continue;
       for (const li of (o.line_items || [])) {
@@ -7952,28 +7955,28 @@ async function sfFetchOrderLines(startIso, endIso, productIds) {
   return rows;
 }
 
-app.get('/api/style-forecast', requireAuth, async (req, res) => {
+async function computeStyleForecast(q, job) {
   const DAY = 86400000;
   const PRE_DAYS = 42;
-  try {
-    const productId  = String(req.query.product_id || '');
-    const compareId  = String(req.query.compare_product_id || '');
-    const start      = new Date(req.query.start);
-    const end        = new Date(req.query.end);
-    const growthPct  = parseFloat(req.query.growth || 0);
-    const eventStart = req.query.event_start ? new Date(req.query.event_start) : null;
+    const productId  = String(q.product_id || '');
+    const compareId  = String(q.compare_product_id || '');
+    const start      = new Date(q.start);
+    const end        = new Date(q.end);
+    const growthPct  = parseFloat(q.growth || 0);
+    const eventStart = q.event_start ? new Date(q.event_start) : null;
     if (!productId || isNaN(start) || isNaN(end) || end <= start) {
-      return res.status(400).json({ error: 'product_id, start and end (start < end) required' });
+      throw new Error('product_id, start and end (start < end) required');
     }
     end.setHours(23, 59, 59, 999);
     const periodDays = Math.max(1, Math.round((end - start) / DAY));
-    const eventDays  = parseInt(req.query.event_days) || periodDays;
+    const eventDays  = parseInt(q.event_days) || periodDays;
 
     const cacheKey = [productId, compareId, start.toISOString(), end.toISOString()].join('|');
     let base = styleForecastCache[cacheKey] && (Date.now() - styleForecastCache[cacheKey].at < 30 * 60 * 1000)
       ? styleForecastCache[cacheKey].data : null;
 
     if (!base) {
+      if (job) job.progress = 'Loading product details…';
       // Product (and optional comparison product) with current stock per size
       const fetchProduct = async (id) => {
         const r = await fetch(
@@ -7992,10 +7995,15 @@ app.get('/api/style-forecast', requireAuth, async (req, res) => {
       const preStart = new Date(start.getTime() - PRE_DAYS * DAY);
       const now = new Date();
       const curStart = new Date(now.getTime() - PRE_DAYS * DAY);
+      let refScanned = 0, curScanned = 0;
+      const reportProgress = () => {
+        if (job) job.progress = `Scanning order history… ${(refScanned + curScanned).toLocaleString()} orders read`;
+      };
       const [refLines, curLines] = await Promise.all([
-        sfFetchOrderLines(preStart.toISOString(), end.toISOString(), [refProductId]),
-        sfFetchOrderLines(curStart.toISOString(), now.toISOString(), [productId]),
+        sfFetchOrderLines(preStart.toISOString(), end.toISOString(), [refProductId], n => { refScanned = n; reportProgress(); }),
+        sfFetchOrderLines(curStart.toISOString(), now.toISOString(), [productId], n => { curScanned = n; reportProgress(); }),
       ]);
+      if (job) job.progress = 'Computing forecast…';
 
       const sizeAgg = (lines) => {
         const m = {};
@@ -8114,7 +8122,7 @@ app.get('/api/style-forecast', requireAuth, async (req, res) => {
       return String(a.size).localeCompare(String(b.size));
     });
 
-    res.json({
+    return {
       ...base,
       model: {
         growth_pct: growthPct,
@@ -8131,8 +8139,31 @@ app.get('/api/style-forecast', requireAuth, async (req, res) => {
         insufficient_history: base.ref_period.units < 10,
       },
       sizes,
-    });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    };
+}
+
+// Long scans (BF windows) exceed request timeouts — run as a background job and poll
+const sfJobs = {};
+
+app.post('/api/style-forecast/run', requireAuth, (req, res) => {
+  // Sweep jobs older than 30 minutes
+  for (const [id, j] of Object.entries(sfJobs)) {
+    if (Date.now() - j.startedAt > 30 * 60 * 1000) delete sfJobs[id];
+  }
+  const jobId = 'sf' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const job = { running: true, error: null, result: null, progress: 'Starting…', startedAt: Date.now() };
+  sfJobs[jobId] = job;
+  computeStyleForecast(req.body || {}, job)
+    .then(result => { job.result = result; })
+    .catch(err => { job.error = err.message; })
+    .finally(() => { job.running = false; });
+  res.json({ job: jobId });
+});
+
+app.get('/api/style-forecast/job/:id', requireAuth, (req, res) => {
+  const j = sfJobs[req.params.id];
+  if (!j) return res.status(404).json({ error: 'Unknown or expired job — run the forecast again' });
+  res.json({ running: j.running, error: j.error, progress: j.progress, result: j.running ? null : j.result });
 });
 
 app.post('/api/style-forecast/insight', requireAuth, async (req, res) => {
