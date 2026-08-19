@@ -80,6 +80,46 @@ function updateArchiveBtn() {
   const n = selectedIds.size;
   btn.style.display = n ? '' : 'none';
   btn.textContent = viewArchived ? `Unarchive Selected (${n})` : `Archive Selected (${n})`;
+
+  // Mark Received applies to confirmed (non-archived) orders only
+  const rbtn = document.getElementById('po-receive-btn');
+  if (rbtn) {
+    const confirmedSelected = [...selectedIds].filter(id => {
+      const o = allOrders.find(x => x.id === id);
+      return o && o.status === 'confirmed';
+    }).length;
+    rbtn.style.display = (!viewArchived && confirmedSelected) ? '' : 'none';
+    rbtn.textContent = `Mark Received (${confirmedSelected})`;
+  }
+}
+
+async function markReceivedSelected() {
+  const ids = [...selectedIds].filter(id => {
+    const o = allOrders.find(x => x.id === id);
+    return o && o.status === 'confirmed';
+  });
+  if (!ids.length) return;
+  if (!confirm(`Mark ${ids.length} confirmed PO${ids.length !== 1 ? 's' : ''} as received? They will drop out of the Restock Planner's incoming stock.`)) return;
+  const btn = document.getElementById('po-receive-btn');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/production-orders/mark-received', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Failed');
+    selectedIds.clear();
+    const selectAll = document.getElementById('po-select-all');
+    if (selectAll) selectAll.checked = false;
+    updateArchiveBtn();
+    await loadOrders();
+  } catch (err) {
+    alert('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function archiveSelected() {

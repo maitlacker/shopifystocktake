@@ -1710,6 +1710,25 @@ app.post('/api/production-orders/archive', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Bulk mark received — confirmed orders only (draft/cancelled are skipped)
+app.post('/api/production-orders/mark-received', requireAuth, async (req, res) => {
+  const ids = (req.body.ids || []).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'ids required' });
+  try {
+    const { rowCount } = await pool.query(
+      `UPDATE production_orders SET status='received', updated_at=NOW()
+       WHERE id = ANY($1::int[]) AND status = 'confirmed'`,
+      [ids]
+    );
+    // Refresh the planner so the POs drop out of incoming
+    if (rowCount) {
+      restockSync.runAnalysis().catch(err =>
+        console.error('[po] Post-receive restock refresh failed:', err.message));
+    }
+    res.json({ ok: true, marked_received: rowCount, skipped: ids.length - rowCount });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/api/production-orders/unarchive', requireAuth, async (req, res) => {
   const ids = (req.body.ids || []).map(Number).filter(Boolean);
   if (!ids.length) return res.status(400).json({ error: 'ids required' });
