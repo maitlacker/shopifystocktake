@@ -7910,6 +7910,279 @@ app.post('/api/incorrect-orders/:id/notify', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Style Forecast (Reports) ────────────────────────────────────────
+// Event-demand forecasting for one style: reference-period history (own or
+// comparison style), demand amplification, current momentum, per-size order
+// scenarios, and an AI read on the numbers.
+
+const styleForecastCache = {}; // key → { at, data }
+
+async function sfFetchOrderLines(startIso, endIso, productIds) {
+  // Returns line-item rows for the given products within the window
+  const wanted = new Set(productIds.map(String));
+  const rows = [];
+  let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json` +
+    `?status=any&created_at_min=${startIso}&created_at_max=${endIso}` +
+    `&limit=250&fields=id,created_at,cancelled_at,line_items`;
+  while (url) {
+    const r = await fetch(url, { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } });
+    if (r.status === 429) {
+      await new Promise(w => setTimeout(w, parseFloat(r.headers.get('retry-after') || '2') * 1000));
+      continue;
+    }
+    if (!r.ok) throw new Error(`Shopify orders API ${r.status}`);
+    const data = await r.json();
+    for (const o of (data.orders || [])) {
+      if (o.cancelled_at) continue;
+      for (const li of (o.line_items || [])) {
+        if (!wanted.has(String(li.product_id || ''))) continue;
+        rows.push({
+          product_id: String(li.product_id),
+          size: li.variant_title || '—',
+          qty: li.quantity || 0,
+          price: parseFloat(li.price || 0),
+          created_at: o.created_at,
+        });
+      }
+    }
+    const link = r.headers.get('link');
+    const next = link && link.match(/<([^>]+)>;\s*rel="next"/);
+    url = next ? next[1] : null;
+  }
+  return rows;
+}
+
+app.get('/api/style-forecast', requireAuth, async (req, res) => {
+  const DAY = 86400000;
+  const PRE_DAYS = 42;
+  try {
+    const productId  = String(req.query.product_id || '');
+    const compareId  = String(req.query.compare_product_id || '');
+    const start      = new Date(req.query.start);
+    const end        = new Date(req.query.end);
+    const growthPct  = parseFloat(req.query.growth || 0);
+    const eventStart = req.query.event_start ? new Date(req.query.event_start) : null;
+    if (!productId || isNaN(start) || isNaN(end) || end <= start) {
+      return res.status(400).json({ error: 'product_id, start and end (start < end) required' });
+    }
+    end.setHours(23, 59, 59, 999);
+    const periodDays = Math.max(1, Math.round((end - start) / DAY));
+    const eventDays  = parseInt(req.query.event_days) || periodDays;
+
+    const cacheKey = [productId, compareId, start.toISOString(), end.toISOString()].join('|');
+    let base = styleForecastCache[cacheKey] && (Date.now() - styleForecastCache[cacheKey].at < 30 * 60 * 1000)
+      ? styleForecastCache[cacheKey].data : null;
+
+    if (!base) {
+      // Product (and optional comparison product) with current stock per size
+      const fetchProduct = async (id) => {
+        const r = await fetch(
+          `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products/${id}.json?fields=id,title,images,variants,published_at`,
+          { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } }
+        );
+        if (!r.ok) throw new Error(`Product ${id}: Shopify ${r.status}`);
+        return (await r.json()).product;
+      };
+      const target  = await fetchProduct(productId);
+      const compare = compareId ? await fetchProduct(compareId) : null;
+      const refProductId = compareId || productId;
+
+      // Window scans: [start - 42d, end] for the reference product,
+      // [now - 42d, now] for the target's current momentum
+      const preStart = new Date(start.getTime() - PRE_DAYS * DAY);
+      const now = new Date();
+      const curStart = new Date(now.getTime() - PRE_DAYS * DAY);
+      const [refLines, curLines] = await Promise.all([
+        sfFetchOrderLines(preStart.toISOString(), end.toISOString(), [refProductId]),
+        sfFetchOrderLines(curStart.toISOString(), now.toISOString(), [productId]),
+      ]);
+
+      const sizeAgg = (lines) => {
+        const m = {};
+        let units = 0, revenue = 0;
+        for (const l of lines) {
+          if (!m[l.size]) m[l.size] = { units: 0, revenue: 0 };
+          m[l.size].units += l.qty;
+          m[l.size].revenue += l.price * l.qty;
+          units += l.qty;
+          revenue += l.price * l.qty;
+        }
+        return { bySize: m, units, revenue };
+      };
+
+      const refPeriodLines = refLines.filter(l => new Date(l.created_at) >= start);
+      const refPreLines    = refLines.filter(l => new Date(l.created_at) <  start);
+      const refPeriod = sizeAgg(refPeriodLines);
+      const refPre    = sizeAgg(refPreLines);
+      const current   = sizeAgg(curLines);
+
+      // Daily curve across the reference period (for the UI)
+      const dailyCurve = {};
+      refPeriodLines.forEach(l => {
+        const d = String(l.created_at).slice(0, 10);
+        dailyCurve[d] = (dailyCurve[d] || 0) + l.qty;
+      });
+
+      // Incoming confirmed POs for the target product, per size
+      const { rows: poRows } = await pool.query(`
+        SELECT po.po_number, po.delivery_date, pol.quantities, pol.total_qty
+        FROM production_order_lines pol
+        JOIN production_orders po ON po.id = pol.order_id
+        WHERE po.status = 'confirmed' AND po.archived_at IS NULL
+          AND pol.product_id = $1
+          AND (po.delivery_date IS NULL OR po.delivery_date > NOW() - INTERVAL '7 days')`,
+        [productId]
+      );
+      const incomingBySize = {};
+      let incomingTotal = 0;
+      for (const r2 of poRows) {
+        for (const [k, v] of Object.entries(r2.quantities || {})) {
+          incomingBySize[k] = (incomingBySize[k] || 0) + (parseInt(v) || 0);
+          incomingTotal += parseInt(v) || 0;
+        }
+      }
+
+      base = {
+        target: {
+          product_id: target.id, title: target.title,
+          image: target.images?.[0]?.src || null,
+          published_at: target.published_at,
+          stock_by_size: Object.fromEntries(
+            (target.variants || []).map(v => [v.title === 'Default Title' ? '—' : v.title, Math.max(0, v.inventory_quantity || 0)])
+          ),
+        },
+        compare: compare ? { product_id: compare.id, title: compare.title, image: compare.images?.[0]?.src || null } : null,
+        ref_product_id: refProductId,
+        window: { start: start.toISOString(), end: end.toISOString(), period_days: periodDays, pre_days: PRE_DAYS },
+        ref_period: refPeriod,
+        ref_pre: refPre,
+        current,
+        daily_curve: dailyCurve,
+        incoming: { by_size: incomingBySize, total: incomingTotal, pos: poRows.map(p => ({ po_number: p.po_number, delivery_date: p.delivery_date, total_qty: p.total_qty })) },
+      };
+      styleForecastCache[cacheKey] = { at: Date.now(), data: base };
+    }
+
+    // ── Model (computed fresh each request so growth %/event inputs apply) ──
+    const refPeriodVel = base.ref_period.units / base.window.period_days;
+    const refPreVel    = base.ref_pre.units / base.window.pre_days;
+    const currentVel   = base.current.units / PRE_DAYS;
+    const amplification = refPreVel > 0 ? refPeriodVel / refPreVel : null;
+    const momentum      = refPreVel > 0 ? currentVel / refPreVel : null;
+
+    const growth = 1 + (growthPct / 100);
+    // Predicted event-period daily velocity = today's demand level, lifted by
+    // the amplification the reference style showed last time, plus growth
+    const predictedVel   = amplification !== null ? currentVel * amplification * growth : null;
+    const predictedUnits = predictedVel !== null ? predictedVel * eventDays : null;
+
+    // Size mix: how sizes actually sold during the reference event (fallback: current mix)
+    const mixSource = base.ref_period.units >= 10 ? base.ref_period.bySize : base.current.bySize;
+    const mixTotal  = Object.values(mixSource).reduce((s, v) => s + v.units, 0);
+
+    const daysToEvent = eventStart ? Math.max(0, Math.round((eventStart - Date.now()) / DAY)) : 0;
+
+    const allSizes = [...new Set([
+      ...Object.keys(base.target.stock_by_size),
+      ...Object.keys(mixSource),
+    ])];
+    const SCENARIOS = { conservative: 0.8, expected: 1.0, aggressive: 1.2 };
+    const sizes = allSizes.map(size => {
+      const mixShare   = mixTotal > 0 ? (mixSource[size]?.units || 0) / mixTotal : 0;
+      const curSizeVel = (base.current.bySize[size]?.units || 0) / PRE_DAYS;
+      const depletion  = Math.round(curSizeVel * daysToEvent);
+      const stock      = base.target.stock_by_size[size] || 0;
+      const incoming   = base.incoming.by_size[size] || 0;
+      const row = {
+        size,
+        ref_units: base.ref_period.bySize[size]?.units || 0,
+        current_42d: base.current.bySize[size]?.units || 0,
+        stock, incoming, depletion,
+        mix_pct: Math.round(mixShare * 1000) / 10,
+      };
+      for (const [name, mult] of Object.entries(SCENARIOS)) {
+        const demand = predictedUnits !== null ? predictedUnits * mixShare * mult : null;
+        row[name] = demand !== null
+          ? Math.max(0, Math.ceil(demand + depletion - stock - incoming))
+          : null;
+        row[`${name}_demand`] = demand !== null ? Math.round(demand) : null;
+      }
+      return row;
+    }).sort((a, b) => {
+      const na = parseFloat(a.size), nb = parseFloat(b.size);
+      if (!isNaN(na) && !isNaN(nb)) return na - nb;
+      return String(a.size).localeCompare(String(b.size));
+    });
+
+    res.json({
+      ...base,
+      model: {
+        growth_pct: growthPct,
+        event_days: eventDays,
+        event_start: eventStart ? eventStart.toISOString().slice(0, 10) : null,
+        days_to_event: daysToEvent,
+        ref_period_vel: Math.round(refPeriodVel * 100) / 100,
+        ref_pre_vel: Math.round(refPreVel * 100) / 100,
+        current_vel: Math.round(currentVel * 100) / 100,
+        amplification: amplification !== null ? Math.round(amplification * 100) / 100 : null,
+        momentum: momentum !== null ? Math.round(momentum * 100) / 100 : null,
+        predicted_units: predictedUnits !== null ? Math.round(predictedUnits) : null,
+        mix_from: base.ref_period.units >= 10 ? 'reference_period' : 'current_sales',
+        insufficient_history: base.ref_period.units < 10,
+      },
+      sizes,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/style-forecast/insight', requireAuth, async (req, res) => {
+  if (!anthropicClient) return res.status(503).json({ error: 'ANTHROPIC_API_KEY not configured' });
+  try {
+    const a = req.body.analysis;
+    if (!a || !a.model) return res.status(400).json({ error: 'analysis payload required' });
+
+    const prompt = `You are an inventory planning analyst for The Self Styler, an Australian womenswear e-commerce retailer, planning stock for this year's Black Friday sales period.
+
+Business context and priorities, in order:
+1. BIGGEST risk: over-ordering stock that won't clear after the event.
+2. Second risk: under-ordering so customers can't buy during the event.
+
+The style being planned: "${a.target.title}"${a.compare ? ` (no usable history of its own — using "${a.compare.title}" as the comparison/reference style)` : ''}.
+
+DATA (JSON):
+${JSON.stringify({
+  reference_window: a.window,
+  reference_period_sales: { units: a.ref_period.units, revenue: Math.round(a.ref_period.revenue), by_size: a.ref_period.bySize },
+  reference_preperiod_velocity_per_day: a.model.ref_pre_vel,
+  reference_period_velocity_per_day: a.model.ref_period_vel,
+  demand_amplification: a.model.amplification,
+  current_velocity_per_day_last_42d: a.model.current_vel,
+  momentum_vs_last_year_preperiod: a.model.momentum,
+  growth_assumption_pct: a.model.growth_pct,
+  predicted_event_units: a.model.predicted_units,
+  event: { start: a.model.event_start, days: a.model.event_days, days_until: a.model.days_to_event },
+  current_stock_by_size: a.target.stock_by_size,
+  incoming_pos: a.incoming,
+  per_size_scenarios: a.sizes,
+  daily_curve_reference_period: a.daily_curve,
+}, null, 1)}
+
+Write a concise planning read (plain text, short paragraphs and dot points, no markdown headers):
+1. MOMENTUM READ — is this style trending above or below where the reference was before last year's event? What does that imply for the growth assumption?
+2. DEMAND SHAPE — anything notable in the reference daily curve (early spike vs late) and size mix; call out sizes that look risky (fringe sizes with thin history are where over-ordering hides).
+3. RECOMMENDATION — which scenario (conservative/expected/aggressive) to order, per the priorities above; state the total units and any per-size adjustments you'd make by hand. If momentum is weak, say so bluntly.
+4. WATCH-OUTS — data caveats (e.g. comparison-style proxy, stockouts suppressing measured velocity, thin sample sizes).
+Keep it under 400 words. Be direct and numeric.`;
+
+    const message = await anthropicClient.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 1500,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    res.json({ insight: message.content[0]?.text || '', model_used: 'claude-sonnet-4-5' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Barcoding / GTIN Prep (Scanner) ─────────────────────────────────
 
 // Separate cache from productsCache: includes draft + archived products

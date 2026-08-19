@@ -23,6 +23,7 @@
     {
       label: 'Reports',
       children: [
+        { label: 'Style Forecast',        href: '/style-forecast.html' },
         { label: 'Sales Velocity',        href: '/velocity.html' },
         { label: 'Velocity Chart',        href: '/velocity-chart.html' },
         { label: 'Sell-Through',          href: '/sell-through.html' },

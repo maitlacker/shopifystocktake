@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Style Forecast – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    .sf-page-title { font-size: 1.6rem; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
+    .sf-sub { color: #64748b; font-size: 0.88rem; margin-bottom: 22px; }
+
+    .sf-card {
+      background: #fff;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 22px;
+      margin-bottom: 20px;
+    }
+    .sf-card-title { font-size: 1.02rem; font-weight: 700; color: #1e293b; margin-bottom: 4px;
+      display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .sf-card-sub { font-size: 0.82rem; color: #64748b; margin-bottom: 14px; }
+
+    .sf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+    .sf-field label {
+      display: block; font-size: 0.74rem; font-weight: 600; color: #64748b;
+      text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 5px;
+    }
+    .sf-field input {
+      width: 100%; padding: 9px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px;
+      font-size: 0.92rem; color: #1e293b; outline: none; box-sizing: border-box; background: #fff;
+    }
+    .sf-field input:focus { border-color: #4f46e5; }
+
+    /* Product pickers */
+    .sf-picker { position: relative; }
+    .sf-picker .sf-dd {
+      position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+      background: #fff; border: 1.5px solid #e2e8f0; border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12); max-height: 300px; overflow-y: auto;
+      z-index: 60; display: none;
+    }
+    .sf-picker .sf-dd.open { display: block; }
+    .sf-dd-opt { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; border-bottom: 1px solid #f1f5f9; }
+    .sf-dd-opt:hover { background: #f8fafc; }
+    .sf-dd-opt img { width: 34px; height: 34px; border-radius: 6px; object-fit: cover; background: #f1f5f9; }
+    .sf-dd-msg { padding: 12px; color: #94a3b8; text-align: center; font-size: 0.86rem; }
+    .sf-chip {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 10px;
+      padding: 6px 10px; margin-top: 8px; font-size: 0.88rem; font-weight: 600; color: #1e293b;
+    }
+    .sf-chip img { width: 28px; height: 28px; border-radius: 5px; object-fit: cover; }
+    .sf-chip button { border: none; background: none; color: #94a3b8; cursor: pointer; font-size: 0.95rem; }
+    .sf-chip button:hover { color: #b91c1c; }
+
+    .sf-metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    .sf-tile { background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 13px; text-align: center; }
+    .sf-tile-num { font-size: 1.35rem; font-weight: 700; color: #1e293b; }
+    .sf-tile-num.up { color: #15803d; }
+    .sf-tile-num.down { color: #b91c1c; }
+    .sf-tile-label { font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 3px; }
+
+    .sf-table-wrap { overflow-x: auto; }
+    .sf-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+    .sf-table th {
+      text-align: right; padding: 8px 11px; font-size: 0.7rem; font-weight: 600;
+      color: #64748b; text-transform: uppercase; letter-spacing: 0.04em;
+      border-bottom: 2px solid #e2e8f0; white-space: nowrap;
+    }
+    .sf-table th:first-child { text-align: left; }
+    .sf-table td { padding: 9px 11px; border-bottom: 1px solid #f1f5f9; text-align: right; white-space: nowrap; }
+    .sf-table td:first-child { text-align: left; font-weight: 600; color: #1e293b; }
+    .sf-table tfoot td { font-weight: 700; border-top: 2px solid #e2e8f0; border-bottom: none; background: #f8fafc; }
+    .sf-order-cell { font-weight: 700; }
+    .sf-order-cell.conservative { color: #15803d; }
+    .sf-order-cell.expected { color: #1d4ed8; }
+    .sf-order-cell.aggressive { color: #7c3aed; }
+
+    .sf-note {
+      background: #fffbeb; border: 1.5px solid #fde68a; border-radius: 10px;
+      padding: 12px 14px; font-size: 0.86rem; color: #92400e; margin-bottom: 14px;
+    }
+    .sf-formula { font-size: 0.78rem; color: #94a3b8; margin-top: 10px; line-height: 1.5; }
+
+    .sf-insight {
+      white-space: pre-wrap; font-size: 0.92rem; color: #1e293b; line-height: 1.6;
+      background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 18px;
+    }
+    .sf-loading { color: #94a3b8; padding: 30px; text-align: center; }
+    .sf-badge {
+      display: inline-block; padding: 3px 10px; border-radius: 99px;
+      font-size: 0.74rem; font-weight: 700;
+    }
+    .sf-badge.proxy { background: #fef3c7; color: #92400e; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main class="container" style="padding-top:28px;max-width:1080px">
+
+    <div class="sf-page-title">Style Forecast</div>
+    <div class="sf-sub">
+      Plan event stock (e.g. Black Friday) for one style: last period's sales × your growth assumption,
+      adjusted for how the style is trending right now — minus what you already have and what's on order.
+    </div>
+
+    <!-- Setup -->
+    <div class="sf-card">
+      <div class="sf-card-title">Setup</div>
+      <div class="sf-grid" style="grid-template-columns:1fr 1fr;margin-bottom:14px">
+        <div class="sf-field sf-picker">
+          <label>Style to Forecast *</label>
+          <input id="sf-target-search" type="text" placeholder="Search Shopify styles…" autocomplete="off" />
+          <div class="sf-dd" id="sf-target-dd"></div>
+          <div id="sf-target-chip"></div>
+        </div>
+        <div class="sf-field sf-picker">
+          <label>Comparison Style <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional — used when the style has no history in the window)</span></label>
+          <input id="sf-compare-search" type="text" placeholder="Search a similar style…" autocomplete="off" />
+          <div class="sf-dd" id="sf-compare-dd"></div>
+          <div id="sf-compare-chip"></div>
+        </div>
+      </div>
+      <div class="sf-grid">
+        <div class="sf-field"><label>Reference Start</label><input id="sf-start" type="date" value="2025-11-10" /></div>
+        <div class="sf-field"><label>Reference End</label><input id="sf-end" type="date" value="2025-12-02" /></div>
+        <div class="sf-field"><label>Growth Assumption (%)</label><input id="sf-growth" type="number" value="20" step="5" /></div>
+        <div class="sf-field"><label>This Year's Event Start</label><input id="sf-event-start" type="date" value="2026-11-14" /></div>
+        <div class="sf-field"><label>Event Length (days)</label><input id="sf-event-days" type="number" min="1" max="60" placeholder="= reference length" /></div>
+        <div class="sf-field" style="display:flex;align-items:flex-end">
+          <button class="btn btn-primary" id="sf-run" style="width:100%">Run Forecast</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="sf-results" style="display:none">
+
+      <div id="sf-warnings"></div>
+
+      <!-- Reference period -->
+      <div class="sf-card">
+        <div class="sf-card-title">Reference Period Sales <span id="sf-ref-badge"></span></div>
+        <div class="sf-card-sub" id="sf-ref-sub"></div>
+        <div class="sf-metrics" id="sf-ref-tiles" style="margin-bottom:16px"></div>
+        <div class="sf-table-wrap"><table class="sf-table" id="sf-ref-table"></table></div>
+      </div>
+
+      <!-- Momentum -->
+      <div class="sf-card">
+        <div class="sf-card-title">Momentum &amp; Model</div>
+        <div class="sf-card-sub">Is this style trending harder or softer than the reference was in the lead-up to last year's event?</div>
+        <div class="sf-metrics" id="sf-momentum-tiles"></div>
+        <div class="sf-formula" id="sf-formula"></div>
+      </div>
+
+      <!-- Suggested order -->
+      <div class="sf-card">
+        <div class="sf-card-title">Suggested Order — by Size</div>
+        <div class="sf-card-sub">
+          Order = predicted event demand + sales between now and the event − current stock − incoming POs.
+          <strong>Conservative ×0.8</strong> protects against over-ordering; <strong>Aggressive ×1.2</strong> protects against selling out.
+        </div>
+        <div class="sf-table-wrap"><table class="sf-table" id="sf-order-table"></table></div>
+      </div>
+
+      <!-- AI insight -->
+      <div class="sf-card">
+        <div class="sf-card-title">
+          AI Planning Read
+          <button class="btn btn-primary" id="sf-insight-btn">Generate Insight</button>
+        </div>
+        <div id="sf-insight-body"><div class="sf-card-sub">Runs the numbers past Claude for a momentum read, size-risk callouts, and a scenario recommendation weighted to your "don't over-order" priority.</div></div>
+      </div>
+
+    </div>
+
+    <div id="sf-loading" class="sf-loading" style="display:none">Scanning order history — reference + current windows. This can take up to a minute for Black Friday periods…</div>
+
+  </main>
+  <script src="nav.js"></script>
+  <script src="style-forecast.js"></script>
+</body>
+</html>
