@@ -4,6 +4,8 @@ let allOrders   = [];
 let budgets     = {};   // keyed by "YYYY-MM"
 let currentFilter = 'all';
 let groupByMonth  = false;
+let viewArchived  = false;
+let selectedIds   = new Set();
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const NUMERIC_SIZES = ['6','8','10','12','14','16','18'];
@@ -16,13 +18,13 @@ const PANTS_SIZES   = ['6','7','8','9','10','11','12','14','16','18'];
 
 async function loadOrders() {
   try {
-    const r = await fetch('/api/production-orders');
+    const r = await fetch(`/api/production-orders${viewArchived ? '?view=archived' : ''}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     allOrders = await r.json();
     render();
   } catch (err) {
     document.getElementById('po-tbody').innerHTML =
-      `<tr><td colspan="9" class="empty-cell">Error: ${escHtml(err.message)}</td></tr>`;
+      `<tr><td colspan="10" class="empty-cell">Error: ${escHtml(err.message)}</td></tr>`;
   }
 }
 
@@ -45,10 +47,66 @@ async function loadBudgets() {
 }
 
 function setFilter(status, btn) {
-  currentFilter = status;
   document.querySelectorAll('.po-filter-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  render();
+  const wantArchived = status === 'archived';
+  currentFilter = wantArchived ? 'all' : status;
+  selectedIds.clear();
+  updateArchiveBtn();
+  if (wantArchived !== viewArchived) {
+    viewArchived = wantArchived;
+    loadOrders();     // archived list comes from the server
+  } else {
+    render();
+  }
+}
+
+/* ── Selection + bulk archive ─────────────────────────────────────── */
+function toggleSelect(id, checked) {
+  if (checked) selectedIds.add(id); else selectedIds.delete(id);
+  updateArchiveBtn();
+}
+
+function toggleSelectAll(box) {
+  document.querySelectorAll('.po-row-check').forEach(cb => {
+    cb.checked = box.checked;
+    toggleSelect(Number(cb.dataset.id), box.checked);
+  });
+}
+
+function updateArchiveBtn() {
+  const btn = document.getElementById('po-archive-btn');
+  if (!btn) return;
+  const n = selectedIds.size;
+  btn.style.display = n ? '' : 'none';
+  btn.textContent = viewArchived ? `Unarchive Selected (${n})` : `Archive Selected (${n})`;
+}
+
+async function archiveSelected() {
+  const ids = [...selectedIds];
+  if (!ids.length) return;
+  const action = viewArchived ? 'unarchive' : 'archive';
+  if (!confirm(`${viewArchived ? 'Unarchive' : 'Archive'} ${ids.length} production order${ids.length !== 1 ? 's' : ''}?`)) return;
+  const btn = document.getElementById('po-archive-btn');
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/production-orders/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Failed');
+    selectedIds.clear();
+    const selectAll = document.getElementById('po-select-all');
+    if (selectAll) selectAll.checked = false;
+    updateArchiveBtn();
+    await loadOrders();
+  } catch (err) {
+    alert('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function toggleMonthView() {
@@ -80,8 +138,8 @@ function render() {
   const tbody = document.getElementById('po-tbody');
   if (!orders.length) {
     tbody.innerHTML = q
-      ? `<tr><td colspan="9" class="empty-cell">No orders match "${escHtml(q)}".</td></tr>`
-      : `<tr><td colspan="9" class="empty-cell">No orders found — <a href="/production-order.html" style="color:#6366f1">create one</a>.</td></tr>`;
+      ? `<tr><td colspan="10" class="empty-cell">No orders match "${escHtml(q)}".</td></tr>`
+      : `<tr><td colspan="10" class="empty-cell">${viewArchived ? 'No archived orders.' : 'No orders found — <a href="/production-order.html" style="color:#6366f1">create one</a>.'}</td></tr>`;
     return;
   }
 
@@ -138,7 +196,7 @@ function monthGroupHeader(key, count, units, totalAud, budget) {
   }
 
   return `<tr class="po-month-row">
-    <td colspan="9">
+    <td colspan="10">
       <span class="po-month-label">📅 ${label}</span>
       <span class="po-month-stats"> · ${count} order${count!==1?'s':''} · ${units} units · AUD ${fmt(totalAud)}</span>
       ${budgetChip}
@@ -186,6 +244,11 @@ function orderRow(o) {
       ? `<div class="po-aud-gst">${o.currency} @ ${parseFloat(o.exchange_rate).toFixed(4)}</div>` : '');
 
   return `<tr class="po-data-row" onclick="window.location.href='/production-order.html?id=${o.id}'">
+    <td onclick="event.stopPropagation()" style="text-align:center">
+      <input type="checkbox" class="po-row-check" data-id="${o.id}" style="cursor:pointer"
+        ${selectedIds.has(o.id) ? 'checked' : ''}
+        onchange="toggleSelect(${o.id}, this.checked)" />
+    </td>
     <td><span class="po-num">${escHtml(o.po_number)}</span></td>
     <td>${escHtml(o.supplier_name || '—')}</td>
     <td>${productsHtml}</td>

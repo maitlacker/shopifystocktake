@@ -101,15 +101,19 @@
       <button class="po-filter-btn" onclick="setFilter('confirmed',this)">Confirmed</button>
       <button class="po-filter-btn" onclick="setFilter('received',this)">Received</button>
       <button class="po-filter-btn" onclick="setFilter('cancelled',this)">Cancelled</button>
+      <button class="po-filter-btn" onclick="setFilter('archived',this)">Archived</button>
       <button class="po-toggle" id="month-toggle" onclick="toggleMonthView()">
         <span class="po-toggle-dot"></span> Group by Month
       </button>
+      <button class="btn" id="po-archive-btn" onclick="archiveSelected()"
+        style="display:none;margin-left:auto;background:#1e293b;color:#fff">Archive Selected</button>
     </div>
 
     <div class="po-table-wrap">
       <table class="po-table">
         <thead>
           <tr>
+            <th style="width:34px"><input type="checkbox" id="po-select-all" onclick="toggleSelectAll(this)" style="cursor:pointer" /></th>
             <th>PO #</th>
             <th>Supplier</th>
             <th>Products</th>
@@ -122,7 +126,7 @@
           </tr>
         </thead>
         <tbody id="po-tbody">
-          <tr><td colspan="9" class="empty-cell">Loading…</td></tr>
+          <tr><td colspan="10" class="empty-cell">Loading…</td></tr>
         </tbody>
       </table>
     </div>

@@ -390,7 +390,7 @@ async function runAnalysis() {
         FROM production_order_lines pol
         JOIN production_orders po ON po.id = pol.order_id
         LEFT JOIN suppliers s ON s.id = po.supplier_id
-        WHERE po.status = 'confirmed'
+        WHERE po.status = 'confirmed' AND po.archived_at IS NULL
         ORDER BY po.delivery_date ASC NULLS LAST
       `);
       poLineRows = poRes.rows;
@@ -465,7 +465,8 @@ async function runAnalysis() {
                pol.product_id, pol.product_name, pol.product_code, pol.total_qty
         FROM production_order_lines pol
         JOIN production_orders po ON po.id = pol.order_id
-        WHERE po.status = 'received' AND po.updated_at > NOW() - INTERVAL '7 days'
+        WHERE po.status = 'received' AND po.archived_at IS NULL
+          AND po.updated_at > NOW() - INTERVAL '7 days'
         ORDER BY po.updated_at DESC`);
       recentReceivedRaw = rr.rows;
     } catch (rrErr) {

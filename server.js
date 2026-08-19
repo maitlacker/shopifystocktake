@@ -1462,7 +1462,7 @@ app.get('/api/restock/po-incoming-debug', requireAuth, async (req, res) => {
                pol.product_id, pol.product_name, pol.product_code, pol.total_qty
         FROM production_order_lines pol
         JOIN production_orders po ON po.id = pol.order_id
-        WHERE po.status NOT IN ('received','cancelled')
+        WHERE po.status NOT IN ('received','cancelled') AND po.archived_at IS NULL
         ORDER BY po.po_number, pol.id`),
     ]);
     const analysis = cacheRows.length ? JSON.parse(cacheRows[0].value) : null;
@@ -1690,8 +1690,36 @@ app.get('/api/production-orders', async (req, res) => {
           FROM production_order_lines l WHERE l.order_id=po.id)
         , '[]'::json) AS line_summaries
       FROM production_orders po
+      WHERE ${req.query.view === 'archived' ? 'po.archived_at IS NOT NULL' : 'po.archived_at IS NULL'}
       ORDER BY po.delivery_date ASC NULLS LAST, po.order_date DESC`);
     res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Bulk archive / unarchive
+app.post('/api/production-orders/archive', requireAuth, async (req, res) => {
+  const ids = (req.body.ids || []).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'ids required' });
+  try {
+    const { rowCount } = await pool.query(
+      `UPDATE production_orders SET archived_at=NOW(), archived_by=$1, updated_at=NOW()
+       WHERE id = ANY($2::int[]) AND archived_at IS NULL`,
+      [req.user.email, ids]
+    );
+    res.json({ ok: true, archived: rowCount });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/production-orders/unarchive', requireAuth, async (req, res) => {
+  const ids = (req.body.ids || []).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'ids required' });
+  try {
+    const { rowCount } = await pool.query(
+      `UPDATE production_orders SET archived_at=NULL, archived_by=NULL, updated_at=NOW()
+       WHERE id = ANY($1::int[])`,
+      [ids]
+    );
+    res.json({ ok: true, unarchived: rowCount });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
