@@ -654,6 +654,8 @@ async function initDb() {
       synced_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     ALTER TABLE leave_employees ADD COLUMN IF NOT EXISTS is_casual BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE leave_employees ADD COLUMN IF NOT EXISTS leave_balances JSONB;
+    ALTER TABLE leave_employees ADD COLUMN IF NOT EXISTS balances_synced_at TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS idx_leave_employees_wms
       ON leave_employees(wms_email);
 

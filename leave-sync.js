@@ -101,6 +101,42 @@ async function syncEmployees(pool) {
   return synced;
 }
 
+// ── Leave balances ─────────────────────────────────────────────────
+// Xero AU Payroll returns LeaveBalances on the single-employee endpoint:
+// [{ LeaveName, LeaveTypeID, NumberOfUnits, TypeOfUnits }] — units are hours.
+async function refreshEmployeeBalance(pool, employee) {
+  const data = await payrollGet(`/Employees/${employee.xero_employee_id}`);
+  const emp  = (data.Employees || [])[0];
+  const balances = (emp?.LeaveBalances || []).map(b => ({
+    name:          b.LeaveName,
+    type_id:       b.LeaveTypeID,
+    units:         b.NumberOfUnits,
+    type_of_units: b.TypeOfUnits || 'Hours',
+  }));
+  await pool.query(
+    `UPDATE leave_employees SET leave_balances=$1, balances_synced_at=NOW() WHERE id=$2`,
+    [JSON.stringify(balances), employee.id]
+  );
+  return balances;
+}
+
+async function syncLeaveBalances(pool) {
+  const { rows: emps } = await pool.query(
+    `SELECT id, xero_employee_id, first_name, last_name FROM leave_employees WHERE is_active=TRUE`
+  );
+  let synced = 0;
+  for (const e of emps) {
+    try {
+      await refreshEmployeeBalance(pool, e);
+      synced++;
+    } catch (err) {
+      console.error(`[leave] Balance sync failed for ${e.first_name} ${e.last_name}:`, err.message);
+    }
+  }
+  console.log(`[leave] Leave balances synced for ${synced}/${emps.length} employees`);
+  return { synced, total: emps.length };
+}
+
 // ── Create leave application in Xero ──────────────────────────────
 async function createLeaveInXero(pool, requestId) {
   const { rows } = await pool.query(
@@ -350,11 +386,23 @@ function startCron(pool) {
     }
   });
   console.log(`[leave] Weekly Slack digest cron: ${ANNUAL_LEAVE_CRON}`);
+
+  // Daily balance refresh — 6am AEST (20:00 UTC)
+  cron.schedule('0 20 * * *', async () => {
+    try {
+      await syncLeaveBalances(pool);
+    } catch (err) {
+      console.error('[leave] Balance sync cron error:', err.message);
+    }
+  });
+  console.log('[leave] Daily balance sync cron: 6am AEST');
 }
 
 module.exports = {
   startCron,
   syncEmployees,
+  syncLeaveBalances,
+  refreshEmployeeBalance,
   importLeaveFromXero,
   createLeaveInXero,
   getUpcomingLeave,

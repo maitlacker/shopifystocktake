@@ -83,6 +83,7 @@
         notes.disabled     = true;
         return;
       }
+      renderBalances(linkedEmployee);
       // Relabel the form for casual staff
       if (linkedEmployee.is_casual) {
         document.getElementById('pageTitle').textContent    = 'Unavailability Notice';
@@ -98,6 +99,43 @@
       }
     } catch (e) {
       console.error('Failed to check employee link', e);
+    }
+  }
+
+  // ── Leave balances (from Xero via /api/leave/me) ───────────────────
+  const HOURS_PER_DAY = 7.6; // AU standard full-time day
+  function renderBalances(emp) {
+    if (!emp || emp.is_casual) return; // casuals don't accrue leave
+    const balances = emp.leave_balances || [];
+    if (!balances.length) return;
+    const rows = balances
+      .filter(b => b.units !== null && b.units !== undefined)
+      .map(b => {
+        const units = parseFloat(b.units) || 0;
+        const isHours = String(b.type_of_units || 'Hours').toLowerCase().startsWith('hour');
+        const detail = isHours
+          ? `<strong>${units.toFixed(1)} hrs</strong> <span style="color:#64748b">(~${(units / HOURS_PER_DAY).toFixed(1)} days)</span>`
+          : `<strong>${units.toFixed(1)} ${escHtml(b.type_of_units || '')}</strong>`;
+        return `<div style="display:flex;justify-content:space-between;gap:12px">
+          <span>${escHtml(b.name)}</span><span>${detail}</span></div>`;
+      });
+    if (!rows.length) return;
+    document.getElementById('balanceRows').innerHTML = rows.join('');
+    document.getElementById('balanceMeta').textContent =
+      `From Xero payroll${emp.balances_synced_at ? ' · updated ' + fmtDate(emp.balances_synced_at) : ''}. ` +
+      `Accrued balance — approved future leave isn't deducted until it's paid.`;
+    document.getElementById('balanceCard').style.display = '';
+  }
+
+  function renderBookedAhead(requests) {
+    const today = new Date().toISOString().slice(0, 10);
+    const upcoming = (requests || []).filter(r =>
+      (r.status === 'approved' || r.status === 'pending') && String(r.start_date).slice(0, 10) >= today
+    );
+    const days = upcoming.reduce((s, r) => s + (parseFloat(r.days_count) || 0), 0);
+    const el = document.getElementById('balanceBooked');
+    if (el && days > 0) {
+      el.innerHTML = `📅 You already have <strong>${days} day${days !== 1 ? 's' : ''}</strong> booked or pending ahead — factor that in.`;
     }
   }
 
@@ -187,6 +225,7 @@
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       renderRequests(data.requests || []);
+      renderBookedAhead(data.requests || []);
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="5" class="lr-empty">Error: ${escHtml(err.message)}</td></tr>`;
     }

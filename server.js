@@ -5618,7 +5618,7 @@ app.patch('/api/leave/employees/:id/link', requireAuth, requireLeaveAdmin, async
   }
 });
 
-// GET /api/leave/me — get the current user's linked employee
+// GET /api/leave/me — get the current user's linked employee (+ fresh balances)
 app.get('/api/leave/me', requireAuth, async (req, res) => {
   try {
     const email = req.user.email;
@@ -5626,10 +5626,34 @@ app.get('/api/leave/me', requireAuth, async (req, res) => {
       `SELECT * FROM leave_employees WHERE wms_email=$1 AND is_active=TRUE LIMIT 1`,
       [email]
     );
-    res.json({ employee: rows[0] || null });
+    const employee = rows[0] || null;
+
+    // Refresh this employee's balances from Xero if older than 12 hours;
+    // stale data is served if Xero is unreachable
+    if (employee && !employee.is_casual) {
+      const age = employee.balances_synced_at
+        ? Date.now() - new Date(employee.balances_synced_at).getTime()
+        : Infinity;
+      if (age > 12 * 60 * 60 * 1000) {
+        try {
+          employee.leave_balances     = await leaveSync.refreshEmployeeBalance(pool, employee);
+          employee.balances_synced_at = new Date().toISOString();
+        } catch (xeroErr) {
+          console.error('[leave] On-demand balance refresh failed:', xeroErr.message);
+        }
+      }
+    }
+    res.json({ employee });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// POST /api/leave/balances/sync — refresh all employees' balances (admin only)
+app.post('/api/leave/balances/sync', requireAuth, requireLeaveAdmin, async (req, res) => {
+  try {
+    res.json(await leaveSync.syncLeaveBalances(pool));
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // GET /api/leave/requests — admin sees all; staff sees their own
