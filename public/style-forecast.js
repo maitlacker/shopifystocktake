@@ -212,10 +212,19 @@
       </tr>`;
     }).join('');
 
+    const th = (label, tip) => `<th><span class="sf-th-help" title="${escHtml(tip)}">${label}</span></th>`;
     F('sf-order-table').innerHTML = `
       <thead><tr>
-        <th>Size</th><th>Ref Units</th><th>Sold 42d</th><th>Mix</th><th>Stock</th><th>Incoming</th><th>Pre-Event Sales</th>
-        <th>🟢 Conservative</th><th>🔵 Expected</th><th>🟣 Aggressive</th>
+        ${th('Size', 'The size (Shopify variant) this row applies to.')}
+        ${th('Ref Units', 'Units this size sold during the reference period (last year’s event window' + (d.compare ? ', from the comparison style' : '') + ').')}
+        ${th('Sold 42d', 'Units this size has sold in the last 42 days — its current run rate.')}
+        ${th('Mix', 'This size’s share of total demand, used to split the predicted event units across sizes. Taken from ' + (m.mix_from === 'reference_period' ? 'how sizes sold during the reference event.' : 'current sales (the reference period was too thin).'))}
+        ${th('Stock', 'Units currently on hand in Shopify for this size.')}
+        ${th('Incoming', 'Units already on confirmed production orders for this size — counted as stock you don’t need to re-order.')}
+        ${th('Pre-Event Sales', 'Units expected to sell between today and the event start at the current run rate — this stock is gone before the event, so the order must cover it.')}
+        ${th('🟢 Conservative', 'Suggested order at 80% of predicted demand. The safe choice when your priority is not being left with unsold stock.')}
+        ${th('🔵 Expected', 'Suggested order at 100% of predicted demand: predicted event units + pre-event sales − stock − incoming.')}
+        ${th('🟣 Aggressive', 'Suggested order at 120% of predicted demand. Protects against selling out if the event outperforms — at the cost of leftover-stock risk.')}
       </tr></thead>
       <tbody>${rows}</tbody>
       <tfoot><tr>
