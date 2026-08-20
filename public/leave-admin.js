@@ -250,6 +250,26 @@
           }
         });
       });
+      tbody.querySelectorAll('form[data-hours-id]').forEach(form => {
+        form.addEventListener('submit', async e => {
+          e.preventDefault();
+          const id  = form.dataset.hoursId;
+          const val = form.querySelector('input').value.trim();
+          try {
+            const res  = await fetch(`/api/leave/employees/${id}/hours`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ hours_per_day: val || null }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error);
+            showStatus(val ? `Hours per day set to ${val}` : 'Hours per day reset to default (7.6)', 'success');
+            loadEmployees();
+          } catch (err) {
+            showStatus(`Failed: ${err.message}`, 'error');
+          }
+        });
+      });
       tbody.querySelectorAll('form[data-emp-id]').forEach(form => {
         form.addEventListener('submit', async e => {
           e.preventDefault();
@@ -300,6 +320,13 @@
         <td>
           ${active}
           <div style="margin-top:4px;">${casualBtn}</div>
+          ${e.is_casual ? '' : `
+          <form class="la-link-form" data-hours-id="${e.id}" style="margin-top:6px;display:flex;align-items:center;gap:4px;" title="Used to convert Xero leave hours into days on the booking page">
+            <span style="font-size:0.7rem;color:#94a3b8;white-space:nowrap;">hrs/day</span>
+            <input type="number" step="0.1" min="0.5" max="24" value="${e.hours_per_day != null ? e.hours_per_day : ''}"
+              placeholder="7.6" style="width:60px;" />
+            <button type="submit" class="la-action-btn link">Save</button>
+          </form>`}
         </td>
       </tr>`;
   }

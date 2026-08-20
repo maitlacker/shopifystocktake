@@ -5649,6 +5649,23 @@ app.get('/api/leave/me', requireAuth, async (req, res) => {
   }
 });
 
+// PATCH /api/leave/employees/:id/hours — set hours-per-day override (admin only)
+app.patch('/api/leave/employees/:id/hours', requireAuth, requireLeaveAdmin, async (req, res) => {
+  const raw = req.body.hours_per_day;
+  const val = (raw === null || raw === '' || raw === undefined) ? null : parseFloat(raw);
+  if (val !== null && (isNaN(val) || val <= 0 || val > 24)) {
+    return res.status(400).json({ error: 'hours_per_day must be between 0 and 24, or empty to reset' });
+  }
+  try {
+    const { rows } = await pool.query(
+      `UPDATE leave_employees SET hours_per_day=$1 WHERE id=$2 RETURNING *`,
+      [val, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json({ employee: rows[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // POST /api/leave/balances/sync — refresh all employees' balances (admin only)
 app.post('/api/leave/balances/sync', requireAuth, requireLeaveAdmin, async (req, res) => {
   try {

@@ -103,9 +103,9 @@
   }
 
   // ── Leave balances (from Xero via /api/leave/me) ───────────────────
-  const HOURS_PER_DAY = 7.6; // AU standard full-time day
   function renderBalances(emp) {
     if (!emp || emp.is_casual) return; // casuals don't accrue leave
+    const hoursPerDay = parseFloat(emp.hours_per_day) || 7.6; // admin override, else AU standard
     const balances = emp.leave_balances || [];
     if (!balances.length) return;
     const rows = balances
@@ -114,7 +114,7 @@
         const units = parseFloat(b.units) || 0;
         const isHours = String(b.type_of_units || 'Hours').toLowerCase().startsWith('hour');
         const detail = isHours
-          ? `<strong>${units.toFixed(1)} hrs</strong> <span style="color:#64748b">(~${(units / HOURS_PER_DAY).toFixed(1)} days)</span>`
+          ? `<strong>${units.toFixed(1)} hrs</strong> <span style="color:#64748b">(~${(units / hoursPerDay).toFixed(1)} days)</span>`
           : `<strong>${units.toFixed(1)} ${escHtml(b.type_of_units || '')}</strong>`;
         return `<div style="display:flex;justify-content:space-between;gap:12px">
           <span>${escHtml(b.name)}</span><span>${detail}</span></div>`;
@@ -123,6 +123,7 @@
     document.getElementById('balanceRows').innerHTML = rows.join('');
     document.getElementById('balanceMeta').textContent =
       `From Xero payroll${emp.balances_synced_at ? ' · updated ' + fmtDate(emp.balances_synced_at) : ''}. ` +
+      `Days based on a ${hoursPerDay}-hour day${emp.hours_per_day ? ' (set for you by admin)' : ''}. ` +
       `Accrued balance — approved future leave isn't deducted until it's paid.`;
     document.getElementById('balanceCard').style.display = '';
   }
