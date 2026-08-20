@@ -20,6 +20,7 @@ const xeroSync         = require('./xero-sync');
 const weeklyPulse      = require('./weekly-pulse');
 const opsSync          = require('./ops-sync');
 const restockSync      = require('./restock-sync');
+const ordersSync       = require('./orders-sync');
 const stockValueSync   = require('./stock-value-sync');
 const adsAssetSync     = require('./google-ads-asset-sync');
 const arcadsSync       = require('./arcads-sync');
@@ -8010,13 +8011,42 @@ async function computeStyleForecast(q, job) {
       const preStart = new Date(start.getTime() - PRE_DAYS * DAY);
       const now = new Date();
       const curStart = new Date(now.getTime() - PRE_DAYS * DAY);
+      // Prefer the local orders warehouse (instant); fall back to a live
+      // Shopify scan when the backfill hasn't reached the window yet.
+      const sfGetLines = async (startIso, endIso, prodId, onProgress) => {
+        try {
+          const cov = await ordersSync.getCoverage();
+          const fresh = cov.newest_cursor && (Date.now() - new Date(cov.newest_cursor).getTime()) < 2 * 60 * 60 * 1000;
+          const deep  = cov.oldest_synced && new Date(cov.oldest_synced) <= new Date(startIso);
+          if (fresh && deep) {
+            const { rows } = await pool.query(
+              `SELECT product_id, variant_title, quantity, price, created_at
+               FROM shopify_order_lines
+               WHERE product_id = $1 AND NOT cancelled
+                 AND created_at >= $2 AND created_at <= $3`,
+              [prodId, startIso, endIso]
+            );
+            return rows.map(r => ({
+              product_id: String(r.product_id),
+              size: r.variant_title || '—',
+              qty: r.quantity,
+              price: parseFloat(r.price || 0),
+              created_at: r.created_at,
+            }));
+          }
+        } catch (e) {
+          console.error('[style-forecast] Local lookup failed, using API:', e.message);
+        }
+        return sfFetchOrderLines(startIso, endIso, [prodId], onProgress);
+      };
+
       let refScanned = 0, curScanned = 0;
       const reportProgress = () => {
-        if (job) job.progress = `Scanning order history… ${(refScanned + curScanned).toLocaleString()} orders read`;
+        if (job) job.progress = `Scanning order history from Shopify… ${(refScanned + curScanned).toLocaleString()} orders read (local warehouse still backfilling — this gets instant once done)`;
       };
       const [refLines, curLines] = await Promise.all([
-        sfFetchOrderLines(preStart.toISOString(), end.toISOString(), [refProductId], n => { refScanned = n; reportProgress(); }),
-        sfFetchOrderLines(curStart.toISOString(), now.toISOString(), [productId], n => { curScanned = n; reportProgress(); }),
+        sfGetLines(preStart.toISOString(), end.toISOString(), refProductId, n => { refScanned = n; reportProgress(); }),
+        sfGetLines(curStart.toISOString(), now.toISOString(), productId, n => { curScanned = n; reportProgress(); }),
       ]);
       if (job) job.progress = 'Computing forecast…';
 
@@ -8164,6 +8194,13 @@ async function computeStyleForecast(q, job) {
       sizes,
     };
 }
+
+// Orders warehouse status — coverage, counts, backfill progress
+app.get('/api/orders-sync/status', requireAuth, async (req, res) => {
+  try {
+    res.json(await ordersSync.getStatus());
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // Long scans (BF windows) exceed request timeouts — run as a background job and poll
 const sfJobs = {};
@@ -8984,6 +9021,7 @@ initDb()
     weeklyPulse.startCron(pool, anthropicClient);
     opsSync.startCron(pool);
     restockSync.startCron(pool);
+    ordersSync.startCron(pool);
     stockValueSync.startCron(pool);
     adsAssetSync.startCron();
     arcadsSync.startCron(pool);

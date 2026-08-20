@@ -941,6 +941,38 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_incorrect_order_notes_order
       ON incorrect_order_notes(order_id, added_at DESC);
 
+    CREATE TABLE IF NOT EXISTS shopify_orders (
+      id             BIGINT PRIMARY KEY,
+      order_number   TEXT,
+      created_at     TIMESTAMPTZ NOT NULL,
+      cancelled_at   TIMESTAMPTZ,
+      total_price    NUMERIC(12,2),
+      discount_codes JSONB NOT NULL DEFAULT '[]',
+      synced_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_shopify_orders_created
+      ON shopify_orders(created_at);
+
+    CREATE TABLE IF NOT EXISTS shopify_order_lines (
+      id            BIGINT PRIMARY KEY,
+      order_id      BIGINT NOT NULL,
+      created_at    TIMESTAMPTZ NOT NULL,
+      cancelled     BOOLEAN NOT NULL DEFAULT FALSE,
+      product_id    BIGINT,
+      variant_id    BIGINT,
+      variant_title TEXT,
+      title         TEXT,
+      sku           TEXT,
+      quantity      INT NOT NULL DEFAULT 0,
+      price         NUMERIC(10,2)
+    );
+    CREATE INDEX IF NOT EXISTS idx_sol_product_created
+      ON shopify_order_lines(product_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_sol_created
+      ON shopify_order_lines(created_at);
+    CREATE INDEX IF NOT EXISTS idx_sol_order
+      ON shopify_order_lines(order_id);
+
     CREATE TABLE IF NOT EXISTS style_forecast_cache (
       cache_key   TEXT PRIMARY KEY,
       data        JSONB NOT NULL,
