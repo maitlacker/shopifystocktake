@@ -19,7 +19,7 @@ function createTransport() {
 async function sendMail({ to, subject, html, text }) {
   if (!enabled()) {
     console.warn('[email] GMAIL_USER / GMAIL_APP_PASSWORD not set — skipping email');
-    return;
+    return false;
   }
   const transporter = createTransport();
   await transporter.sendMail({
@@ -30,6 +30,7 @@ async function sendMail({ to, subject, html, text }) {
     text,
   });
   console.log(`[email] Sent "${subject}" → ${to}`);
+  return true;
 }
 
 // ── Leave email templates ──────────────────────────────────────────
@@ -166,8 +167,27 @@ async function sendCasualUnavailabilityNotification({ adminEmail, staffName, sta
   await sendMail({ to: adminEmail, subject, html, text });
 }
 
+// Standard WMS email shell with a call-to-action button (staff documents etc.)
+function template({ heading, bodyHtml, buttonText, buttonUrl }) {
+  return `
+  <div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px">
+    <div style="font-size:13px;font-weight:700;color:#64748b;letter-spacing:0.05em;text-transform:uppercase;margin-bottom:16px">The Self Styler — WMS</div>
+    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:28px">
+      <h2 style="margin:0 0 12px;font-size:19px;color:#1e293b">${heading}</h2>
+      <div style="font-size:15px;color:#334155;line-height:1.6">${bodyHtml}</div>
+      ${buttonUrl ? `
+      <div style="margin-top:24px">
+        <a href="${buttonUrl}" style="background:#4f46e5;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:9px;display:inline-block">${buttonText || 'Open in WMS'}</a>
+      </div>` : ''}
+    </div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:14px">Sent automatically by The Self Styler WMS.</div>
+  </div>`;
+}
+
 module.exports = {
   enabled,
+  sendMail,
+  template,
   sendLeaveRequestNotification,
   sendLeaveApprovedNotification,
   sendLeaveRejectedNotification,

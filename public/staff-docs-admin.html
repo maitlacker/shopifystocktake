@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Staff Documents – The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    .sda-page-title { font-size: 1.6rem; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
+    .sda-sub { color: #64748b; font-size: 0.88rem; margin-bottom: 20px; }
+
+    .sda-card { background: #fff; border: 1.5px solid #e2e8f0; border-radius: 14px; padding: 22px; margin-bottom: 20px; }
+    .sda-card-title { font-size: 1.02rem; font-weight: 700; color: #1e293b; margin-bottom: 14px;
+      display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+    .sda-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+    .sda-field label { display: block; font-size: 0.74rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 5px; }
+    .sda-field input[type=text], .sda-field input[type=number], .sda-field select, .sda-field textarea {
+      width: 100%; padding: 9px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px;
+      font-size: 0.92rem; outline: none; box-sizing: border-box; background: #fff; font-family: inherit;
+    }
+    .sda-field input:focus, .sda-field select:focus, .sda-field textarea:focus { border-color: #4f46e5; }
+    .sda-field.wide { grid-column: 1 / -1; }
+    .sda-check { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: #334155; cursor: pointer; padding-top: 22px; }
+    .sda-check input { accent-color: #4f46e5; }
+
+    .sda-table-wrap { overflow-x: auto; }
+    .sda-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    .sda-table th {
+      text-align: left; padding: 9px 12px; font-size: 0.74rem; font-weight: 600;
+      color: #64748b; text-transform: uppercase; letter-spacing: 0.04em;
+      border-bottom: 2px solid #e2e8f0; white-space: nowrap;
+    }
+    .sda-table td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+
+    .sda-badge { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 0.74rem; font-weight: 700; white-space: nowrap; }
+    .sda-badge.ok       { background: #dcfce7; color: #15803d; }
+    .sda-badge.warn     { background: #fef3c7; color: #92400e; }
+    .sda-badge.bad      { background: #fee2e2; color: #b91c1c; }
+    .sda-badge.grey     { background: #f1f5f9; color: #64748b; }
+
+    .sda-mini-btn {
+      padding: 5px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; background: #fff;
+      color: #4f46e5; font-size: 0.8rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+    }
+    .sda-mini-btn:hover { border-color: #4f46e5; }
+    .sda-mini-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .sda-email-note { font-size: 0.84rem; padding: 10px 14px; border-radius: 10px; margin-bottom: 16px; }
+    .sda-email-note.ok  { background: #f0fdf4; color: #15803d; border: 1.5px solid #bbf7d0; }
+    .sda-email-note.bad { background: #fef2f2; color: #b91c1c; border: 1.5px solid #fecaca; }
+
+    .sda-empty { color: #94a3b8; padding: 24px; text-align: center; }
+    .sda-status-msg { font-size: 0.86rem; margin-left: 8px; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main class="container" style="padding-top:28px;max-width:1100px">
+
+    <div class="sda-page-title">Staff Documents</div>
+    <div class="sda-sub">Upload company documents, set sign-off rules, and track every acknowledgment. This area is restricted to accounts@theselfstyler.com.</div>
+
+    <div id="sda-email-note"></div>
+
+    <!-- Upload -->
+    <div class="sda-card">
+      <div class="sda-card-title">New Document</div>
+      <div class="sda-grid">
+        <div class="sda-field wide"><label>Title *</label><input type="text" id="nd-title" placeholder="e.g. Employee Handbook" /></div>
+        <div class="sda-field wide"><label>Description</label><input type="text" id="nd-desc" placeholder="Shown to staff above the sign-off box" /></div>
+        <div class="sda-field">
+          <label>Sign-Off Rule</label>
+          <select id="nd-recur">
+            <option value="">Once only</option>
+            <option value="90" selected>Every 90 days (quarterly)</option>
+            <option value="180">Every 180 days</option>
+            <option value="365">Every 365 days</option>
+          </select>
+        </div>
+        <div class="sda-field">
+          <label>Audience</label>
+          <select id="nd-audience">
+            <option value="all" selected>All active staff</option>
+            <option value="selected">Selected staff only</option>
+          </select>
+        </div>
+        <label class="sda-check"><input type="checkbox" id="nd-decline" /> Allow staff to decline (e.g. Social Media Release)</label>
+        <div class="sda-field"><label>PDF File *</label><input type="file" id="nd-file" accept="application/pdf" /></div>
+        <div class="sda-field" style="display:flex;align-items:flex-end">
+          <button class="btn btn-primary" id="nd-create" style="width:100%">Upload &amp; Issue</button>
+        </div>
+      </div>
+      <div class="sda-sub" style="margin:10px 0 0">Uploading immediately emails everyone in the audience a sign-off request. Replacing the file later (new version) automatically re-issues it to everyone.</div>
+    </div>
+
+    <!-- Documents -->
+    <div class="sda-card">
+      <div class="sda-card-title">Documents</div>
+      <div class="sda-table-wrap">
+        <table class="sda-table">
+          <thead><tr>
+            <th>Document</th><th>Rule</th><th>Audience</th><th style="text-align:center">Version</th>
+            <th style="text-align:center">Signed</th><th style="text-align:center">Outstanding</th><th style="text-align:center">Declined</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="sda-docs"><tr><td colspan="8" class="sda-empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Register -->
+    <div class="sda-card">
+      <div class="sda-card-title">
+        Sign-Off Register
+        <span>
+          <a class="sda-mini-btn" href="/api/staff-docs/register?format=csv" style="text-decoration:none">⬇ Export CSV</a>
+          <button class="sda-mini-btn" id="sda-test-email">Send Test Email</button>
+        </span>
+      </div>
+      <div class="sda-table-wrap" style="margin-bottom:22px">
+        <table class="sda-table">
+          <thead><tr><th>Staff Member</th><th>Document</th><th style="text-align:center">Version</th><th>Status</th><th>Due / Signed</th></tr></thead>
+          <tbody id="sda-current"><tr><td colspan="5" class="sda-empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="sda-card-title" style="font-size:0.92rem">Full History (permanent log)</div>
+      <div class="sda-table-wrap">
+        <table class="sda-table">
+          <thead><tr><th>Date</th><th>Staff</th><th>Document</th><th style="text-align:center">Version</th><th>Response</th><th>Signed As</th><th>IP</th></tr></thead>
+          <tbody id="sda-history"><tr><td colspan="7" class="sda-empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+  <script src="nav.js"></script>
+  <script src="staff-docs-admin.js"></script>
+</body>
+</html>

@@ -62,6 +62,7 @@
       children: [
         { label: 'Leave Calendar', href: '/leave-calendar.html' },
         { label: 'Leave Request',  href: '/leave-request.html' },
+        { label: 'My Documents',   href: '/my-documents.html' },
       ],
     },
     {
@@ -92,6 +93,7 @@
         { label: 'Weekly Pulse',   href: '/weekly-pulse.html' },
         { label: 'Packing Report', href: '/packing-report.html' },
         { label: 'Leave Admin',    href: '/leave-admin.html' },
+        { label: 'Staff Documents', href: '/staff-docs-admin.html', restrict: ['accounts@theselfstyler.com'] },
         { label: 'Manage Syncs',   href: '/syncing.html' },
       ],
     },
@@ -162,6 +164,24 @@
         const allowed = el.dataset.restrict.split(',');
         if (allowed.includes(user.email)) el.style.display = '';
       });
+
+      // Site-wide banner when the user has documents awaiting sign-off
+      if (!window.location.pathname.endsWith('/my-documents.html')) {
+        fetch('/api/staff-docs/pending-count')
+          .then((r) => (r.ok ? r.json() : { pending: 0 }))
+          .then(({ pending }) => {
+            if (!pending) return;
+            const header = document.querySelector('header');
+            if (!header) return;
+            header.insertAdjacentHTML('afterend', `
+              <div style="background:#fef3c7;border-bottom:1.5px solid #fde68a;color:#92400e;
+                          font-size:0.9rem;font-weight:600;text-align:center;padding:9px 16px;">
+                📄 You have ${pending} document${pending !== 1 ? 's' : ''} awaiting your sign-off —
+                <a href="/my-documents.html" style="color:#92400e;text-decoration:underline;">review now</a>
+              </div>`);
+          })
+          .catch(() => {});
+      }
 
       const nameEl = document.getElementById('nav-user-name');
       if (!nameEl) return;

@@ -21,6 +21,7 @@ const weeklyPulse      = require('./weekly-pulse');
 const opsSync          = require('./ops-sync');
 const restockSync      = require('./restock-sync');
 const ordersSync       = require('./orders-sync');
+const staffDocs        = require('./staff-docs');
 const stockValueSync   = require('./stock-value-sync');
 const adsAssetSync     = require('./google-ads-asset-sync');
 const arcadsSync       = require('./arcads-sync');
@@ -60,7 +61,7 @@ app.use(requireAuth);
 // ── Static + body parsing ──────────────────────────────────────────
 // Serve login.html without auth (requireAuth already exempts /login)
 app.use(express.static('public'));
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '30mb' }));
 
 const SHOPIFY_SHOP  = process.env.SHOPIFY_SHOP;
 const SHOPIFY_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
@@ -7952,6 +7953,315 @@ app.post('/api/incorrect-orders/:id/notify', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Staff Documents (sign-off tracking) ─────────────────────────────
+
+const DOCS_ADMIN = process.env.DOCS_ADMIN_EMAIL || 'accounts@theselfstyler.com';
+function requireDocsAdmin(req, res, next) {
+  if (req.user?.email !== DOCS_ADMIN) return res.status(403).json({ error: 'Not authorised' });
+  next();
+}
+
+const crypto = require('crypto');
+
+// ── Staff-facing ──
+
+// My documents: everything assigned to me with status + my sign-off history
+app.get('/api/staff-docs/mine', requireAuth, async (req, res) => {
+  try {
+    const email = req.user.email;
+    const all = await staffDocs.computeDueList();
+    const mine = all.filter(r => (r.wms_email || '').toLowerCase() === email.toLowerCase());
+    const { rows: history } = await pool.query(
+      `SELECT document_id, document_title, version_number, response, typed_name, created_at
+       FROM staff_document_acks WHERE LOWER(wms_email)=LOWER($1)
+       ORDER BY created_at DESC`,
+      [email]
+    );
+    res.json({
+      linked: mine.length > 0 || history.length > 0,
+      documents: mine.map(r => ({
+        document_id: r.document_id,
+        title: r.title,
+        version_number: r.version_number,
+        recur_days: r.recur_days,
+        allow_decline: r.allow_decline,
+        status: r.status,
+        due_at: r.due_at,
+        last_response_at: r.ack_at,
+      })),
+      history,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Pending count — powers the site-wide banner
+app.get('/api/staff-docs/pending-count', requireAuth, async (req, res) => {
+  try {
+    const email = req.user.email;
+    const all = await staffDocs.computeDueList();
+    const count = all.filter(r =>
+      (r.wms_email || '').toLowerCase() === email.toLowerCase() && staffDocs.isOutstanding(r)
+    ).length;
+    res.json({ pending: count });
+  } catch (err) { res.json({ pending: 0 }); }
+});
+
+// View the current version's file (assigned staff or admin)
+app.get('/api/staff-docs/:id/file', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT v.filename, v.mime, v.data FROM staff_documents d
+       JOIN staff_document_versions v ON v.id = d.current_version_id
+       WHERE d.id=$1`,
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(404).send('Not found');
+    const f = rows[0];
+    res.setHeader('Content-Type', f.mime);
+    res.setHeader('Content-Disposition', `inline; filename="${f.filename.replace(/[^\w.\- ]/g, '')}"`);
+    res.send(Buffer.from(f.data, 'base64'));
+  } catch (err) { res.status(500).send(err.message); }
+});
+
+// Record a sign-off (acknowledge or decline)
+app.post('/api/staff-docs/:id/ack', requireAuth, async (req, res) => {
+  const { response, typed_name } = req.body;
+  if (!['acknowledged', 'declined'].includes(response)) {
+    return res.status(400).json({ error: 'response must be acknowledged or declined' });
+  }
+  if (!typed_name || typed_name.trim().length < 3) {
+    return res.status(400).json({ error: 'Please type your full name to sign' });
+  }
+  try {
+    const email = req.user.email;
+    const { rows: docs } = await pool.query(
+      `SELECT d.*, v.version_number, v.sha256 FROM staff_documents d
+       JOIN staff_document_versions v ON v.id = d.current_version_id
+       WHERE d.id=$1 AND d.status='active'`,
+      [req.params.id]
+    );
+    if (!docs.length) return res.status(404).json({ error: 'Document not found' });
+    const doc = docs[0];
+    if (response === 'declined' && !doc.allow_decline) {
+      return res.status(400).json({ error: 'This document does not accept declines' });
+    }
+
+    // Must be in the document's audience
+    const all = await staffDocs.computeDueList();
+    const mine = all.find(r =>
+      r.document_id === doc.id && (r.wms_email || '').toLowerCase() === email.toLowerCase()
+    );
+    if (!mine) return res.status(403).json({ error: 'This document is not assigned to you' });
+
+    const { rows: ackRows } = await pool.query(
+      `INSERT INTO staff_document_acks
+        (document_id, version_id, version_number, document_title, employee_id,
+         wms_email, employee_name, response, typed_name, ip, user_agent, version_sha256)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [doc.id, doc.current_version_id, doc.version_number, doc.title, mine.employee_id,
+       email, `${mine.first_name || ''} ${mine.last_name || ''}`.trim() || null,
+       response, typed_name.trim(), req.ip || null,
+       (req.headers['user-agent'] || '').slice(0, 300), doc.sha256]
+    );
+
+    if (response === 'declined') {
+      staffDocs.sendDeclineAlert({ document: doc, ack: ackRows[0] })
+        .catch(e => console.error('[staff-docs] Decline alert failed:', e.message));
+    }
+    res.json({ ok: true, ack: ackRows[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Admin (accounts@ only) ──
+
+// List documents with outstanding/acked counts
+app.get('/api/staff-docs', requireAuth, requireDocsAdmin, async (req, res) => {
+  try {
+    const { rows: docs } = await pool.query(`
+      SELECT d.*, v.version_number, v.filename, v.file_size, v.created_at AS version_created_at
+      FROM staff_documents d
+      LEFT JOIN staff_document_versions v ON v.id = d.current_version_id
+      ORDER BY d.status ASC, d.created_at DESC`);
+    const due = await staffDocs.computeDueList();
+    const stats = {};
+    for (const r of due) {
+      if (!stats[r.document_id]) stats[r.document_id] = { assigned: 0, outstanding: 0, acknowledged: 0, declined: 0 };
+      const s = stats[r.document_id];
+      s.assigned++;
+      if (staffDocs.isOutstanding(r)) s.outstanding++;
+      else if (r.status === 'acknowledged') s.acknowledged++;
+      else if (r.status === 'declined') s.declined++;
+    }
+    res.json({ documents: docs.map(d => ({ ...d, data: undefined, stats: stats[d.id] || { assigned: 0, outstanding: 0, acknowledged: 0, declined: 0 } })), email_configured: mailer.enabled() });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Create a document (first version included, base64)
+app.post('/api/staff-docs', requireAuth, requireDocsAdmin, async (req, res) => {
+  const { title, description, recur_days, allow_decline, audience, filename, mime, data_base64, version_notes } = req.body;
+  if (!title || !filename || !data_base64) {
+    return res.status(400).json({ error: 'title, filename and file required' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [doc] } = await client.query(
+      `INSERT INTO staff_documents (title, description, recur_days, allow_decline, audience, created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$6) RETURNING *`,
+      [title, description || null, recur_days ? parseInt(recur_days) : null,
+       !!allow_decline, audience === 'selected' ? 'selected' : 'all', req.user.email]
+    );
+    const sha = crypto.createHash('sha256').update(Buffer.from(data_base64, 'base64')).digest('hex');
+    const { rows: [ver] } = await client.query(
+      `INSERT INTO staff_document_versions
+        (document_id, version_number, filename, mime, data, sha256, file_size, version_notes, created_by)
+       VALUES ($1,1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [doc.id, filename, mime || 'application/pdf', data_base64, sha,
+       Buffer.from(data_base64, 'base64').length, version_notes || null, req.user.email]
+    );
+    await client.query(`UPDATE staff_documents SET current_version_id=$1 WHERE id=$2`, [ver.id, doc.id]);
+    await client.query('COMMIT');
+    // Prompt the audience — fire and forget
+    staffDocs.promptOutstanding(doc.id, { force: true })
+      .catch(e => console.error('[staff-docs] Issue prompts failed:', e.message));
+    res.json({ ...doc, current_version_id: ver.id });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally { client.release(); }
+});
+
+// Upload a new version — invalidates prior sign-offs and re-issues
+app.post('/api/staff-docs/:id/version', requireAuth, requireDocsAdmin, async (req, res) => {
+  const { filename, mime, data_base64, version_notes } = req.body;
+  if (!filename || !data_base64) return res.status(400).json({ error: 'filename and file required' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [prev] } = await client.query(
+      `SELECT COALESCE(MAX(version_number),0) AS n FROM staff_document_versions WHERE document_id=$1`,
+      [req.params.id]
+    );
+    const sha = crypto.createHash('sha256').update(Buffer.from(data_base64, 'base64')).digest('hex');
+    const { rows: [ver] } = await client.query(
+      `INSERT INTO staff_document_versions
+        (document_id, version_number, filename, mime, data, sha256, file_size, version_notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, version_number`,
+      [req.params.id, prev.n + 1, filename, mime || 'application/pdf', data_base64, sha,
+       Buffer.from(data_base64, 'base64').length, version_notes || null, req.user.email]
+    );
+    const { rows: updated } = await client.query(
+      `UPDATE staff_documents SET current_version_id=$1, updated_at=NOW(), updated_by=$2 WHERE id=$3 RETURNING *`,
+      [ver.id, req.user.email, req.params.id]
+    );
+    if (!updated.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Not found' }); }
+    await client.query('COMMIT');
+    staffDocs.promptOutstanding(Number(req.params.id), { force: true })
+      .catch(e => console.error('[staff-docs] Re-issue prompts failed:', e.message));
+    res.json({ ok: true, version: ver.version_number });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally { client.release(); }
+});
+
+// Edit document settings
+app.put('/api/staff-docs/:id', requireAuth, requireDocsAdmin, async (req, res) => {
+  const { title, description, recur_days, allow_decline, audience, status } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `UPDATE staff_documents SET
+         title=COALESCE($1,title), description=$2,
+         recur_days=$3, allow_decline=COALESCE($4,allow_decline),
+         audience=COALESCE($5,audience), status=COALESCE($6,status),
+         updated_at=NOW(), updated_by=$7
+       WHERE id=$8 RETURNING *`,
+      [title || null, description || null, recur_days ? parseInt(recur_days) : null,
+       allow_decline === undefined ? null : !!allow_decline,
+       audience || null, status || null, req.user.email, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Recipients (audience = selected)
+app.get('/api/staff-docs/:id/recipients', requireAuth, requireDocsAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT e.id, e.first_name, e.last_name, e.wms_email, e.is_active,
+             (r.id IS NOT NULL) AS selected
+      FROM leave_employees e
+      LEFT JOIN staff_document_recipients r ON r.employee_id = e.id AND r.document_id = $1
+      WHERE e.is_active = TRUE
+      ORDER BY e.first_name, e.last_name`, [req.params.id]);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/staff-docs/:id/recipients', requireAuth, requireDocsAdmin, async (req, res) => {
+  const ids = (req.body.employee_ids || []).map(Number).filter(Boolean);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM staff_document_recipients WHERE document_id=$1', [req.params.id]);
+    for (const eid of ids) {
+      await client.query(
+        `INSERT INTO staff_document_recipients (document_id, employee_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+        [req.params.id, eid]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, count: ids.length });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally { client.release(); }
+});
+
+// The register: staff × documents matrix + full acknowledgment history
+app.get('/api/staff-docs/register', requireAuth, requireDocsAdmin, async (req, res) => {
+  try {
+    const due = await staffDocs.computeDueList();
+    const { rows: acks } = await pool.query(
+      `SELECT * FROM staff_document_acks ORDER BY created_at DESC`
+    );
+    if (req.query.format === 'csv') {
+      const esc = (v) => { const s = String(v ?? ''); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+      const lines = [['Document', 'Version', 'Employee', 'Email', 'Response', 'Typed Name', 'Signed At', 'IP', 'Version SHA256'].join(',')];
+      for (const a of acks) {
+        lines.push([a.document_title, a.version_number, a.employee_name, a.wms_email,
+          a.response, a.typed_name, new Date(a.created_at).toISOString(), a.ip, a.version_sha256].map(esc).join(','));
+      }
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="signoff-register-${new Date().toISOString().slice(0,10)}.csv"`);
+      return res.send('\uFEFF' + lines.join('\r\n'));
+    }
+    res.json({ current: due, history: acks });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Manual re-send of prompts for one document
+app.post('/api/staff-docs/:id/remind', requireAuth, requireDocsAdmin, async (req, res) => {
+  try {
+    if (!mailer.enabled()) return res.status(503).json({ error: 'Email not configured — set GMAIL_USER / GMAIL_APP_PASSWORD in Railway' });
+    res.json(await staffDocs.promptOutstanding(Number(req.params.id), { force: true }));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// SMTP test
+app.post('/api/staff-docs/test-email', requireAuth, requireDocsAdmin, async (req, res) => {
+  try {
+    if (!mailer.enabled()) return res.status(503).json({ error: 'Email not configured — set GMAIL_USER / GMAIL_APP_PASSWORD in Railway' });
+    await mailer.sendMail({
+      to: req.user.email,
+      subject: 'WMS email test',
+      html: mailer.template({ heading: 'Email works 🎉', bodyHtml: '<p>The WMS can send email. Staff document prompts are good to go.</p>' }),
+    });
+    res.json({ ok: true, sent_to: req.user.email });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Style Forecast (Reports) ────────────────────────────────────────
 // Event-demand forecasting for one style: reference-period history (own or
 // comparison style), demand amplification, current momentum, per-size order
@@ -9132,6 +9442,7 @@ initDb()
     opsSync.startCron(pool);
     restockSync.startCron(pool);
     ordersSync.startCron(pool);
+    staffDocs.startCron(pool);
     stockValueSync.startCron(pool);
     adsAssetSync.startCron();
     arcadsSync.startCron(pool);

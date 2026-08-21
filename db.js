@@ -944,6 +944,79 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_incorrect_order_notes_order
       ON incorrect_order_notes(order_id, added_at DESC);
 
+    -- ── Staff Documents (handbooks, agreements, sign-off tracking) ──
+    -- Acknowledgments are a permanent compliance log: no CASCADE deletes,
+    -- documents are archived rather than removed.
+
+    CREATE TABLE IF NOT EXISTS staff_documents (
+      id                 SERIAL PRIMARY KEY,
+      title              TEXT NOT NULL,
+      description        TEXT,
+      recur_days         INT,                       -- NULL = one-off sign-off
+      allow_decline      BOOLEAN NOT NULL DEFAULT FALSE,
+      audience           TEXT NOT NULL DEFAULT 'all',  -- all | selected
+      status             TEXT NOT NULL DEFAULT 'active',
+      current_version_id INT,
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_by         TEXT,
+      updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by         TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS staff_document_versions (
+      id             SERIAL PRIMARY KEY,
+      document_id    INT NOT NULL REFERENCES staff_documents(id),
+      version_number INT NOT NULL,
+      filename       TEXT NOT NULL,
+      mime           TEXT NOT NULL DEFAULT 'application/pdf',
+      data           TEXT NOT NULL,                 -- base64
+      sha256         TEXT NOT NULL,
+      file_size      INT,
+      version_notes  TEXT,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_by     TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_sdoc_versions_doc
+      ON staff_document_versions(document_id, version_number DESC);
+
+    CREATE TABLE IF NOT EXISTS staff_document_recipients (
+      id          SERIAL PRIMARY KEY,
+      document_id INT NOT NULL REFERENCES staff_documents(id),
+      employee_id INT NOT NULL REFERENCES leave_employees(id),
+      UNIQUE(document_id, employee_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS staff_document_acks (
+      id             SERIAL PRIMARY KEY,
+      document_id    INT NOT NULL,
+      version_id     INT NOT NULL,
+      version_number INT,
+      document_title TEXT,
+      employee_id    INT,
+      wms_email      TEXT NOT NULL,
+      employee_name  TEXT,
+      response       TEXT NOT NULL,                 -- acknowledged | declined
+      typed_name     TEXT NOT NULL,
+      ip             TEXT,
+      user_agent     TEXT,
+      version_sha256 TEXT,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_sdoc_acks_doc
+      ON staff_document_acks(document_id, wms_email, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_sdoc_acks_email
+      ON staff_document_acks(wms_email, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS staff_document_email_log (
+      id          SERIAL PRIMARY KEY,
+      document_id INT,
+      wms_email   TEXT NOT NULL,
+      email_type  TEXT NOT NULL,                    -- due_reminder | new_version | decline_alert
+      sent_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_sdoc_email_log
+      ON staff_document_email_log(document_id, wms_email, email_type, sent_at DESC);
+
     CREATE TABLE IF NOT EXISTS shopify_orders (
       id             BIGINT PRIMARY KEY,
       order_number   TEXT,
