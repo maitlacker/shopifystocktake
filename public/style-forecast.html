@@ -133,6 +133,7 @@
         <div class="sf-field"><label>Growth Assumption (%)</label><input id="sf-growth" type="number" value="20" step="5" /></div>
         <div class="sf-field"><label>This Year's Event Start</label><input id="sf-event-start" type="date" value="2026-11-14" /></div>
         <div class="sf-field"><label>Event Length (days)</label><input id="sf-event-days" type="number" min="1" max="60" placeholder="= reference length" /></div>
+        <div class="sf-field"><label>Event Uplift Override (×)</label><input id="sf-uplift" type="number" min="0.5" max="20" step="0.5" placeholder="auto from reference" title="How many times faster the event sells vs a normal day. Leave blank to derive it from the reference style's history; set manually (e.g. 3) when the reference has no clean event history." /></div>
         <div class="sf-field" style="display:flex;align-items:flex-end">
           <button class="btn btn-primary" id="sf-run" style="width:100%">Run Forecast</button>
         </div>
@@ -163,8 +164,8 @@
       <div class="sf-card">
         <div class="sf-card-title">Suggested Order — by Size</div>
         <div class="sf-card-sub">
-          Order = predicted event demand + sales between now and the event − current stock − incoming POs.
-          <strong>Conservative ×0.8</strong> protects against over-ordering; <strong>Aggressive ×1.2</strong> protects against selling out.
+          Order = (predicted event demand + sales between now and the event) × scenario − current stock − incoming POs.
+          The ×0.8 / ×1.0 / ×1.2 scenarios apply to <strong>all forward demand</strong>, so the spread reflects real over/under-ordering risk.
         </div>
         <div class="sf-table-wrap"><table class="sf-table" id="sf-order-table"></table></div>
       </div>

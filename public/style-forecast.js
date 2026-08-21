@@ -97,6 +97,7 @@
       event_start: F('sf-event-start').value,
     };
     if (F('sf-event-days').value) params.event_days = F('sf-event-days').value;
+    if (F('sf-uplift').value) params.uplift = F('sf-uplift').value;
     if (compareProduct) params.compare_product_id = compareProduct.id;
 
     F('sf-results').style.display = 'none';
@@ -158,7 +159,7 @@
       warn += `<div class="sf-note">Reference history comes from <strong>${escHtml(d.compare.title)}</strong> — the forecast scales it by how "${escHtml(d.target.title)}" is selling right now.</div>`;
     }
     if (m.amplification_floored) {
-      warn += `<div class="sf-note">⚠ <strong>Reference data anomaly:</strong> last year this reference sold <em>faster in the lead-up</em> (${m.ref_pre_vel}/day) than during the event window (${m.ref_period_vel}/day) — raw amplification ${m.raw_amplification}x. That usually means a launch spike, a stockout during the event, or reference dates that miss the actual sale period. The model has floored amplification at <strong>1.0x</strong> (event at least matches current demand). Consider re-checking the reference dates or using a comparison style with a clean event history.</div>`;
+      warn += `<div class="sf-note">⚠ <strong>Reference data anomaly:</strong> last year this reference sold <em>faster in the lead-up</em> (${m.ref_pre_vel}/day) than during the event window (${m.ref_period_vel}/day) — raw amplification ${m.raw_amplification}x. That usually means a launch spike, a stockout during the event, or reference dates that miss the actual sale period. The model has floored amplification at <strong>1.0x</strong> (event at least matches current demand). Re-check the reference dates, use a comparison style with a clean event history, or set an <strong>Event Uplift Override</strong> above (e.g. 3 if your events typically sell 3× a normal day).</div>`;
     }
     if (m.sells_out_before_event && m.runout_days !== null) {
       const runoutDate = new Date(Date.now() + m.runout_days * 86400000)
@@ -191,7 +192,7 @@
     F('sf-momentum-tiles').innerHTML = `
       <div class="sf-tile"><div class="sf-tile-num">${m.current_vel}</div><div class="sf-tile-label">Current Units / Day (42d)</div></div>
       <div class="sf-tile"><div class="sf-tile-num ${momCls}">${m.momentum !== null ? m.momentum + 'x ' + momArrow : '—'}</div><div class="sf-tile-label">Momentum vs Last Year's Lead-Up</div></div>
-      <div class="sf-tile"><div class="sf-tile-num">${m.amplification !== null ? m.amplification + 'x' : '—'}</div><div class="sf-tile-label">Event Demand Amplification${m.amplification_floored ? ' (floored — was ' + m.raw_amplification + 'x)' : ''}</div></div>
+      <div class="sf-tile"><div class="sf-tile-num">${m.amplification !== null ? m.amplification + 'x' : '—'}</div><div class="sf-tile-label">Event Demand Amplification${m.uplift_override ? ' (manual override)' : m.amplification_floored ? ' (floored — was ' + m.raw_amplification + 'x)' : ''}</div></div>
       <div class="sf-tile"><div class="sf-tile-num">${m.growth_pct}%</div><div class="sf-tile-label">Growth Assumption</div></div>
       <div class="sf-tile"><div class="sf-tile-num">${m.predicted_units !== null ? fmtNum(m.predicted_units) : '—'}</div><div class="sf-tile-label">Predicted Event Units (${m.event_days}d)</div></div>`;
     F('sf-formula').innerHTML =
@@ -232,9 +233,9 @@
         ${th('Stock', 'Units currently on hand in Shopify for this size.')}
         ${th('Incoming', 'Units already on confirmed production orders for this size — counted as stock you don’t need to re-order.')}
         ${th('Pre-Event Sales', 'Units expected to sell between today and the event start at the current run rate — this stock is gone before the event, so the order must cover it.')}
-        ${th('🟢 Conservative', 'Suggested order at 80% of predicted demand. The safe choice when your priority is not being left with unsold stock.')}
-        ${th('🔵 Expected', 'Suggested order at 100% of predicted demand: predicted event units + pre-event sales − stock − incoming.')}
-        ${th('🟣 Aggressive', 'Suggested order at 120% of predicted demand. Protects against selling out if the event outperforms — at the cost of leftover-stock risk.')}
+        ${th('🟢 Conservative', 'Order if demand runs 20% UNDER forecast: (event demand + pre-event sales) × 0.8 − stock − incoming. The safe choice when your priority is not being left with unsold stock.')}
+        ${th('🔵 Expected', 'Order at forecast demand: (event demand + pre-event sales) − stock − incoming.')}
+        ${th('🟣 Aggressive', 'Order if demand runs 20% OVER forecast: (event demand + pre-event sales) × 1.2 − stock − incoming. Protects against selling out — at the cost of leftover-stock risk.')}
       </tr></thead>
       <tbody>${rows}</tbody>
       <tfoot><tr>

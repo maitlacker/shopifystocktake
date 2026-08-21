@@ -8174,8 +8174,13 @@ async function computeStyleForecast(q, job) {
     // An event predicted to sell slower than an ordinary day is useless for
     // planning, so floor it at 1.0 and flag the anomaly instead.
     const rawAmplification = refPreVel > 0 ? refPeriodVel / refPreVel : null;
-    const amplification    = rawAmplification !== null ? Math.max(1, rawAmplification) : null;
-    const amplificationFloored = rawAmplification !== null && rawAmplification < 1;
+    // Manual uplift override wins — for when you KNOW the event runs hotter
+    // than the reference history can show (new-ish styles, broken references)
+    const upliftOverride = parseFloat(q.uplift) > 0 ? parseFloat(q.uplift) : null;
+    const amplification  = upliftOverride !== null
+      ? upliftOverride
+      : (rawAmplification !== null ? Math.max(1, rawAmplification) : null);
+    const amplificationFloored = upliftOverride === null && rawAmplification !== null && rawAmplification < 1;
     const momentum      = refPreVel > 0 ? currentVel / refPreVel : null;
 
     const growth = 1 + (growthPct / 100);
@@ -8213,11 +8218,13 @@ async function computeStyleForecast(q, job) {
         mix_pct: Math.round(mixShare * 1000) / 10,
       };
       for (const [name, mult] of Object.entries(SCENARIOS)) {
-        const demand = predictedUnits !== null ? predictedUnits * mixShare * mult : null;
-        row[name] = demand !== null
-          ? Math.max(0, Math.ceil(demand + depletion - stock - incoming))
+        // Scenario multiplier applies to ALL forward demand (event + pre-event) —
+        // the months of assumed run-rate are as uncertain as the event itself
+        const eventDemand = predictedUnits !== null ? predictedUnits * mixShare : null;
+        row[name] = eventDemand !== null
+          ? Math.max(0, Math.ceil((eventDemand + depletion) * mult - stock - incoming))
           : null;
-        row[`${name}_demand`] = demand !== null ? Math.round(demand) : null;
+        row[`${name}_demand`] = eventDemand !== null ? Math.round(eventDemand * mult) : null;
       }
       return row;
     }).sort((a, b) => {
@@ -8239,6 +8246,7 @@ async function computeStyleForecast(q, job) {
         amplification: amplification !== null ? Math.round(amplification * 100) / 100 : null,
         raw_amplification: rawAmplification !== null ? Math.round(rawAmplification * 100) / 100 : null,
         amplification_floored: amplificationFloored,
+        uplift_override: upliftOverride,
         momentum: momentum !== null ? Math.round(momentum * 100) / 100 : null,
         predicted_units: predictedUnits !== null ? Math.round(predictedUnits) : null,
         mix_from: base.ref_period.units >= 10 ? 'reference_period' : 'current_sales',
@@ -8306,6 +8314,8 @@ ${JSON.stringify({
   demand_amplification: a.model.amplification,
   raw_amplification_before_floor: a.model.raw_amplification,
   amplification_was_floored_to_1: a.model.amplification_floored,
+  manual_uplift_override: a.model.uplift_override,
+  scenario_note: 'conservative/expected/aggressive multipliers (0.8/1.0/1.2) apply to ALL forward demand (event + pre-event run rate)',
   stock_runout: { on_hand: a.model.stock_on_hand, incoming: a.model.incoming_total, runout_days: a.model.runout_days, sells_out_before_event: a.model.sells_out_before_event },
   current_velocity_per_day_last_42d: a.model.current_vel,
   momentum_vs_last_year_preperiod: a.model.momentum,
