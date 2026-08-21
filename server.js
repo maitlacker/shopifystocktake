@@ -8169,7 +8169,13 @@ async function computeStyleForecast(q, job) {
     const refPeriodVel = base.ref_period.units / base.window.period_days;
     const refPreVel    = base.ref_pre.units / base.window.pre_days;
     const currentVel   = base.current.units / PRE_DAYS;
-    const amplification = refPreVel > 0 ? refPeriodVel / refPreVel : null;
+    // Raw amplification can come out below 1 when last year's lead-up outsold
+    // the event (launch spike, event stockout, or a mis-set reference window).
+    // An event predicted to sell slower than an ordinary day is useless for
+    // planning, so floor it at 1.0 and flag the anomaly instead.
+    const rawAmplification = refPreVel > 0 ? refPeriodVel / refPreVel : null;
+    const amplification    = rawAmplification !== null ? Math.max(1, rawAmplification) : null;
+    const amplificationFloored = rawAmplification !== null && rawAmplification < 1;
     const momentum      = refPreVel > 0 ? currentVel / refPreVel : null;
 
     const growth = 1 + (growthPct / 100);
@@ -8183,6 +8189,10 @@ async function computeStyleForecast(q, job) {
     const mixTotal  = Object.values(mixSource).reduce((s, v) => s + v.units, 0);
 
     const daysToEvent = eventStart ? Math.max(0, Math.round((eventStart - Date.now()) / DAY)) : 0;
+
+    // Will current stock + incoming even reach the event at today's run rate?
+    const stockTotal = Object.values(base.target.stock_by_size).reduce((s, v) => s + v, 0);
+    const runoutDays = currentVel > 0 ? Math.round((stockTotal + base.incoming.total) / currentVel) : null;
 
     const allSizes = [...new Set([
       ...Object.keys(base.target.stock_by_size),
@@ -8227,10 +8237,16 @@ async function computeStyleForecast(q, job) {
         ref_pre_vel: Math.round(refPreVel * 100) / 100,
         current_vel: Math.round(currentVel * 100) / 100,
         amplification: amplification !== null ? Math.round(amplification * 100) / 100 : null,
+        raw_amplification: rawAmplification !== null ? Math.round(rawAmplification * 100) / 100 : null,
+        amplification_floored: amplificationFloored,
         momentum: momentum !== null ? Math.round(momentum * 100) / 100 : null,
         predicted_units: predictedUnits !== null ? Math.round(predictedUnits) : null,
         mix_from: base.ref_period.units >= 10 ? 'reference_period' : 'current_sales',
         insufficient_history: base.ref_period.units < 10,
+        stock_on_hand: stockTotal,
+        incoming_total: base.incoming.total,
+        runout_days: runoutDays,
+        sells_out_before_event: runoutDays !== null && daysToEvent > 0 && runoutDays < daysToEvent,
       },
       sizes,
     };
@@ -8288,6 +8304,9 @@ ${JSON.stringify({
   reference_preperiod_velocity_per_day: a.model.ref_pre_vel,
   reference_period_velocity_per_day: a.model.ref_period_vel,
   demand_amplification: a.model.amplification,
+  raw_amplification_before_floor: a.model.raw_amplification,
+  amplification_was_floored_to_1: a.model.amplification_floored,
+  stock_runout: { on_hand: a.model.stock_on_hand, incoming: a.model.incoming_total, runout_days: a.model.runout_days, sells_out_before_event: a.model.sells_out_before_event },
   current_velocity_per_day_last_42d: a.model.current_vel,
   momentum_vs_last_year_preperiod: a.model.momentum,
   growth_assumption_pct: a.model.growth_pct,

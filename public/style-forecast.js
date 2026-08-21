@@ -157,6 +157,14 @@
     if (d.compare) {
       warn += `<div class="sf-note">Reference history comes from <strong>${escHtml(d.compare.title)}</strong> — the forecast scales it by how "${escHtml(d.target.title)}" is selling right now.</div>`;
     }
+    if (m.amplification_floored) {
+      warn += `<div class="sf-note">⚠ <strong>Reference data anomaly:</strong> last year this reference sold <em>faster in the lead-up</em> (${m.ref_pre_vel}/day) than during the event window (${m.ref_period_vel}/day) — raw amplification ${m.raw_amplification}x. That usually means a launch spike, a stockout during the event, or reference dates that miss the actual sale period. The model has floored amplification at <strong>1.0x</strong> (event at least matches current demand). Consider re-checking the reference dates or using a comparison style with a clean event history.</div>`;
+    }
+    if (m.sells_out_before_event && m.runout_days !== null) {
+      const runoutDate = new Date(Date.now() + m.runout_days * 86400000)
+        .toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+      warn += `<div class="sf-note">⏳ <strong>Stock runs out before the event:</strong> at the current rate (${m.current_vel}/day), stock on hand + incoming (${fmtNum(m.stock_on_hand + m.incoming_total)} units) lasts ~${m.runout_days} days — running dry around <strong>${runoutDate}</strong>, ${m.days_to_event - m.runout_days} days before the event. The suggested order covers this gap, but delivery timing is critical.</div>`;
+    }
     F('sf-warnings').innerHTML = warn;
 
     /* Reference period */
@@ -183,7 +191,7 @@
     F('sf-momentum-tiles').innerHTML = `
       <div class="sf-tile"><div class="sf-tile-num">${m.current_vel}</div><div class="sf-tile-label">Current Units / Day (42d)</div></div>
       <div class="sf-tile"><div class="sf-tile-num ${momCls}">${m.momentum !== null ? m.momentum + 'x ' + momArrow : '—'}</div><div class="sf-tile-label">Momentum vs Last Year's Lead-Up</div></div>
-      <div class="sf-tile"><div class="sf-tile-num">${m.amplification !== null ? m.amplification + 'x' : '—'}</div><div class="sf-tile-label">Event Demand Amplification</div></div>
+      <div class="sf-tile"><div class="sf-tile-num">${m.amplification !== null ? m.amplification + 'x' : '—'}</div><div class="sf-tile-label">Event Demand Amplification${m.amplification_floored ? ' (floored — was ' + m.raw_amplification + 'x)' : ''}</div></div>
       <div class="sf-tile"><div class="sf-tile-num">${m.growth_pct}%</div><div class="sf-tile-label">Growth Assumption</div></div>
       <div class="sf-tile"><div class="sf-tile-num">${m.predicted_units !== null ? fmtNum(m.predicted_units) : '—'}</div><div class="sf-tile-label">Predicted Event Units (${m.event_days}d)</div></div>`;
     F('sf-formula').innerHTML =
@@ -193,9 +201,9 @@
       (m.days_to_event ? ` Pre-event depletion assumes current velocity holds for the ${m.days_to_event} days until the event.` : '');
 
     /* Suggested order */
-    const totals = { ref_units: 0, current_42d: 0, stock: 0, incoming: 0, depletion: 0, conservative: 0, expected: 0, aggressive: 0 };
+    const totals = { ref_units: 0, current_42d: 0, stock: 0, incoming: 0, depletion: 0, expected_demand: 0, conservative: 0, expected: 0, aggressive: 0 };
     const rows = d.sizes.map(s => {
-      ['ref_units','current_42d','stock','incoming','depletion','conservative','expected','aggressive'].forEach(k => {
+      ['ref_units','current_42d','stock','incoming','depletion','expected_demand','conservative','expected','aggressive'].forEach(k => {
         totals[k] += s[k] || 0;
       });
       return `<tr>
@@ -203,6 +211,7 @@
         <td>${fmtNum(s.ref_units)}</td>
         <td>${fmtNum(s.current_42d)}</td>
         <td>${s.mix_pct}%</td>
+        <td>${s.expected_demand !== null ? fmtNum(s.expected_demand) : '—'}</td>
         <td>${fmtNum(s.stock)}</td>
         <td>${s.incoming ? '+' + fmtNum(s.incoming) : '—'}</td>
         <td>${s.depletion ? '−' + fmtNum(s.depletion) : '—'}</td>
@@ -219,6 +228,7 @@
         ${th('Ref Units', 'Units this size sold during the reference period (last year’s event window' + (d.compare ? ', from the comparison style' : '') + ').')}
         ${th('Sold 42d', 'Units this size has sold in the last 42 days — its current run rate.')}
         ${th('Mix', 'This size’s share of total demand, used to split the predicted event units across sizes. Taken from ' + (m.mix_from === 'reference_period' ? 'how sizes sold during the reference event.' : 'current sales (the reference period was too thin).'))}
+        ${th('Event Demand', 'Predicted units this size sells DURING the event itself (' + m.event_days + ' days) — before adding pre-event sales or subtracting stock.')}
         ${th('Stock', 'Units currently on hand in Shopify for this size.')}
         ${th('Incoming', 'Units already on confirmed production orders for this size — counted as stock you don’t need to re-order.')}
         ${th('Pre-Event Sales', 'Units expected to sell between today and the event start at the current run rate — this stock is gone before the event, so the order must cover it.')}
@@ -232,6 +242,7 @@
         <td>${fmtNum(totals.ref_units)}</td>
         <td>${fmtNum(totals.current_42d)}</td>
         <td></td>
+        <td>${fmtNum(totals.expected_demand)}</td>
         <td>${fmtNum(totals.stock)}</td>
         <td>${totals.incoming ? '+' + fmtNum(totals.incoming) : '—'}</td>
         <td>${totals.depletion ? '−' + fmtNum(totals.depletion) : '—'}</td>
