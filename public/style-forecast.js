@@ -158,8 +158,11 @@
     if (d.compare) {
       warn += `<div class="sf-note">Reference history comes from <strong>${escHtml(d.compare.title)}</strong> — the forecast scales it by how "${escHtml(d.target.title)}" is selling right now.</div>`;
     }
+    if (m.amplification_source === 'store_wide') {
+      warn += `<div class="sf-note" style="background:#eff6ff;border-color:#bfdbfe;color:#1e40af">ℹ️ <strong>Using the store-wide event spike:</strong> this style's own reference history is unusable for measuring the event lift (raw amplification ${m.raw_amplification ?? '—'}x — launch spike, stockout, or thin data). Instead, the model measured how the <strong>whole store</strong> lifted during the reference window vs its lead-up: <strong>${m.store_amplification}x</strong>. That spike is applied on top of this style's current run rate.</div>`;
+    }
     if (m.amplification_floored) {
-      warn += `<div class="sf-note">⚠ <strong>Reference data anomaly:</strong> last year this reference sold <em>faster in the lead-up</em> (${m.ref_pre_vel}/day) than during the event window (${m.ref_period_vel}/day) — raw amplification ${m.raw_amplification}x. That usually means a launch spike, a stockout during the event, or reference dates that miss the actual sale period. The model has floored amplification at <strong>1.0x</strong> (event at least matches current demand). Re-check the reference dates, use a comparison style with a clean event history, or set an <strong>Event Uplift Override</strong> above (e.g. 3 if your events typically sell 3× a normal day).</div>`;
+      warn += `<div class="sf-note">⚠ <strong>Reference data anomaly:</strong> last year this reference sold <em>faster in the lead-up</em> (${m.ref_pre_vel}/day) than during the event window (${m.ref_period_vel}/day) — raw amplification ${m.raw_amplification}x — and store-wide sales data isn't available for that window yet, so amplification is floored at <strong>1.0x</strong>. Re-check the reference dates, use a comparison style, or set an <strong>Event Uplift Override</strong> above.</div>`;
     }
     if (m.sells_out_before_event && m.runout_days !== null) {
       const runoutDate = new Date(Date.now() + m.runout_days * 86400000)
@@ -192,7 +195,13 @@
     F('sf-momentum-tiles').innerHTML = `
       <div class="sf-tile"><div class="sf-tile-num">${m.current_vel}</div><div class="sf-tile-label">Current Units / Day (42d)</div></div>
       <div class="sf-tile"><div class="sf-tile-num ${momCls}">${m.momentum !== null ? m.momentum + 'x ' + momArrow : '—'}</div><div class="sf-tile-label">Momentum vs Last Year's Lead-Up</div></div>
-      <div class="sf-tile"><div class="sf-tile-num">${m.amplification !== null ? m.amplification + 'x' : '—'}</div><div class="sf-tile-label">Event Demand Amplification${m.uplift_override ? ' (manual override)' : m.amplification_floored ? ' (floored — was ' + m.raw_amplification + 'x)' : ''}</div></div>
+      <div class="sf-tile"><div class="sf-tile-num">${m.amplification !== null ? m.amplification + 'x' : '—'}</div><div class="sf-tile-label">Event Amplification (${
+        m.amplification_source === 'manual' ? 'manual override'
+        : m.amplification_source === 'style_reference' ? "this style's history"
+        : m.amplification_source === 'store_wide' ? 'store-wide spike'
+        : m.amplification_source === 'floored' ? 'floored — was ' + m.raw_amplification + 'x'
+        : 'n/a'})</div></div>
+      ${m.store_amplification !== null ? `<div class="sf-tile"><div class="sf-tile-num">${m.store_amplification}x</div><div class="sf-tile-label">Store-Wide Spike Last Event</div></div>` : ''}
       <div class="sf-tile"><div class="sf-tile-num">${m.growth_pct}%</div><div class="sf-tile-label">Growth Assumption</div></div>
       <div class="sf-tile"><div class="sf-tile-num">${m.predicted_units !== null ? fmtNum(m.predicted_units) : '—'}</div><div class="sf-tile-label">Predicted Event Units (${m.event_days}d)</div></div>`;
     F('sf-formula').innerHTML =

@@ -8174,14 +8174,50 @@ async function computeStyleForecast(q, job) {
     // An event predicted to sell slower than an ordinary day is useless for
     // planning, so floor it at 1.0 and flag the anomaly instead.
     const rawAmplification = refPreVel > 0 ? refPeriodVel / refPreVel : null;
-    // Manual uplift override wins — for when you KNOW the event runs hotter
-    // than the reference history can show (new-ish styles, broken references)
-    const upliftOverride = parseFloat(q.uplift) > 0 ? parseFloat(q.uplift) : null;
-    const amplification  = upliftOverride !== null
-      ? upliftOverride
-      : (rawAmplification !== null ? Math.max(1, rawAmplification) : null);
-    const amplificationFloored = upliftOverride === null && rawAmplification !== null && rawAmplification < 1;
     const momentum      = refPreVel > 0 ? currentVel / refPreVel : null;
+
+    // Store-wide event uplift: how much the WHOLE store lifted during the
+    // reference window vs its own 42-day lead-up (from the orders warehouse).
+    // The best spike estimate when a style's own history is unusable.
+    let storeAmplification = null;
+    try {
+      const preStartM = new Date(start.getTime() - PRE_DAYS * DAY);
+      const cov = await ordersSync.getCoverage();
+      if (cov.oldest_synced && new Date(cov.oldest_synced) <= preStartM) {
+        const { rows: sw } = await pool.query(
+          `SELECT
+             SUM(CASE WHEN created_at >= $1 THEN quantity ELSE 0 END)::float AS period_units,
+             SUM(CASE WHEN created_at <  $1 THEN quantity ELSE 0 END)::float AS pre_units
+           FROM shopify_order_lines
+           WHERE NOT cancelled AND created_at >= $2 AND created_at <= $3`,
+          [start.toISOString(), preStartM.toISOString(), end.toISOString()]
+        );
+        const perU = sw[0].period_units || 0, preU = sw[0].pre_units || 0;
+        if (perU > 0 && preU > 0) {
+          storeAmplification = (perU / periodDays) / (preU / PRE_DAYS);
+        }
+      }
+    } catch (swErr) {
+      console.error('[style-forecast] Store amplification failed:', swErr.message);
+    }
+
+    // Amplification pick order:
+    //   manual override → style's own clean history → store-wide uplift → floor 1.0
+    const upliftOverride = parseFloat(q.uplift) > 0 ? parseFloat(q.uplift) : null;
+    const styleAmpUsable = rawAmplification !== null && rawAmplification >= 1 && base.ref_period.units >= 10;
+    let amplification, amplificationSource;
+    if (upliftOverride !== null) {
+      amplification = upliftOverride; amplificationSource = 'manual';
+    } else if (styleAmpUsable) {
+      amplification = rawAmplification; amplificationSource = 'style_reference';
+    } else if (storeAmplification !== null) {
+      amplification = Math.max(1, storeAmplification); amplificationSource = 'store_wide';
+    } else if (rawAmplification !== null) {
+      amplification = Math.max(1, rawAmplification); amplificationSource = 'floored';
+    } else {
+      amplification = null; amplificationSource = null;
+    }
+    const amplificationFloored = amplificationSource === 'floored';
 
     const growth = 1 + (growthPct / 100);
     // Predicted event-period daily velocity = today's demand level, lifted by
@@ -8246,6 +8282,8 @@ async function computeStyleForecast(q, job) {
         amplification: amplification !== null ? Math.round(amplification * 100) / 100 : null,
         raw_amplification: rawAmplification !== null ? Math.round(rawAmplification * 100) / 100 : null,
         amplification_floored: amplificationFloored,
+        amplification_source: amplificationSource,
+        store_amplification: storeAmplification !== null ? Math.round(storeAmplification * 100) / 100 : null,
         uplift_override: upliftOverride,
         momentum: momentum !== null ? Math.round(momentum * 100) / 100 : null,
         predicted_units: predictedUnits !== null ? Math.round(predictedUnits) : null,
@@ -8315,6 +8353,8 @@ ${JSON.stringify({
   raw_amplification_before_floor: a.model.raw_amplification,
   amplification_was_floored_to_1: a.model.amplification_floored,
   manual_uplift_override: a.model.uplift_override,
+  amplification_source: a.model.amplification_source,
+  store_wide_event_uplift_last_year: a.model.store_amplification,
   scenario_note: 'conservative/expected/aggressive multipliers (0.8/1.0/1.2) apply to ALL forward demand (event + pre-event run rate)',
   stock_runout: { on_hand: a.model.stock_on_hand, incoming: a.model.incoming_total, runout_days: a.model.runout_days, sells_out_before_event: a.model.sells_out_before_event },
   current_velocity_per_day_last_42d: a.model.current_vel,
