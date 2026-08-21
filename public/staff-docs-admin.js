@@ -55,25 +55,36 @@
     }
     tbody.innerHTML = docs.map(d => {
       const s = d.stats;
+      const isDraft = d.status === 'draft';
+      const statusBadge = isDraft
+        ? '<span class="sda-badge warn">DRAFT — not visible to staff</span>'
+        : d.status === 'archived' ? '<span class="sda-badge grey">archived</span>' : '';
+      const actions = [
+        `<a class="sda-mini-btn" href="/api/staff-docs/${d.id}/file" target="_blank" style="text-decoration:none">Preview</a>`,
+        `<button class="sda-mini-btn" data-act="test" data-id="${d.id}">Email Me a Test</button>`,
+        d.audience === 'selected' ? `<button class="sda-mini-btn" data-act="recipients" data-id="${d.id}">Recipients</button>` : '',
+        isDraft
+          ? `<button class="sda-mini-btn" data-act="issue" data-id="${d.id}" data-title="${escHtml(d.title)}" style="background:#4f46e5;color:#fff;border-color:#4f46e5">Issue &amp; Send</button>`
+          : '',
+        !isDraft && d.status === 'active' ? `<button class="sda-mini-btn" data-act="remind" data-id="${d.id}">Send Reminders</button>` : '',
+        `<button class="sda-mini-btn" data-act="newver" data-id="${d.id}">New Version</button>`,
+        d.status !== 'draft' ? `<button class="sda-mini-btn" data-act="${d.status === 'archived' ? 'unarchive' : 'archive'}" data-id="${d.id}">${d.status === 'archived' ? 'Unarchive' : 'Archive'}</button>` : '',
+      ].filter(Boolean).join(' ');
       return `
       <tr data-id="${d.id}" ${d.status === 'archived' ? 'style="opacity:0.5"' : ''}>
         <td>
-          <div style="font-weight:600">${escHtml(d.title)}</div>
-          <div style="font-size:0.78rem;color:#94a3b8">${escHtml(d.filename || '')}${d.status === 'archived' ? ' · archived' : ''}</div>
+          <div style="font-weight:600">${escHtml(d.title)} ${statusBadge}</div>
+          <div style="font-size:0.78rem;color:#94a3b8">${escHtml(d.filename || '')}</div>
         </td>
         <td>${d.recur_days ? `Every ${d.recur_days}d` : 'Once'}${d.allow_decline ? ' · declinable' : ''}</td>
         <td>${d.audience === 'all' ? 'All staff' : 'Selected'}</td>
         <td style="text-align:center">v${d.version_number || '—'}</td>
         <td style="text-align:center"><span class="sda-badge ok">${s.acknowledged}</span></td>
-        <td style="text-align:center"><span class="sda-badge ${s.outstanding ? 'warn' : 'grey'}">${s.outstanding}</span></td>
+        <td style="text-align:center"><span class="sda-badge ${s.outstanding ? 'warn' : 'grey'}">${isDraft ? '—' : s.outstanding}</span></td>
         <td style="text-align:center"><span class="sda-badge ${s.declined ? 'bad' : 'grey'}">${s.declined}</span></td>
-        <td style="white-space:nowrap">
-          <a class="sda-mini-btn" href="/api/staff-docs/${d.id}/file" target="_blank" style="text-decoration:none">View</a>
-          <button class="sda-mini-btn" data-act="newver" data-id="${d.id}">New Version</button>
-          <button class="sda-mini-btn" data-act="remind" data-id="${d.id}">Send Reminders</button>
-          <button class="sda-mini-btn" data-act="${d.status === 'archived' ? 'unarchive' : 'archive'}" data-id="${d.id}">${d.status === 'archived' ? 'Unarchive' : 'Archive'}</button>
-        </td>
-      </tr>`;
+        <td style="white-space:nowrap">${actions}</td>
+      </tr>
+      <tr class="sda-recipients-row" data-for="${d.id}" style="display:none"><td colspan="8"></td></tr>`;
     }).join('');
 
     tbody.querySelectorAll('button[data-act]').forEach(btn => {
@@ -84,6 +95,36 @@
   async function handleAction(btn) {
     const id  = btn.dataset.id;
     const act = btn.dataset.act;
+
+    if (act === 'test') {
+      btn.disabled = true;
+      try {
+        const res = await fetch(`/api/staff-docs/${id}/test-send`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        alert(`Test sent to ${data.sent_to} — that's exactly what staff will receive (marked [TEST]).`);
+      } catch (err) { alert(`Failed: ${err.message}`); }
+      btn.disabled = false;
+      return;
+    }
+
+    if (act === 'issue') {
+      if (!confirm(`Issue "${btn.dataset.title}" now?\n\nThis makes it visible to its audience in the WMS and sends every recipient a sign-off email immediately.`)) return;
+      btn.disabled = true;
+      try {
+        const res = await fetch(`/api/staff-docs/${id}/issue`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        alert(`Issued — ${data.emailed} of ${data.outstanding} recipients emailed.`);
+        await load();
+      } catch (err) { alert(`Failed: ${err.message}`); btn.disabled = false; }
+      return;
+    }
+
+    if (act === 'recipients') {
+      await toggleRecipients(id);
+      return;
+    }
 
     if (act === 'remind') {
       btn.disabled = true;
@@ -115,7 +156,7 @@
       input.onchange = async () => {
         const file = input.files[0];
         if (!file) return;
-        if (!confirm(`Upload "${file.name}" as a NEW VERSION? Everyone will need to sign again and will be emailed immediately.`)) return;
+        if (!confirm(`Upload "${file.name}" as a NEW VERSION?\n\nEveryone will need to sign again. No emails are sent automatically — use "Send Reminders" when you're ready to notify staff.`)) return;
         btn.disabled = true;
         try {
           const res = await fetch(`/api/staff-docs/${id}/version`, {
@@ -129,12 +170,57 @@
           });
           const data = await res.json();
           if (!res.ok) throw new Error(data.error);
-          alert(`Version ${data.version} issued — sign-off requests are going out.`);
+          alert(`Version ${data.version} uploaded. Prior sign-offs are invalidated; hit "Send Reminders" to email staff.`);
           await load();
         } catch (err) { alert(`Failed: ${err.message}`); }
         btn.disabled = false;
       };
       input.click();
+    }
+  }
+
+  /* ── Recipients picker (audience = selected) ──────────────────── */
+  async function toggleRecipients(id) {
+    const row = document.querySelector(`.sda-recipients-row[data-for="${id}"]`);
+    if (!row) return;
+    if (row.style.display !== 'none') { row.style.display = 'none'; return; }
+    const cell = row.querySelector('td');
+    cell.innerHTML = '<div class="sda-empty">Loading staff…</div>';
+    row.style.display = '';
+    try {
+      const res = await fetch(`/api/staff-docs/${id}/recipients`);
+      const emps = await res.json();
+      if (!res.ok) throw new Error(emps.error);
+      cell.innerHTML = `
+        <div style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:10px;padding:14px">
+          <div style="font-size:0.8rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:10px">Who must sign this document</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin-bottom:12px">
+            ${emps.map(e => `
+              <label style="display:flex;align-items:center;gap:7px;font-size:0.88rem;color:#334155;cursor:pointer">
+                <input type="checkbox" class="sda-rec-check" value="${e.id}" ${e.selected ? 'checked' : ''} style="accent-color:#4f46e5" />
+                ${escHtml(`${e.first_name || ''} ${e.last_name || ''}`.trim())}
+                <span style="color:#94a3b8;font-size:0.76rem">${escHtml(e.wms_email || 'no WMS email')}</span>
+              </label>`).join('')}
+          </div>
+          <button class="sda-mini-btn sda-rec-save" data-id="${id}" style="background:#4f46e5;color:#fff;border-color:#4f46e5">Save Recipients</button>
+        </div>`;
+      cell.querySelector('.sda-rec-save').addEventListener('click', async (ev) => {
+        const ids = [...cell.querySelectorAll('.sda-rec-check:checked')].map(c => Number(c.value));
+        ev.target.disabled = true;
+        try {
+          const r = await fetch(`/api/staff-docs/${id}/recipients`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ employee_ids: ids }),
+          });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error);
+          row.style.display = 'none';
+          await load();
+        } catch (err) { alert(`Failed: ${err.message}`); ev.target.disabled = false; }
+      });
+    } catch (err) {
+      cell.innerHTML = `<div class="sda-empty">Failed: ${escHtml(err.message)}</div>`;
     }
   }
 
@@ -167,13 +253,13 @@
       document.getElementById('nd-title').value = '';
       document.getElementById('nd-desc').value = '';
       document.getElementById('nd-file').value = '';
-      alert(`"${data.title}" uploaded and issued — sign-off emails are going out now.`);
+      alert(`"${data.title}" uploaded as a DRAFT.\n\nStaff can't see it yet — preview it, email yourself a test, set recipients if needed, then click "Issue & Send" when you're ready.`);
       await load();
     } catch (err) {
       alert(`Failed: ${err.message}`);
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Upload & Issue';
+      btn.textContent = 'Upload as Draft';
     }
   });
 

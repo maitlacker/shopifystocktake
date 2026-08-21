@@ -8105,9 +8105,11 @@ app.post('/api/staff-docs', requireAuth, requireDocsAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // New documents start as DRAFTS — invisible to staff, no emails —
+    // until explicitly issued from the admin page
     const { rows: [doc] } = await client.query(
-      `INSERT INTO staff_documents (title, description, recur_days, allow_decline, audience, created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$6) RETURNING *`,
+      `INSERT INTO staff_documents (title, description, recur_days, allow_decline, audience, status, created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,'draft',$6,$6) RETURNING *`,
       [title, description || null, recur_days ? parseInt(recur_days) : null,
        !!allow_decline, audience === 'selected' ? 'selected' : 'all', req.user.email]
     );
@@ -8121,9 +8123,6 @@ app.post('/api/staff-docs', requireAuth, requireDocsAdmin, async (req, res) => {
     );
     await client.query(`UPDATE staff_documents SET current_version_id=$1 WHERE id=$2`, [ver.id, doc.id]);
     await client.query('COMMIT');
-    // Prompt the audience — fire and forget
-    staffDocs.promptOutstanding(doc.id, { force: true })
-      .catch(e => console.error('[staff-docs] Issue prompts failed:', e.message));
     res.json({ ...doc, current_version_id: ver.id });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -8156,8 +8155,8 @@ app.post('/api/staff-docs/:id/version', requireAuth, requireDocsAdmin, async (re
     );
     if (!updated.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Not found' }); }
     await client.query('COMMIT');
-    staffDocs.promptOutstanding(Number(req.params.id), { force: true })
-      .catch(e => console.error('[staff-docs] Re-issue prompts failed:', e.message));
+    // No auto-email — the version is live in the WMS (prior sign-offs are
+    // invalidated); use Send Reminders when ready to notify staff
     res.json({ ok: true, version: ver.version_number });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -8238,6 +8237,40 @@ app.get('/api/staff-docs/register', requireAuth, requireDocsAdmin, async (req, r
       return res.send('\uFEFF' + lines.join('\r\n'));
     }
     res.json({ current: due, history: acks });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Issue a draft: make it live for staff and send the sign-off emails
+app.post('/api/staff-docs/:id/issue', requireAuth, requireDocsAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `UPDATE staff_documents SET status='active', updated_at=NOW(), updated_by=$1
+       WHERE id=$2 AND status='draft' RETURNING *`,
+      [req.user.email, req.params.id]
+    );
+    if (!rows.length) return res.status(400).json({ error: 'Document is not a draft' });
+    let result = { outstanding: 0, emailed: 0 };
+    try {
+      result = await staffDocs.promptOutstanding(Number(req.params.id), { force: true });
+    } catch (e) {
+      console.error('[staff-docs] Issue prompts failed:', e.message);
+    }
+    res.json({ ok: true, ...result });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Send the sign-off prompt email to YOURSELF only — preview what staff will get
+app.post('/api/staff-docs/:id/test-send', requireAuth, requireDocsAdmin, async (req, res) => {
+  try {
+    if (!mailer.enabled()) return res.status(503).json({ error: 'Email not configured — set GMAIL_USER / GMAIL_APP_PASSWORD in Railway' });
+    const { rows } = await pool.query(
+      `SELECT d.id, d.title, v.version_number FROM staff_documents d
+       JOIN staff_document_versions v ON v.id = d.current_version_id WHERE d.id=$1`,
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    await staffDocs.sendTestPrompt(rows[0], req.user.email);
+    res.json({ ok: true, sent_to: req.user.email });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

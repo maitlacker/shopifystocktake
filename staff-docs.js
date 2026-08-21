@@ -102,6 +102,22 @@ async function sendDuePrompt(row, emailType) {
   return ok;
 }
 
+// Preview email — sent only to the admin, never logged against staff
+async function sendTestPrompt(doc, toEmail) {
+  const heading = `Action required: ${doc.title}`;
+  return mailer.sendMail({
+    to: toEmail,
+    subject: `[TEST] ${heading}`,
+    html: mailer.template({
+      heading,
+      bodyHtml: `<p>Hi there,</p><p><strong>${doc.title}</strong> (version ${doc.version_number}) needs your review and sign-off. Please read the document and record your response in the WMS.</p>
+        <p style="color:#b91c1c"><em>This is a test preview sent only to you — no staff have been emailed.</em></p>`,
+      buttonText: 'Review & Sign Off',
+      buttonUrl: `${APP_URL}/my-documents.html`,
+    }),
+  });
+}
+
 async function sendDeclineAlert({ document, ack }) {
   return mailer.sendMail({
     to: ADMIN_EMAIL,
@@ -148,4 +164,4 @@ function startCron(dbPool) {
   console.log('[staff-docs] Daily sign-off sweep cron: 9am AEST');
 }
 
-module.exports = { startCron, computeDueList, isOutstanding, promptOutstanding, runDailySweep, sendDeclineAlert };
+module.exports = { startCron, computeDueList, isOutstanding, promptOutstanding, runDailySweep, sendDeclineAlert, sendTestPrompt };
