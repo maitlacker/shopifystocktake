@@ -24,7 +24,7 @@ async function loadOrders() {
     render();
   } catch (err) {
     document.getElementById('po-tbody').innerHTML =
-      `<tr><td colspan="10" class="empty-cell">Error: ${escHtml(err.message)}</td></tr>`;
+      `<tr><td colspan="11" class="empty-cell">Error: ${escHtml(err.message)}</td></tr>`;
   }
 }
 
@@ -178,8 +178,8 @@ function render() {
   const tbody = document.getElementById('po-tbody');
   if (!orders.length) {
     tbody.innerHTML = q
-      ? `<tr><td colspan="10" class="empty-cell">No orders match "${escHtml(q)}".</td></tr>`
-      : `<tr><td colspan="10" class="empty-cell">${viewArchived ? 'No archived orders.' : 'No orders found — <a href="/production-order.html" style="color:#6366f1">create one</a>.'}</td></tr>`;
+      ? `<tr><td colspan="11" class="empty-cell">No orders match "${escHtml(q)}".</td></tr>`
+      : `<tr><td colspan="11" class="empty-cell">${viewArchived ? 'No archived orders.' : 'No orders found — <a href="/production-order.html" style="color:#6366f1">create one</a>.'}</td></tr>`;
     return;
   }
 
@@ -236,7 +236,7 @@ function monthGroupHeader(key, count, units, totalAud, budget) {
   }
 
   return `<tr class="po-month-row">
-    <td colspan="10">
+    <td colspan="11">
       <span class="po-month-label">📅 ${label}</span>
       <span class="po-month-stats"> · ${count} order${count!==1?'s':''} · ${units} units · AUD ${fmt(totalAud)}</span>
       ${budgetChip}
@@ -293,6 +293,7 @@ function orderRow(o) {
     <td>${escHtml(o.supplier_name || '—')}</td>
     <td>${productsHtml}</td>
     <td>${qtyHtml}</td>
+    <td style="text-align:center;font-weight:700;white-space:nowrap">${Number(o.total_items || 0).toLocaleString('en-AU')}</td>
     <td style="white-space:nowrap">${orderDate}</td>
     <td style="white-space:nowrap">${delivDate}</td>
     <td>${freight}</td>
