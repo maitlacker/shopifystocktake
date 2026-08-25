@@ -133,27 +133,46 @@ async function sendDeclineAlert({ document, ack }) {
   });
 }
 
+// Send prompts to a list of due rows — one failure never blocks the rest,
+// and every failure is reported back rather than lost in logs
+async function sendPrompts(rows) {
+  let sent = 0;
+  const failures = [];
+  for (const row of rows) {
+    try {
+      if (await sendDuePrompt(row, 'due_reminder')) sent++;
+      await new Promise(w => setTimeout(w, 400)); // gentle pace for Gmail
+    } catch (err) {
+      console.error(`[staff-docs] Email to ${row.wms_email} failed:`, err.message);
+      failures.push({ email: row.wms_email, error: err.message });
+    }
+  }
+  return { sent, failures };
+}
+
 // Prompt everyone outstanding on one document immediately (new doc / new version / manual resend)
 async function promptOutstanding(documentId, { force } = {}) {
   const due = (await computeDueList()).filter(r => r.document_id === documentId && isOutstanding(r));
-  let sent = 0;
+  const targets = [];
   for (const row of due) {
     if (!force && await recentlyEmailed(row.document_id, row.wms_email, 'due_reminder', 1)) continue;
-    if (await sendDuePrompt(row, 'due_reminder')) sent++;
+    targets.push(row);
   }
-  return { outstanding: due.length, emailed: sent };
+  const { sent, failures } = await sendPrompts(targets);
+  return { outstanding: due.length, emailed: sent, failures };
 }
 
 // Daily sweep: prompt anyone outstanding who hasn't been emailed recently
 async function runDailySweep() {
   const due = (await computeDueList()).filter(isOutstanding);
-  let sent = 0;
+  const targets = [];
   for (const row of due) {
     if (await recentlyEmailed(row.document_id, row.wms_email, 'due_reminder', REMIND_EVERY_DAYS)) continue;
-    if (await sendDuePrompt(row, 'due_reminder')) sent++;
+    targets.push(row);
   }
-  console.log(`[staff-docs] Daily sweep — ${due.length} outstanding, ${sent} emails sent`);
-  return { outstanding: due.length, emailed: sent };
+  const { sent, failures } = await sendPrompts(targets);
+  console.log(`[staff-docs] Daily sweep — ${due.length} outstanding, ${sent} sent, ${failures.length} failed`);
+  return { outstanding: due.length, emailed: sent, failures };
 }
 
 function startCron(dbPool) {

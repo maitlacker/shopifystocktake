@@ -134,7 +134,12 @@
         const res = await fetch(`/api/staff-docs/${id}/issue`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
-        alert(`Issued — ${data.emailed} of ${data.outstanding} recipients emailed.`);
+        let msg = `Issued — ${data.emailed} of ${data.outstanding} recipients emailed.`;
+        if (data.failures && data.failures.length) {
+          msg += `\n\nFAILED (${data.failures.length}):\n` +
+            data.failures.map(f => `• ${f.email}: ${f.error}`).join('\n');
+        }
+        alert(msg);
         await load();
       } catch (err) { alert(`Failed: ${err.message}`); btn.disabled = false; }
       return;
@@ -151,7 +156,12 @@
         const res = await fetch(`/api/staff-docs/${id}/remind`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
-        alert(`Reminders sent: ${data.emailed} of ${data.outstanding} outstanding.`);
+        let msg = `Reminders sent: ${data.emailed} of ${data.outstanding} outstanding.`;
+        if (data.failures && data.failures.length) {
+          msg += `\n\nFAILED (${data.failures.length}):\n` +
+            data.failures.map(f => `• ${f.email}: ${f.error}`).join('\n');
+        }
+        alert(msg);
       } catch (err) { alert(`Failed: ${err.message}`); }
       btn.disabled = false;
       return;

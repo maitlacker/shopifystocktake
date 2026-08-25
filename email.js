@@ -9,11 +9,20 @@ function enabled() {
   return Boolean(GMAIL_USER && GMAIL_PASS);
 }
 
+// One pooled transporter for the process — a fresh SMTP login per message
+// trips Gmail's rate limiting on bulk sends
+let _transporter = null;
 function createTransport() {
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user: GMAIL_USER, pass: GMAIL_PASS },
-  });
+  if (!_transporter) {
+    _transporter = nodemailer.createTransport({
+      service: 'gmail',
+      pool: true,
+      maxConnections: 2,
+      maxMessages: 50,
+      auth: { user: GMAIL_USER, pass: GMAIL_PASS },
+    });
+  }
+  return _transporter;
 }
 
 async function sendMail({ to, subject, html, text }) {
