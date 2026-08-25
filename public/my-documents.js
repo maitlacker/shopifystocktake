@@ -15,6 +15,7 @@
     renewal_due: 'Re-confirmation due',
     acknowledged: 'Signed',
     declined: 'Declined',
+    draft_preview: 'Draft — staff can\'t see this yet',
   };
 
   async function load() {
@@ -45,6 +46,20 @@
     });
 
     wrap.innerHTML = docs.map(d => {
+      if (d.status === 'draft_preview') {
+        return `
+          <div class="md-card" data-doc="${d.document_id}" style="border-style:dashed">
+            <div class="md-doc-head">
+              <div>
+                <div class="md-doc-title">${escHtml(d.title)}</div>
+                <div class="md-doc-meta">Version ${d.version_number} · Admin preview — this is what staff will see once issued.</div>
+              </div>
+              <span class="md-badge pending">DRAFT PREVIEW</span>
+            </div>
+            <a class="md-view-btn" href="/api/staff-docs/${d.document_id}/file" target="_blank">📄 Open &amp; Read the Document</a>
+            <div class="md-fineprint">Sign-off is disabled on drafts. Issue it from <a href="/staff-docs-admin.html">Staff Documents admin</a> to send it out.</div>
+          </div>`;
+      }
       const outstanding = d.status === 'pending' || d.status === 'renewal_due';
       const recurNote = d.recur_days
         ? `Re-confirmation required every ${d.recur_days} days.`

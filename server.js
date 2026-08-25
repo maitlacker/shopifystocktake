@@ -7977,18 +7977,33 @@ app.get('/api/staff-docs/mine', requireAuth, async (req, res) => {
        ORDER BY created_at DESC`,
       [email]
     );
+    const documents = mine.map(r => ({
+      document_id: r.document_id,
+      title: r.title,
+      version_number: r.version_number,
+      recur_days: r.recur_days,
+      allow_decline: r.allow_decline,
+      status: r.status,
+      due_at: r.due_at,
+      last_response_at: r.ack_at,
+    }));
+
+    // The docs admin also sees drafts here as previews — exactly where the
+    // test email lands — clearly marked as invisible to staff
+    if (email === DOCS_ADMIN) {
+      const { rows: drafts } = await pool.query(`
+        SELECT d.id AS document_id, d.title, d.recur_days, d.allow_decline, v.version_number
+        FROM staff_documents d
+        JOIN staff_document_versions v ON v.id = d.current_version_id
+        WHERE d.status = 'draft'`);
+      for (const dr of drafts) {
+        documents.unshift({ ...dr, status: 'draft_preview', due_at: null, last_response_at: null });
+      }
+    }
+
     res.json({
       linked: mine.length > 0 || history.length > 0,
-      documents: mine.map(r => ({
-        document_id: r.document_id,
-        title: r.title,
-        version_number: r.version_number,
-        recur_days: r.recur_days,
-        allow_decline: r.allow_decline,
-        status: r.status,
-        due_at: r.due_at,
-        last_response_at: r.ack_at,
-      })),
+      documents,
       history,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -8010,12 +8025,15 @@ app.get('/api/staff-docs/pending-count', requireAuth, async (req, res) => {
 app.get('/api/staff-docs/:id/file', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT v.filename, v.mime, v.data FROM staff_documents d
+      `SELECT d.status, v.filename, v.mime, v.data FROM staff_documents d
        JOIN staff_document_versions v ON v.id = d.current_version_id
        WHERE d.id=$1`,
       [req.params.id]
     );
     if (!rows.length) return res.status(404).send('Not found');
+    if (rows[0].status === 'draft' && req.user.email !== DOCS_ADMIN) {
+      return res.status(403).send('Not available');
+    }
     const f = rows[0];
     res.setHeader('Content-Type', f.mime);
     res.setHeader('Content-Disposition', `inline; filename="${f.filename.replace(/[^\w.\- ]/g, '')}"`);
@@ -8164,20 +8182,25 @@ app.post('/api/staff-docs/:id/version', requireAuth, requireDocsAdmin, async (re
   } finally { client.release(); }
 });
 
-// Edit document settings
+// Edit document settings — patch-style: only fields present in the body change
 app.put('/api/staff-docs/:id', requireAuth, requireDocsAdmin, async (req, res) => {
-  const { title, description, recur_days, allow_decline, audience, status } = req.body;
   try {
+    const sets = [];
+    const params = [];
+    const set = (col, val) => { sets.push(`${col}=$${params.push(val)}`); };
+    if ('title' in req.body && req.body.title)  set('title', req.body.title);
+    if ('description' in req.body)              set('description', req.body.description || null);
+    if ('recur_days' in req.body)               set('recur_days', req.body.recur_days ? parseInt(req.body.recur_days) : null);
+    if ('allow_decline' in req.body)            set('allow_decline', !!req.body.allow_decline);
+    if ('audience' in req.body)                 set('audience', req.body.audience === 'selected' ? 'selected' : 'all');
+    if ('status' in req.body && req.body.status) set('status', req.body.status);
+    if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
+    set('updated_at', new Date());
+    set('updated_by', req.user.email);
+    params.push(req.params.id);
     const { rows } = await pool.query(
-      `UPDATE staff_documents SET
-         title=COALESCE($1,title), description=$2,
-         recur_days=$3, allow_decline=COALESCE($4,allow_decline),
-         audience=COALESCE($5,audience), status=COALESCE($6,status),
-         updated_at=NOW(), updated_by=$7
-       WHERE id=$8 RETURNING *`,
-      [title || null, description || null, recur_days ? parseInt(recur_days) : null,
-       allow_decline === undefined ? null : !!allow_decline,
-       audience || null, status || null, req.user.email, req.params.id]
+      `UPDATE staff_documents SET ${sets.join(', ')} WHERE id=$${params.length} RETURNING *`,
+      params
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
     res.json(rows[0]);

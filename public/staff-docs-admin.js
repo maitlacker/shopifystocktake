@@ -62,7 +62,7 @@
       const actions = [
         `<a class="sda-mini-btn" href="/api/staff-docs/${d.id}/file" target="_blank" style="text-decoration:none">Preview</a>`,
         `<button class="sda-mini-btn" data-act="test" data-id="${d.id}">Email Me a Test</button>`,
-        d.audience === 'selected' ? `<button class="sda-mini-btn" data-act="recipients" data-id="${d.id}">Recipients</button>` : '',
+        `<button class="sda-mini-btn" data-act="recipients" data-id="${d.id}" data-audience="${d.audience}">Recipients</button>`,
         isDraft
           ? `<button class="sda-mini-btn" data-act="issue" data-id="${d.id}" data-title="${escHtml(d.title)}" style="background:#4f46e5;color:#fff;border-color:#4f46e5">Issue &amp; Send</button>`
           : '',
@@ -109,9 +109,27 @@
     }
 
     if (act === 'issue') {
-      if (!confirm(`Issue "${btn.dataset.title}" now?\n\nThis makes it visible to its audience in the WMS and sends every recipient a sign-off email immediately.`)) return;
       btn.disabled = true;
       try {
+        // Resolve exactly who will receive it before asking for confirmation
+        const rRes = await fetch(`/api/staff-docs/${id}/recipients`);
+        const emps = await rRes.json();
+        if (!rRes.ok) throw new Error(emps.error);
+        const row = btn.closest('tr');
+        const audience = row.querySelector('[data-act="recipients"]')?.dataset.audience || 'all';
+        const targets = (audience === 'all' ? emps : emps.filter(e => e.selected))
+          .filter(e => e.wms_email);
+        if (!targets.length) {
+          alert('No recipients resolved — check the audience/recipient selection and that staff have WMS emails linked.');
+          btn.disabled = false;
+          return;
+        }
+        const names = targets.map(e => `${e.first_name || ''} ${e.last_name || ''}`.trim());
+        const preview = names.slice(0, 12).join(', ') + (names.length > 12 ? ` … and ${names.length - 12} more` : '');
+        if (!confirm(`Issue "${btn.dataset.title}" to ${targets.length} staff and email them now?\n\n${preview}`)) {
+          btn.disabled = false;
+          return;
+        }
         const res = await fetch(`/api/staff-docs/${id}/issue`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
@@ -122,7 +140,7 @@
     }
 
     if (act === 'recipients') {
-      await toggleRecipients(id);
+      await toggleRecipients(id, btn.dataset.audience);
       return;
     }
 
@@ -180,7 +198,7 @@
   }
 
   /* ── Recipients picker (audience = selected) ──────────────────── */
-  async function toggleRecipients(id) {
+  async function toggleRecipients(id, audience) {
     const row = document.querySelector(`.sda-recipients-row[data-for="${id}"]`);
     if (!row) return;
     if (row.style.display !== 'none') { row.style.display = 'none'; return; }
@@ -191,30 +209,59 @@
       const res = await fetch(`/api/staff-docs/${id}/recipients`);
       const emps = await res.json();
       if (!res.ok) throw new Error(emps.error);
+      const withEmail = emps.filter(e => e.wms_email).length;
       cell.innerHTML = `
         <div style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:10px;padding:14px">
           <div style="font-size:0.8rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:10px">Who must sign this document</div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin-bottom:12px">
+          <div style="display:flex;gap:18px;margin-bottom:12px;font-size:0.9rem;color:#334155">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="radio" name="sda-aud-${id}" value="all" ${audience !== 'selected' ? 'checked' : ''} style="accent-color:#4f46e5" />
+              All active staff (${withEmail} with WMS emails)
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="radio" name="sda-aud-${id}" value="selected" ${audience === 'selected' ? 'checked' : ''} style="accent-color:#4f46e5" />
+              Only the staff ticked below
+            </label>
+          </div>
+          <div class="sda-rec-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px;margin-bottom:12px;${audience !== 'selected' ? 'opacity:0.45;pointer-events:none' : ''}">
             ${emps.map(e => `
               <label style="display:flex;align-items:center;gap:7px;font-size:0.88rem;color:#334155;cursor:pointer">
-                <input type="checkbox" class="sda-rec-check" value="${e.id}" ${e.selected ? 'checked' : ''} style="accent-color:#4f46e5" />
+                <input type="checkbox" class="sda-rec-check" value="${e.id}" ${e.selected ? 'checked' : ''} ${e.wms_email ? '' : 'disabled'} style="accent-color:#4f46e5" />
                 ${escHtml(`${e.first_name || ''} ${e.last_name || ''}`.trim())}
-                <span style="color:#94a3b8;font-size:0.76rem">${escHtml(e.wms_email || 'no WMS email')}</span>
+                <span style="color:${e.wms_email ? '#94a3b8' : '#dc2626'};font-size:0.76rem">${escHtml(e.wms_email || 'no WMS email — link on Leave Admin')}</span>
               </label>`).join('')}
           </div>
-          <button class="sda-mini-btn sda-rec-save" data-id="${id}" style="background:#4f46e5;color:#fff;border-color:#4f46e5">Save Recipients</button>
+          <button class="sda-mini-btn sda-rec-save" data-id="${id}" style="background:#4f46e5;color:#fff;border-color:#4f46e5">Save Audience</button>
         </div>`;
+
+      // Radio toggles the grid on/off
+      cell.querySelectorAll(`input[name="sda-aud-${id}"]`).forEach(radio => {
+        radio.addEventListener('change', () => {
+          const grid = cell.querySelector('.sda-rec-grid');
+          const sel = radio.value === 'selected' && radio.checked;
+          grid.style.opacity = sel ? '' : '0.45';
+          grid.style.pointerEvents = sel ? '' : 'none';
+        });
+      });
+
       cell.querySelector('.sda-rec-save').addEventListener('click', async (ev) => {
+        const aud = cell.querySelector(`input[name="sda-aud-${id}"]:checked`).value;
         const ids = [...cell.querySelectorAll('.sda-rec-check:checked')].map(c => Number(c.value));
+        if (aud === 'selected' && !ids.length) { alert('Tick at least one staff member, or switch back to All.'); return; }
         ev.target.disabled = true;
         try {
-          const r = await fetch(`/api/staff-docs/${id}/recipients`, {
+          const r1 = await fetch(`/api/staff-docs/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ employee_ids: ids }),
+            body: JSON.stringify({ audience: aud }),
           });
-          const d = await r.json();
-          if (!r.ok) throw new Error(d.error);
+          if (!r1.ok) throw new Error((await r1.json()).error);
+          const r2 = await fetch(`/api/staff-docs/${id}/recipients`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ employee_ids: aud === 'selected' ? ids : [] }),
+          });
+          if (!r2.ok) throw new Error((await r2.json()).error);
           row.style.display = 'none';
           await load();
         } catch (err) { alert(`Failed: ${err.message}`); ev.target.disabled = false; }
