@@ -8248,6 +8248,26 @@ app.get('/api/staff-docs/register', requireAuth, requireDocsAdmin, async (req, r
     const { rows: acks } = await pool.query(
       `SELECT * FROM staff_document_acks ORDER BY created_at DESC`
     );
+
+    // Email tracking — when was each person last prompted about each document
+    const { rows: emailAgg } = await pool.query(
+      `SELECT document_id, LOWER(wms_email) AS email, MAX(sent_at) AS last_sent, COUNT(*) AS sends
+       FROM staff_document_email_log WHERE email_type='due_reminder'
+       GROUP BY document_id, LOWER(wms_email)`
+    );
+    const emailMap = {};
+    emailAgg.forEach(e => { emailMap[`${e.document_id}|${e.email}`] = e; });
+    for (const r of due) {
+      const e = emailMap[`${r.document_id}|${(r.wms_email || '').toLowerCase()}`];
+      r.last_emailed = e ? e.last_sent : null;
+      r.email_count  = e ? Number(e.sends) : 0;
+    }
+    const { rows: recentEmails } = await pool.query(
+      `SELECT l.sent_at, l.wms_email, l.email_type, d.title
+       FROM staff_document_email_log l
+       LEFT JOIN staff_documents d ON d.id = l.document_id
+       ORDER BY l.sent_at DESC LIMIT 100`
+    );
     if (req.query.format === 'csv') {
       const esc = (v) => { const s = String(v ?? ''); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
       const lines = [['Document', 'Version', 'Employee', 'Email', 'Response', 'Typed Name', 'Signed At', 'IP', 'Version SHA256'].join(',')];
@@ -8259,7 +8279,7 @@ app.get('/api/staff-docs/register', requireAuth, requireDocsAdmin, async (req, r
       res.setHeader('Content-Disposition', `attachment; filename="signoff-register-${new Date().toISOString().slice(0,10)}.csv"`);
       return res.send('\uFEFF' + lines.join('\r\n'));
     }
-    res.json({ current: due, history: acks });
+    res.json({ current: due, history: acks, recent_emails: recentEmails });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

@@ -34,6 +34,7 @@
       renderEmailNote(docs.email_configured);
       renderDocs(docs.documents || []);
       renderRegister(reg.current || [], reg.history || []);
+      renderEmails(reg.recent_emails || []);
     } catch (err) {
       document.getElementById('sda-docs').innerHTML =
         `<tr><td colspan="8" class="sda-empty">Failed: ${escHtml(err.message)}</td></tr>`;
@@ -314,7 +315,7 @@
   function renderRegister(current, history) {
     const cur = document.getElementById('sda-current');
     if (!current.length) {
-      cur.innerHTML = '<tr><td colspan="5" class="sda-empty">Nothing assigned yet.</td></tr>';
+      cur.innerHTML = '<tr><td colspan="6" class="sda-empty">Nothing assigned yet.</td></tr>';
     } else {
       current.sort((a, b) => {
         const oa = (a.status === 'pending' || a.status === 'renewal_due') ? 0 : 1;
@@ -333,6 +334,9 @@
           <td style="text-align:center">v${r.version_number}</td>
           <td>${badge}</td>
           <td>${r.status === 'acknowledged' || r.status === 'declined' ? fmtD(r.ack_at) : 'due ' + fmtD(r.due_at)}</td>
+          <td>${r.last_emailed
+            ? `${new Date(r.last_emailed).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}${r.email_count > 1 ? ` <span style="color:#94a3b8">(×${r.email_count})</span>` : ''}`
+            : '<span class="sda-badge bad">never</span>'}</td>
         </tr>`;
       }).join('');
     }
@@ -349,6 +353,19 @@
           <td style="font-size:0.78rem;color:#94a3b8">${escHtml(a.ip || '')}</td>
         </tr>`).join('')
       : '<tr><td colspan="7" class="sda-empty">No sign-offs recorded yet.</td></tr>';
+  }
+
+  function renderEmails(emails) {
+    const tbody = document.getElementById('sda-emails');
+    if (!tbody) return;
+    tbody.innerHTML = emails.length
+      ? emails.map(e => `<tr>
+          <td style="white-space:nowrap">${new Date(e.sent_at).toLocaleString('en-AU')}</td>
+          <td>${escHtml(e.wms_email)}</td>
+          <td>${escHtml(e.title || '')}</td>
+          <td>${escHtml(e.email_type)}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="4" class="sda-empty">No emails sent yet.</td></tr>';
   }
 
   /* ── Test email ───────────────────────────────────────────────── */
