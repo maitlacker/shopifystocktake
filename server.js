@@ -7021,6 +7021,48 @@ app.post('/api/stock-receipts', requireAuth, async (req, res) => {
   }
 });
 
+// Diagnostic + recovery for the Rise→Length rename: shows every size row still
+// holding a 'Rise' value with its receipt's form-type info; ?apply=1 moves the
+// value to 'Length' (never overwriting an existing Length entry).
+app.get('/api/stock-receipts/rise-length-debug', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT s.id AS size_row_id, s.receipt_id, s.size_label,
+             s.measurements->>'Rise' AS rise_value,
+             s.measurements->>'Length' AS length_value,
+             r.style_name, r.status AS receipt_status,
+             r.form_type_name, r.form_type_id, ft.name AS form_type_actual
+      FROM stock_receipt_sizes s
+      JOIN stock_receipts r ON r.id = s.receipt_id
+      LEFT JOIN srf_form_types ft ON ft.id = r.form_type_id
+      WHERE s.measurements ? 'Rise'
+      ORDER BY r.id, s.sort_order`);
+
+    if (req.query.apply !== '1') {
+      return res.json({
+        mode: 'dry_run',
+        rows_still_holding_rise: rows.length,
+        rows,
+        hint: rows.length
+          ? 'Data is intact under the old Rise key. Re-run with ?apply=1 to move it to Length (Jeans receipts excluded, existing Length values never overwritten).'
+          : 'No Rise values remain anywhere — nothing to recover.',
+      });
+    }
+
+    const { rowCount } = await pool.query(`
+      UPDATE stock_receipt_sizes s
+      SET measurements = (s.measurements - 'Rise') || jsonb_build_object('Length', s.measurements->'Rise')
+      FROM stock_receipts r
+      LEFT JOIN srf_form_types ft ON ft.id = r.form_type_id
+      WHERE r.id = s.receipt_id
+        AND s.measurements ? 'Rise'
+        AND NOT (s.measurements ? 'Length')
+        AND (LOWER(TRIM(COALESCE(r.form_type_name,''))) = 'bottoms'
+             OR LOWER(TRIM(COALESCE(ft.name,''))) = 'bottoms')`);
+    res.json({ mode: 'applied', rows_migrated: rowCount });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // One-off backfill: mark POs received where a completed receipt already references them.
 // Visit without params for a dry run; add ?apply=1 to write the changes.
 // NOTE: must register before /api/stock-receipts/:id or ":id" swallows the path.

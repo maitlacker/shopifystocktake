@@ -810,9 +810,12 @@ async function initDb() {
     UPDATE stock_receipt_sizes s
       SET measurements = (s.measurements - 'Rise') || jsonb_build_object('Length', s.measurements->'Rise')
       FROM stock_receipts r
+      LEFT JOIN srf_form_types ft ON ft.id = r.form_type_id
       WHERE r.id = s.receipt_id
-        AND r.form_type_name = 'Bottoms'
-        AND s.measurements ? 'Rise';
+        AND s.measurements ? 'Rise'
+        AND NOT (s.measurements ? 'Length')
+        AND (LOWER(TRIM(COALESCE(r.form_type_name,''))) = 'bottoms'
+             OR LOWER(TRIM(COALESCE(ft.name,''))) = 'bottoms');
 
     -- Rename Hem Width → Hip Width in the form type and in stored receipt measurements
     UPDATE srf_form_types
