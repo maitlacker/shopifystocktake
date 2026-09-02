@@ -787,7 +787,7 @@ async function initDb() {
 
     INSERT INTO srf_form_types (name, measurement_fields, sort_order) VALUES
       ('Tops/Dresses', '["Bust/Chest","Waist","Body Length","Hip Width","Sleeve Length","Shoulder Width"]', 1),
-      ('Bottoms', '["Waist","Hip","Thigh","Inseam","Rise"]', 2),
+      ('Bottoms', '["Waist","Hip","Thigh","Inseam","Length"]', 2),
       ('Jeans', '["Waist","Hip","Thigh","Inseam","Rise"]', 3),
       ('Accessories', '["Width","Height","Depth"]', 4),
       ('Shoes', '["Insole Length","Width"]', 5)
@@ -802,6 +802,17 @@ async function initDb() {
     UPDATE srf_form_types
       SET measurement_fields = '["Bust/Chest","Waist","Body Length","Hip Width","Sleeve Length","Shoulder Width"]'
       WHERE name = 'Tops/Dresses' AND NOT (measurement_fields ? 'Waist');
+
+    -- Rename Rise → Length on Bottoms only (Jeans keeps its Rise measurement)
+    UPDATE srf_form_types
+      SET measurement_fields = '["Waist","Hip","Thigh","Inseam","Length"]'
+      WHERE name = 'Bottoms' AND measurement_fields ? 'Rise';
+    UPDATE stock_receipt_sizes s
+      SET measurements = (s.measurements - 'Rise') || jsonb_build_object('Length', s.measurements->'Rise')
+      FROM stock_receipts r
+      WHERE r.id = s.receipt_id
+        AND r.form_type_name = 'Bottoms'
+        AND s.measurements ? 'Rise';
 
     -- Rename Hem Width → Hip Width in the form type and in stored receipt measurements
     UPDATE srf_form_types
