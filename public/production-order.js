@@ -22,6 +22,7 @@ const PANTS_SIZES   = ['6','7','8','9','10','11','12','14','16','18'];
   await loadSuppliers();
   if (poId) {
     await loadPO(poId);
+    loadSpecs();
   } else {
     // New PO — prefill the next sequential number (editable = override)
     try {
@@ -104,6 +105,7 @@ function populateHeader(po) {
   document.getElementById('po-currency').value      = po.currency || 'AUD';
   document.getElementById('po-exchange-rate').value = po.exchange_rate || '1.0000';
   document.getElementById('po-notes').value         = po.notes || '';
+  document.getElementById('po-freight-terms').value = po.freight_terms || '';
   document.getElementById('tot-shipping').value     = po.shipping_cost || '0';
   document.getElementById('tot-gst').checked        = !!po.include_gst;
   document.getElementById('po-type').value          = po.po_type || 'restock';
@@ -490,6 +492,7 @@ function buildPayload(status) {
     shippingCost:   parseFloat(document.getElementById('tot-shipping').value) || 0,
     includeGst:     document.getElementById('tot-gst').checked,
     notes:          document.getElementById('po-notes').value.trim() || null,
+    freightTerms:   document.getElementById('po-freight-terms').value.trim() || null,
     poType:         document.getElementById('po-type').value || 'restock',
     launchType:     document.getElementById('po-launch-type').value || '',
     collectionName: document.getElementById('po-collection-name').value.trim() || null,
@@ -543,6 +546,7 @@ async function savePO(statusOverride) {
       document.getElementById('btn-confirm-po').style.display = '';
     }
     currentPO = saved;
+    loadSpecs();
     document.getElementById('po-page-title').textContent = `PO — ${saved.po_number}`;
     document.getElementById('po-status-badge').style.display = '';
     document.getElementById('po-status-badge').className = `po-status-badge ${saved.status}`;
@@ -598,4 +602,285 @@ function escHtml(str) {
 }
 function escJs(str) {
   return String(str ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+}
+
+// ── Supplier Order Specs (new styles) ──────────────────────────────
+let specsData = {};       // product_code → saved spec (incl. images meta)
+const specOpen = {};      // product_code → editor expanded?
+
+function specSizes(sizeSet) {
+  return sizeSet === 'alpha' ? ALPHA_SIZES : sizeSet === 'pants' ? PANTS_SIZES : NUMERIC_SIZES;
+}
+
+async function loadSpecs() {
+  const section = document.getElementById('po-specs-section');
+  if (!section) return;
+  const newLines = lines.filter(l => l.lineType === 'new' && (l.productCode || '').trim());
+  if (!poId || !newLines.length) { section.style.display = 'none'; return; }
+  section.style.display = '';
+  try {
+    const r = await fetch(`/api/production-orders/${poId}/specs`);
+    const data = await r.json();
+    specsData = {};
+    (data.specs || []).forEach(s => { specsData[s.product_code] = s; });
+  } catch (_) { specsData = {}; }
+  renderSpecs(newLines);
+}
+
+function renderSpecs(newLines) {
+  const wrap = document.getElementById('po-specs-container');
+  wrap.innerHTML = newLines.map(l => {
+    const code = l.productCode.trim();
+    const spec = specsData[code];
+    const open = !!specOpen[code];
+    const hasSpec = !!(spec && (spec.fabric || spec.fit_notes || (spec.images || []).length));
+    return `
+      <div style="border:1.5px solid #e2e8f0;border-radius:12px;margin-bottom:12px;background:#fff">
+        <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px">
+            <span style="font-weight:700;color:#1e293b">${escHtml(l.productName || code)}</span>
+            <span style="font-family:ui-monospace,monospace;font-size:0.8rem;color:#64748b;margin-left:8px">${escHtml(code)}</span>
+            ${hasSpec ? '<span style="font-size:0.7rem;font-weight:700;background:#dcfce7;color:#15803d;border-radius:99px;padding:2px 8px;margin-left:8px">SPEC ✓</span>'
+                      : '<span style="font-size:0.7rem;font-weight:700;background:#fef3c7;color:#92400e;border-radius:99px;padding:2px 8px;margin-left:8px">NO SPEC YET</span>'}
+          </div>
+          <button class="btn btn-secondary" style="padding:6px 14px;font-size:0.82rem"
+            onclick="toggleSpec('${escJs(code)}')">${open ? 'Close' : 'Edit Spec'}</button>
+          <a class="btn" style="padding:6px 14px;font-size:0.82rem;background:#4f46e5;color:#fff;text-decoration:none"
+            href="/api/production-orders/${poId}/supplier-order/${encodeURIComponent(code)}" target="_blank">⬇ Supplier Order PDF</a>
+        </div>
+        ${open ? specEditor(l, code, spec || {}) : ''}
+      </div>`;
+  }).join('');
+}
+
+function toggleSpec(code) {
+  specOpen[code] = !specOpen[code];
+  renderSpecs(lines.filter(l => l.lineType === 'new' && (l.productCode || '').trim()));
+}
+
+function specEditor(l, code, s) {
+  const sizes = specSizes(l.sizeSet);
+  const pt = s.pretreatment || {};
+  const bom = Array.isArray(s.bom) && s.bom.length ? s.bom
+    : [{ component: 'MAIN', material: '', supplier: '', colour: '' }];
+  const chart = Array.isArray(s.spec_chart) && s.spec_chart.length ? s.spec_chart
+    : [{ point: '', values: {} }];
+  const imgs = s.images || [];
+  const front = imgs.find(i => i.kind === 'front');
+  const back  = imgs.find(i => i.kind === 'back');
+  const refs  = imgs.filter(i => i.kind === 'reference');
+  const fld = (label, id, val, ph) => `
+    <div>
+      <label style="display:block;font-size:0.72rem;font-weight:600;color:#64748b;text-transform:uppercase;margin-bottom:4px">${label}</label>
+      <input type="text" id="${id}" value="${escHtml(val || '')}" placeholder="${escHtml(ph || '')}"
+        style="width:100%;padding:8px 11px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:0.9rem;box-sizing:border-box" />
+    </div>`;
+  const imgSlot = (kind, img) => `
+    <div style="text-align:center">
+      <div style="font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px">${kind}</div>
+      <div style="width:130px;height:150px;border:1.5px dashed #cbd5e1;border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f8fafc">
+        ${img ? `<img src="/api/spec-images/${img.id}" style="max-width:100%;max-height:100%;object-fit:contain" />` : '<span style="color:#cbd5e1;font-size:0.8rem">empty</span>'}
+      </div>
+      <button class="btn btn-secondary" style="padding:4px 10px;font-size:0.75rem;margin-top:6px"
+        onclick="uploadSpecImage('${escJs(code)}','${kind.toLowerCase()}')">${img ? 'Replace' : 'Upload'}</button>
+    </div>`;
+
+  return `
+  <div style="border-top:1.5px solid #e2e8f0;padding:16px" id="spec-ed-${cssId(code)}">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:14px">
+      ${fld('Season', `sp-season-${cssId(code)}`, s.season, 'e.g. Spring/Summer')}
+      ${fld('Fabric', `sp-fabric-${cssId(code)}`, s.fabric, 'e.g. Mid Blue Denim Wash (as per sample)')}
+      ${fld('Colour', `sp-colour-${cssId(code)}`, s.colour, 'e.g. Chocolate')}
+      ${fld('Colour Code', `sp-colourcode-${cssId(code)}`, s.colour_code, 'e.g. CT46')}
+    </div>
+    <div style="display:flex;gap:18px;margin-bottom:14px;flex-wrap:wrap">
+      ${imgSlot('FRONT', front)}
+      ${imgSlot('BACK', back)}
+      <div style="flex:1;min-width:240px">
+        <div style="font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px">Reference Images (buttons, zips, details…)</div>
+        ${refs.map(r => `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+            <img src="/api/spec-images/${r.id}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0" />
+            <span style="flex:1;font-size:0.82rem;color:#334155">${escHtml(r.caption || '(no caption)')}</span>
+            <button style="border:none;background:none;color:#ef4444;cursor:pointer;font-weight:700" onclick="deleteSpecImage(${r.id})">✕</button>
+          </div>`).join('')}
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <input type="text" id="sp-refcap-${cssId(code)}" placeholder="Caption for next image…"
+            style="flex:1;padding:7px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:0.84rem" />
+          <button class="btn btn-secondary" style="padding:6px 12px;font-size:0.8rem" onclick="uploadSpecImage('${escJs(code)}','reference')">+ Add</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px">Fit Notes (one per line — printed on the PDF as written)</div>
+    <textarea id="sp-fit-${cssId(code)}" rows="6" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:0.88rem;font-family:inherit;margin-bottom:12px"
+      placeholder="1. Sample size 8 is our production size 12&#10;2. Please reduce the length of size 12 to be 86cm from HSP">${escHtml(s.fit_notes || '')}</textarea>
+
+    <div style="font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px">Questions for the Factory (optional)</div>
+    <textarea id="sp-q-${cssId(code)}" rows="3" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:0.88rem;font-family:inherit;margin-bottom:14px">${escHtml(s.questions || '')}</textarea>
+
+    <div style="font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:6px">Spec Sheet — Garment Measurements (cm)</div>
+    <div style="overflow-x:auto;margin-bottom:8px">
+      <table style="border-collapse:collapse;font-size:0.84rem" id="sp-chart-${cssId(code)}">
+        <thead><tr>
+          <th style="text-align:left;padding:5px 8px;color:#64748b;font-size:0.72rem;border-bottom:2px solid #e2e8f0;min-width:180px">MEASUREMENT POINT</th>
+          ${sizes.map(sz => `<th style="padding:5px 6px;color:#64748b;font-size:0.72rem;border-bottom:2px solid #e2e8f0">${sz}</th>`).join('')}
+          <th></th>
+        </tr></thead>
+        <tbody>
+          ${chart.map(row => specChartRow(row, sizes)).join('')}
+        </tbody>
+      </table>
+    </div>
+    <button class="btn btn-secondary" style="padding:5px 12px;font-size:0.78rem;margin-bottom:16px" onclick="addChartRow('${escJs(code)}')">+ Add Measurement</button>
+
+    <div style="font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:6px">Bill of Material</div>
+    <div style="overflow-x:auto;margin-bottom:8px">
+      <table style="border-collapse:collapse;font-size:0.84rem;width:100%" id="sp-bom-${cssId(code)}">
+        <thead><tr>
+          ${['COMPONENT','MATERIAL','SUPPLIER','COLOUR',''].map(h => `<th style="text-align:left;padding:5px 8px;color:#64748b;font-size:0.72rem;border-bottom:2px solid #e2e8f0">${h}</th>`).join('')}
+        </tr></thead>
+        <tbody>${bom.map(r => bomRow(r)).join('')}</tbody>
+      </table>
+    </div>
+    <button class="btn btn-secondary" style="padding:5px 12px;font-size:0.78rem;margin-bottom:16px" onclick="addBomRow('${escJs(code)}')">+ Add Component</button>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:14px">
+      ${fld('Pre-Wash / Shrunk Required', `sp-prewash-${cssId(code)}`, pt.prewash, 'e.g. If shrinkage likely please pre-wash')}
+      ${fld('Wash Type', `sp-washtype-${cssId(code)}`, pt.wash_type, 'n/a')}
+      ${fld('Shrinkage Allowance', `sp-shrink-${cssId(code)}`, pt.shrinkage, 'n/a')}
+      ${fld('Colourfastness', `sp-colourfast-${cssId(code)}`, pt.colourfastness, 'n/a')}
+      ${fld('Hand Feel Target', `sp-handfeel-${cssId(code)}`, pt.hand_feel, 'n/a')}
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:16px">
+      ${fld('Swing Tag — Code', `sp-tagcode-${cssId(code)}`, s.tag_code, code)}
+      ${fld('Swing Tag — Colour', `sp-tagcolour-${cssId(code)}`, s.tag_colour, s.colour || '')}
+      ${fld('Swing Tag — Name', `sp-tagname-${cssId(code)}`, s.tag_name, l.productName || '')}
+    </div>
+
+    <button class="btn" style="background:#4f46e5;color:#fff" onclick="saveSpec('${escJs(code)}')">Save Spec</button>
+    <span id="sp-status-${cssId(code)}" style="margin-left:10px;font-size:0.85rem;color:#15803d"></span>
+  </div>`;
+}
+
+function cssId(code) { return code.replace(/[^a-zA-Z0-9]/g, '_'); }
+
+function specChartRow(row, sizes) {
+  return `<tr class="sp-chart-row">
+    <td style="padding:3px 4px"><input type="text" class="sp-point" value="${escHtml(row.point || '')}" placeholder="e.g. Length from HSP"
+      style="width:100%;box-sizing:border-box;padding:6px 8px;border:1.5px solid #e2e8f0;border-radius:6px;font-size:0.84rem" /></td>
+    ${sizes.map(sz => `<td style="padding:3px 2px"><input type="text" class="sp-val" data-size="${sz}" value="${escHtml(row.values && row.values[sz] !== undefined ? row.values[sz] : '')}"
+      style="width:52px;padding:6px 4px;border:1.5px solid #e2e8f0;border-radius:6px;font-size:0.84rem;text-align:center" /></td>`).join('')}
+    <td><button style="border:none;background:none;color:#ef4444;cursor:pointer;font-weight:700" onclick="this.closest('tr').remove()">✕</button></td>
+  </tr>`;
+}
+
+function bomRow(r) {
+  const cell = (cls, val, ph, w) => `<td style="padding:3px 4px"><input type="text" class="${cls}" value="${escHtml(val || '')}" placeholder="${ph}"
+    style="width:${w};box-sizing:border-box;padding:6px 8px;border:1.5px solid #e2e8f0;border-radius:6px;font-size:0.84rem" /></td>`;
+  return `<tr class="sp-bom-row">
+    ${cell('sp-bcomp', r.component, 'MAIN', '110px')}
+    ${cell('sp-bmat',  r.material, 'e.g. Denim (as per sample)', '100%')}
+    ${cell('sp-bsup',  r.supplier, 'e.g. Wilkins', '110px')}
+    ${cell('sp-bcol',  r.colour, 'e.g. Mid Blue Wash', '130px')}
+    <td><button style="border:none;background:none;color:#ef4444;cursor:pointer;font-weight:700" onclick="this.closest('tr').remove()">✕</button></td>
+  </tr>`;
+}
+
+function addChartRow(code) {
+  const l = lines.find(x => (x.productCode || '').trim() === code);
+  document.querySelector(`#sp-chart-${cssId(code)} tbody`)
+    .insertAdjacentHTML('beforeend', specChartRow({ point: '', values: {} }, specSizes(l ? l.sizeSet : 'numeric')));
+}
+
+function addBomRow(code) {
+  document.querySelector(`#sp-bom-${cssId(code)} tbody`)
+    .insertAdjacentHTML('beforeend', bomRow({}));
+}
+
+async function saveSpec(code) {
+  const id = cssId(code);
+  const v = (fid) => (document.getElementById(fid)?.value || '').trim() || null;
+  const chart = [...document.querySelectorAll(`#sp-chart-${id} .sp-chart-row`)].map(tr => {
+    const point = tr.querySelector('.sp-point').value.trim();
+    const values = {};
+    tr.querySelectorAll('.sp-val').forEach(inp => { if (inp.value.trim() !== '') values[inp.dataset.size] = inp.value.trim(); });
+    return { point, values };
+  }).filter(r => r.point);
+  const bom = [...document.querySelectorAll(`#sp-bom-${id} .sp-bom-row`)].map(tr => ({
+    component: tr.querySelector('.sp-bcomp').value.trim(),
+    material:  tr.querySelector('.sp-bmat').value.trim(),
+    supplier:  tr.querySelector('.sp-bsup').value.trim(),
+    colour:    tr.querySelector('.sp-bcol').value.trim(),
+  })).filter(r => r.component || r.material);
+
+  const payload = {
+    season: v(`sp-season-${id}`), fabric: v(`sp-fabric-${id}`),
+    colour: v(`sp-colour-${id}`), colour_code: v(`sp-colourcode-${id}`),
+    fit_notes: (document.getElementById(`sp-fit-${id}`)?.value || '').trim() || null,
+    questions: (document.getElementById(`sp-q-${id}`)?.value || '').trim() || null,
+    spec_chart: chart, bom,
+    pretreatment: {
+      prewash: v(`sp-prewash-${id}`), wash_type: v(`sp-washtype-${id}`),
+      shrinkage: v(`sp-shrink-${id}`), colourfastness: v(`sp-colourfast-${id}`),
+      hand_feel: v(`sp-handfeel-${id}`),
+    },
+    tag_code: v(`sp-tagcode-${id}`), tag_colour: v(`sp-tagcolour-${id}`), tag_name: v(`sp-tagname-${id}`),
+  };
+  try {
+    const r = await fetch(`/api/production-orders/${poId}/specs/${encodeURIComponent(code)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    const st = document.getElementById(`sp-status-${id}`);
+    st.textContent = '✓ Saved';
+    setTimeout(() => { st.textContent = ''; }, 2000);
+    const fresh = await fetch(`/api/production-orders/${poId}/specs`).then(x => x.json());
+    specsData = {};
+    (fresh.specs || []).forEach(sp => { specsData[sp.product_code] = sp; });
+  } catch (err) {
+    alert('Failed to save spec: ' + err.message);
+  }
+}
+
+function uploadSpecImage(code, kind) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/jpeg,image/png';
+  input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) return;
+    if (!['image/jpeg', 'image/png'].includes(file.type)) { alert('JPEG or PNG only.'); return; }
+    if (file.size > 8 * 1024 * 1024) { alert('Image too large — keep under 8MB.'); return; }
+    const caption = kind === 'reference'
+      ? (document.getElementById(`sp-refcap-${cssId(code)}`)?.value || '').trim() || null
+      : null;
+    const b64 = await new Promise((res2, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res2(String(fr.result).split(',')[1]);
+      fr.onerror = rej;
+      fr.readAsDataURL(file);
+    });
+    try {
+      const r = await fetch(`/api/production-orders/${poId}/specs/${encodeURIComponent(code)}/images`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, caption, mime: file.type, data_base64: b64 }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      await loadSpecs();
+    } catch (err) { alert('Upload failed: ' + err.message); }
+  };
+  input.click();
+}
+
+async function deleteSpecImage(imgId) {
+  if (!confirm('Remove this image?')) return;
+  await fetch(`/api/spec-images/${imgId}`, { method: 'DELETE' });
+  await loadSpecs();
 }

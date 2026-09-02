@@ -193,6 +193,10 @@
         <label>Notes</label>
         <input type="text" id="po-notes" placeholder="Any internal notes for this order…" />
       </div>
+      <div class="po-field">
+        <label>Freight Terms <span style="font-weight:400;color:#94a3b8">(printed on supplier order, e.g. "FOB TERMS" or "TBC once order is made")</span></label>
+        <input type="text" id="po-freight-terms" placeholder="TBC once order is made" />
+      </div>
     </div>
 
     <!-- Lines -->
@@ -206,6 +210,16 @@
           Click <strong>+ Add Line</strong> to add your first product.
         </p>
       </div>
+    </div>
+
+    <!-- Supplier order specs (new styles only) -->
+    <div class="po-section" id="po-specs-section" style="display:none">
+      <p class="po-section-title" style="margin-bottom:4px">Supplier Order Specs — New Styles</p>
+      <p style="font-size:0.84rem;color:#64748b;margin:0 0 14px">
+        Full bulk-order details per new style: images, fit notes, spec chart, bill of material.
+        Each style downloads as its own supplier-ready PDF. Restock lines don't need this.
+      </p>
+      <div id="po-specs-container"></div>
     </div>
 
     <!-- Footer / Totals -->

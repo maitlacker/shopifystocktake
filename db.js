@@ -710,6 +710,43 @@ async function initDb() {
     ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS lead_time_air INT;
     ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS sku_prefixes TEXT;
 
+    -- Supplier order specs — per (order, product_code) because lines are
+    -- delete+reinserted on every PO save (line ids are not stable)
+    CREATE TABLE IF NOT EXISTS production_order_specs (
+      id           SERIAL PRIMARY KEY,
+      order_id     INT NOT NULL REFERENCES production_orders(id) ON DELETE CASCADE,
+      product_code TEXT NOT NULL,
+      season       TEXT,
+      fabric       TEXT,
+      colour       TEXT,
+      colour_code  TEXT,
+      fit_notes    TEXT,
+      questions    TEXT,
+      bom          JSONB NOT NULL DEFAULT '[]',
+      pretreatment JSONB NOT NULL DEFAULT '{}',
+      spec_chart   JSONB NOT NULL DEFAULT '[]',
+      tag_code     TEXT,
+      tag_colour   TEXT,
+      tag_name     TEXT,
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by   TEXT,
+      UNIQUE(order_id, product_code)
+    );
+
+    CREATE TABLE IF NOT EXISTS production_order_spec_images (
+      id         SERIAL PRIMARY KEY,
+      spec_id    INT NOT NULL REFERENCES production_order_specs(id) ON DELETE CASCADE,
+      kind       TEXT NOT NULL DEFAULT 'reference',
+      caption    TEXT,
+      mime       TEXT NOT NULL DEFAULT 'image/jpeg',
+      data       TEXT NOT NULL,
+      sort_order INT NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_spec_images_spec
+      ON production_order_spec_images(spec_id, sort_order);
+
+    ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS freight_terms TEXT;
+
     ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
     ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS archived_by TEXT;
     ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS po_type TEXT NOT NULL DEFAULT 'restock';

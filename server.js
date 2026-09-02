@@ -1930,7 +1930,7 @@ async function upsertLines(client, orderId, lines) {
 app.post('/api/production-orders', async (req, res) => {
   const { poNumber, supplierId, supplierName, orderDate, deliveryDate, freightMode,
           currency, exchangeRate, shippingCost, includeGst, notes, lines=[],
-          poType, launchType, collectionName } = req.body;
+          poType, launchType, collectionName, freightTerms } = req.body;
   const client = await pool.connect();
   try {
     // Blank number → auto-generate; provided number (override) must be unused
@@ -1949,11 +1949,11 @@ app.post('/api/production-orders', async (req, res) => {
     const { rows:[po] } = await client.query(
       `INSERT INTO production_orders
          (po_number,supplier_id,supplier_name,order_date,delivery_date,freight_mode,
-          currency,exchange_rate,shipping_cost,include_gst,notes,po_type,launch_type,collection_name)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+          currency,exchange_rate,shipping_cost,include_gst,notes,po_type,launch_type,collection_name,freight_terms)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
       [finalPoNumber, supplierId||null, supplierName||'', orderDate, deliveryDate||null,
        freightMode||'sea', currency||'AUD', exchangeRate||1, shippingCost||0, includeGst||false, notes||null,
-       poType||'restock', launchType||'', collectionName||null]
+       poType||'restock', launchType||'', collectionName||null, freightTerms||null]
     );
     await upsertLines(client, po.id, lines);
     await client.query('COMMIT');
@@ -1968,7 +1968,7 @@ app.put('/api/production-orders/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   const { poNumber, supplierId, supplierName, orderDate, deliveryDate, freightMode,
           currency, exchangeRate, shippingCost, includeGst, notes, status, lines,
-          poType, launchType, collectionName } = req.body;
+          poType, launchType, collectionName, freightTerms } = req.body;
   const client = await pool.connect();
   try {
     // Overridden PO numbers must not collide with any other PO
@@ -1985,12 +1985,12 @@ app.put('/api/production-orders/:id', async (req, res) => {
          po_number=$1,supplier_id=$2,supplier_name=$3,order_date=$4,delivery_date=$5,
          freight_mode=$6,currency=$7,exchange_rate=$8,shipping_cost=$9,include_gst=$10,
          notes=$11,status=COALESCE($12,status),po_type=$13,launch_type=$14,
-         collection_name=$15,updated_at=NOW()
-       WHERE id=$16 RETURNING *`,
+         collection_name=$15,freight_terms=$16,updated_at=NOW()
+       WHERE id=$17 RETURNING *`,
       [poNumber, supplierId||null, supplierName||'', orderDate, deliveryDate||null,
        freightMode||'sea', currency||'AUD', exchangeRate||1, shippingCost||0,
        includeGst||false, notes||null, status||null,
-       poType||'restock', launchType||'', collectionName||null, id]
+       poType||'restock', launchType||'', collectionName||null, freightTerms||null, id]
     );
     if (!po) { await client.query('ROLLBACK'); return res.status(404).json({ error:'Not found' }); }
     if (lines !== undefined) await upsertLines(client, id, lines);
@@ -2000,6 +2000,379 @@ app.put('/api/production-orders/:id', async (req, res) => {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
   } finally { client.release(); }
+});
+
+// ── Supplier Order Specs (new styles) ───────────────────────────────
+// Keyed by (order_id, product_code) — line ids are recreated on every save.
+
+const SPEC_SIZE_SETS = {
+  numeric: ['6','8','10','12','14','16','18'],
+  alpha:   ['XS','S','M','L','XL','XXL'],
+  pants:   ['6','7','8','9','10','11','12','14','16','18'],
+};
+
+app.get('/api/production-orders/:id/specs', async (req, res) => {
+  try {
+    const { rows: specs } = await pool.query(
+      `SELECT * FROM production_order_specs WHERE order_id=$1`, [req.params.id]);
+    const specIds = specs.map(s => s.id);
+    let images = [];
+    if (specIds.length) {
+      const { rows } = await pool.query(
+        `SELECT id, spec_id, kind, caption, mime, sort_order
+         FROM production_order_spec_images WHERE spec_id = ANY($1::int[])
+         ORDER BY sort_order, id`, [specIds]);
+      images = rows;
+    }
+    res.json({ specs: specs.map(s => ({ ...s, images: images.filter(i => i.spec_id === s.id) })) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/production-orders/:id/specs/:code', requireAuth, async (req, res) => {
+  const { season, fabric, colour, colour_code, fit_notes, questions,
+          bom, pretreatment, spec_chart, tag_code, tag_colour, tag_name } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO production_order_specs
+        (order_id, product_code, season, fabric, colour, colour_code, fit_notes, questions,
+         bom, pretreatment, spec_chart, tag_code, tag_colour, tag_name, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       ON CONFLICT (order_id, product_code) DO UPDATE SET
+         season=EXCLUDED.season, fabric=EXCLUDED.fabric, colour=EXCLUDED.colour,
+         colour_code=EXCLUDED.colour_code, fit_notes=EXCLUDED.fit_notes, questions=EXCLUDED.questions,
+         bom=EXCLUDED.bom, pretreatment=EXCLUDED.pretreatment, spec_chart=EXCLUDED.spec_chart,
+         tag_code=EXCLUDED.tag_code, tag_colour=EXCLUDED.tag_colour, tag_name=EXCLUDED.tag_name,
+         updated_at=NOW(), updated_by=EXCLUDED.updated_by
+       RETURNING id`,
+      [req.params.id, req.params.code, season||null, fabric||null, colour||null, colour_code||null,
+       fit_notes||null, questions||null, JSON.stringify(bom||[]), JSON.stringify(pretreatment||{}),
+       JSON.stringify(spec_chart||[]), tag_code||null, tag_colour||null, tag_name||null, req.user.email]
+    );
+    res.json({ ok: true, spec_id: rows[0].id });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/production-orders/:id/specs/:code/images', requireAuth, async (req, res) => {
+  const { kind, caption, mime, data_base64 } = req.body;
+  if (!data_base64) return res.status(400).json({ error: 'image required' });
+  if (!['image/jpeg', 'image/png'].includes(mime)) {
+    return res.status(400).json({ error: 'JPEG or PNG only (the PDF engine cannot embed other formats)' });
+  }
+  try {
+    // Ensure the spec row exists so images can attach before first save
+    const { rows: specRows } = await pool.query(
+      `INSERT INTO production_order_specs (order_id, product_code, updated_by)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (order_id, product_code) DO UPDATE SET updated_at=NOW()
+       RETURNING id`,
+      [req.params.id, req.params.code, req.user.email]
+    );
+    const specId = specRows[0].id;
+    const k = ['front','back','reference'].includes(kind) ? kind : 'reference';
+    if (k !== 'reference') {
+      // Front/back are single slots — replace any existing
+      await pool.query(`DELETE FROM production_order_spec_images WHERE spec_id=$1 AND kind=$2`, [specId, k]);
+    }
+    const { rows } = await pool.query(
+      `INSERT INTO production_order_spec_images (spec_id, kind, caption, mime, data, sort_order)
+       VALUES ($1,$2,$3,$4,$5,
+         COALESCE((SELECT MAX(sort_order)+1 FROM production_order_spec_images WHERE spec_id=$1), 0))
+       RETURNING id, kind, caption, mime, sort_order`,
+      [specId, k, caption || null, mime, data_base64]
+    );
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/spec-images/:imgId', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT mime, data FROM production_order_spec_images WHERE id=$1`, [req.params.imgId]);
+    if (!rows.length) return res.status(404).send('Not found');
+    res.setHeader('Content-Type', rows[0].mime);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(Buffer.from(rows[0].data, 'base64'));
+  } catch (err) { res.status(500).send(err.message); }
+});
+
+app.delete('/api/spec-images/:imgId', requireAuth, async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM production_order_spec_images WHERE id=$1`, [req.params.imgId]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// The deliverable: one Bulk Order Form PDF per style
+app.get('/api/production-orders/:id/supplier-order/:code', requireAuth, async (req, res) => {
+  try {
+    const code = req.params.code;
+    const [{ rows: poRows }, { rows: lineRows }, { rows: specRows }] = await Promise.all([
+      pool.query(`SELECT * FROM production_orders WHERE id=$1`, [req.params.id]),
+      pool.query(`SELECT * FROM production_order_lines WHERE order_id=$1 AND product_code=$2 LIMIT 1`,
+        [req.params.id, code]),
+      pool.query(`SELECT * FROM production_order_specs WHERE order_id=$1 AND product_code=$2`,
+        [req.params.id, code]),
+    ]);
+    if (!poRows.length)   return res.status(404).send('PO not found');
+    if (!lineRows.length) return res.status(404).send('Style not found on this PO');
+    const po   = poRows[0];
+    const line = lineRows[0];
+    const spec = specRows[0] || {};
+    let images = [];
+    if (spec.id) {
+      const { rows } = await pool.query(
+        `SELECT kind, caption, data FROM production_order_spec_images
+         WHERE spec_id=$1 ORDER BY sort_order, id`, [spec.id]);
+      images = rows;
+    }
+
+    const sizes = SPEC_SIZE_SETS[line.size_set] || SPEC_SIZE_SETS.numeric;
+    const qtys  = line.quantities || {};
+
+    const safe = String(code).replace(/[^\w.\-]/g, '_');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Supplier-Order-PO${po.po_number}-${safe}.pdf"`);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    doc.pipe(res);
+    const ML = 40, PW = doc.page.width, MR = PW - ML, W = MR - ML;
+    const NAVY = '#1e293b', MID = '#64748b', BORDER = '#cbd5e1', BG = '#f1f5f9';
+
+    const band = (title, y) => {
+      doc.rect(ML, y, W, 20).fillColor(BG).fill();
+      doc.fontSize(9).font('Helvetica-Bold').fillColor(MID).text(title, ML + 6, y + 6, { lineBreak: false });
+      return y + 26;
+    };
+    const ensure = (y, needed) => {
+      if (y + needed > doc.page.height - 50) { doc.addPage(); return 40; }
+      return y;
+    };
+
+    // ── Title ──
+    doc.fontSize(20).font('Helvetica-Bold').fillColor(NAVY)
+      .text('BULK ORDER FORM', ML, 42, { lineBreak: false });
+    doc.fontSize(14).font('Helvetica-Bold').fillColor(MID)
+      .text(`PO#${po.po_number}`, ML, 46, { width: W, align: 'right', lineBreak: false });
+    doc.moveTo(ML, 70).lineTo(MR, 70).strokeColor(NAVY).lineWidth(1.5).stroke();
+
+    // ── Header fields (2 columns) ──
+    let y = 82;
+    const headerPairs = [
+      ['FACTORY', po.supplier_name || '—'],
+      ['SEASON', spec.season || '—'],
+      ['STYLE NUMBER', code],
+      ['FABRIC', spec.fabric || '—'],
+      ['STYLE NAME', line.product_name || '—'],
+      ['COLOUR', [spec.colour, spec.colour_code].filter(Boolean).join(' ') || '—'],
+      ['UNIT PRICE', line.unit_price ? `$${Number(line.unit_price).toFixed(2)} ${po.currency}` : '—'],
+      ['SIZES', sizes.join(' / ')],
+    ];
+    const colW = W / 2;
+    for (let i = 0; i < headerPairs.length; i += 2) {
+      for (let c = 0; c < 2 && i + c < headerPairs.length; c++) {
+        const [label, val] = headerPairs[i + c];
+        const x = ML + c * colW;
+        doc.fontSize(7.5).font('Helvetica-Bold').fillColor(MID).text(label, x, y, { lineBreak: false });
+        doc.fontSize(10).font('Helvetica').fillColor(NAVY)
+          .text(String(val), x, y + 10, { width: colW - 14, height: 24, ellipsis: true });
+      }
+      y += 32;
+    }
+
+    // ── Front / Back images ──
+    const front = images.find(i => i.kind === 'front');
+    const back  = images.find(i => i.kind === 'back');
+    if (front || back) {
+      y = ensure(y, 250);
+      const boxW = (W - 16) / 2, boxH = 230;
+      [['FRONT', front], ['BACK', back]].forEach(([label, img], idx) => {
+        const x = ML + idx * (boxW + 16);
+        doc.fontSize(9).font('Helvetica-Bold').fillColor(MID).text(label, x, y, { width: boxW, align: 'center' });
+        doc.rect(x, y + 14, boxW, boxH).strokeColor(BORDER).lineWidth(0.75).stroke();
+        if (img) {
+          try {
+            doc.image(Buffer.from(img.data, 'base64'), x + 6, y + 20, { fit: [boxW - 12, boxH - 12], align: 'center', valign: 'center' });
+          } catch (e) { /* unreadable image — leave the box empty */ }
+        }
+      });
+      y += 14 + 230 + 14;
+    }
+
+    // ── Fit notes / questions ──
+    const textBlock = (title, text, startY) => {
+      if (!text) return startY;
+      doc.fontSize(9.5).font('Helvetica');
+      const h = doc.heightOfString(text, { width: W - 12, lineGap: 2 });
+      let yy = ensure(startY, 30 + h);
+      yy = band(title, yy);
+      doc.fontSize(9.5).font('Helvetica').fillColor(NAVY).text(text, ML + 6, yy, { width: W - 12, lineGap: 2 });
+      return yy + h + 12;
+    };
+    y = textBlock('FIT NOTES', spec.fit_notes, y);
+    y = textBlock('QUESTIONS', spec.questions, y);
+
+    // ── Purchase order size table ──
+    y = ensure(y, 90);
+    y = band(`PURCHASE ORDER #${po.po_number}`, y);
+    const cols = ['SIZE', ...sizes, 'TOTAL'];
+    const cw = W / cols.length;
+    const rowH = 22;
+    doc.rect(ML, y, W, rowH).fillColor(BG).fill();
+    cols.forEach((c2, i) => {
+      doc.fontSize(8.5).font('Helvetica-Bold').fillColor(MID)
+        .text(String(c2), ML + i * cw, y + 7, { width: cw, align: 'center', lineBreak: false });
+    });
+    y += rowH;
+    const vals = [line.product_name || code, ...sizes.map(s => qtys[s] || 0), line.total_qty || 0];
+    vals.forEach((v, i) => {
+      doc.fontSize(i === 0 ? 8 : 10).font(i === cols.length - 1 ? 'Helvetica-Bold' : 'Helvetica').fillColor(NAVY)
+        .text(String(v), ML + i * cw + 2, y + 6, { width: cw - 4, align: 'center', height: rowH, ellipsis: true });
+    });
+    for (let i = 0; i <= cols.length; i++) {
+      doc.moveTo(ML + i * cw, y - rowH).lineTo(ML + i * cw, y + rowH).strokeColor(BORDER).lineWidth(0.5).stroke();
+    }
+    doc.rect(ML, y - rowH, W, rowH * 2).strokeColor(BORDER).lineWidth(0.75).stroke();
+    y += rowH + 14;
+
+    // ── Order details ──
+    y = ensure(y, 70);
+    y = band('ORDER DETAILS', y);
+    const fmtD = (d) => d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : 'TBC';
+    const month = po.delivery_date
+      ? new Date(po.delivery_date).toLocaleDateString('en-AU', { month: 'long', year: 'numeric' }) : 'TBC';
+    [['PO DATE', fmtD(po.order_date)], ['DELIVERY MONTH', month],
+     ['FREIGHT', po.freight_terms || (po.freight_mode || '').toUpperCase() || 'TBC']].forEach(([l, v], i) => {
+      const x = ML + i * (W / 3);
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor(MID).text(l, x, y, { lineBreak: false });
+      doc.fontSize(10).font('Helvetica').fillColor(NAVY).text(String(v), x, y + 10, { width: W / 3 - 10, lineBreak: false });
+    });
+    y += 36;
+
+    // ── Spec sheet (measurement chart) ──
+    const chart = Array.isArray(spec.spec_chart) ? spec.spec_chart : [];
+    if (chart.length) {
+      const ch = 20;
+      y = ensure(y, 30 + (chart.length + 1) * ch);
+      y = band('SPEC SHEET — GARMENT MEASUREMENTS (CM)', y);
+      const pcw = Math.min(170, W * 0.32);
+      const scw = (W - pcw) / sizes.length;
+      const top = y;
+      doc.rect(ML, y, W, ch).fillColor(BG).fill();
+      doc.fontSize(8).font('Helvetica-Bold').fillColor(MID)
+        .text('MEASUREMENT POINT', ML + 4, y + 6, { lineBreak: false });
+      sizes.forEach((s, i) => {
+        doc.text(String(s), ML + pcw + i * scw, y + 6, { width: scw, align: 'center', lineBreak: false });
+      });
+      y += ch;
+      chart.forEach(row => {
+        doc.fontSize(8.5).font('Helvetica').fillColor(NAVY)
+          .text(String(row.point || ''), ML + 4, y + 6, { width: pcw - 8, height: ch, ellipsis: true });
+        sizes.forEach((s, i) => {
+          const v = row.values && row.values[s] !== undefined && row.values[s] !== '' ? row.values[s] : '—';
+          doc.text(String(v), ML + pcw + i * scw, y + 6, { width: scw, align: 'center', lineBreak: false });
+        });
+        doc.moveTo(ML, y).lineTo(MR, y).strokeColor(BORDER).lineWidth(0.4).stroke();
+        y += ch;
+      });
+      doc.rect(ML, top, W, y - top).strokeColor(BORDER).lineWidth(0.75).stroke();
+      doc.moveTo(ML + pcw, top).lineTo(ML + pcw, y).strokeColor(BORDER).lineWidth(0.5).stroke();
+      y += 14;
+    }
+
+    // ── Bill of material ──
+    const bom = Array.isArray(spec.bom) ? spec.bom : [];
+    if (bom.length) {
+      y = ensure(y, 40 + bom.length * 24);
+      y = band('BILL OF MATERIAL', y);
+      const bcols = [['COMPONENT', 0.2], ['MATERIAL', 0.42], ['SUPPLIER', 0.19], ['COLOUR', 0.19]];
+      let x0 = ML;
+      const top2 = y;
+      doc.rect(ML, y, W, 18).fillColor(BG).fill();
+      bcols.forEach(([l, f]) => {
+        doc.fontSize(7.5).font('Helvetica-Bold').fillColor(MID).text(l, x0 + 4, y + 5, { lineBreak: false });
+        x0 += W * f;
+      });
+      y += 18;
+      bom.forEach(r => {
+        doc.fontSize(8.5).font('Helvetica');
+        const h = Math.max(
+          18,
+          doc.heightOfString(String(r.material || ''), { width: W * 0.42 - 8 }) + 8
+        );
+        y = ensure(y, h);
+        let x = ML;
+        [[r.component, 0.2, 'Helvetica-Bold'], [r.material, 0.42, 'Helvetica'],
+         [r.supplier, 0.19, 'Helvetica'], [r.colour, 0.19, 'Helvetica']].forEach(([v, f, fnt]) => {
+          doc.fontSize(8.5).font(fnt).fillColor(NAVY).text(String(v || ''), x + 4, y + 4, { width: W * f - 8 });
+          x += W * f;
+        });
+        doc.moveTo(ML, y).lineTo(MR, y).strokeColor(BORDER).lineWidth(0.4).stroke();
+        y += h;
+      });
+      doc.rect(ML, top2, W, y - top2).strokeColor(BORDER).lineWidth(0.75).stroke();
+      y += 14;
+    }
+
+    // ── Pre-treatment & wash ──
+    const pt = spec.pretreatment || {};
+    const ptRows = [
+      ['Pre-Wash/shrunk Required', pt.prewash],
+      ['Wash Type', pt.wash_type],
+      ['Shrinkage Allowance', pt.shrinkage],
+      ['Colourfastness', pt.colourfastness],
+      ['Hand Feel Target', pt.hand_feel],
+    ].filter(([, v]) => v);
+    if (ptRows.length) {
+      y = ensure(y, 40 + ptRows.length * 18);
+      y = band('PRE-TREATMENT & WASH', y);
+      const top3 = y;
+      ptRows.forEach(([l, v]) => {
+        doc.fontSize(8.5).font('Helvetica-Bold').fillColor(NAVY).text(l, ML + 4, y + 5, { lineBreak: false });
+        doc.font('Helvetica').text(String(v), ML + W * 0.4, y + 5, { width: W * 0.6 - 8, lineBreak: false });
+        doc.moveTo(ML, y).lineTo(MR, y).strokeColor(BORDER).lineWidth(0.4).stroke();
+        y += 18;
+      });
+      doc.rect(ML, top3, W, y - top3).strokeColor(BORDER).lineWidth(0.75).stroke();
+      y += 14;
+    }
+
+    // ── Swing tag sticker ──
+    y = ensure(y, 120);
+    y = band('STICKER FOR SWING TAG', y);
+    const tagRows = [
+      ['CODE', spec.tag_code || code],
+      ['COLOUR', spec.tag_colour || spec.colour || '—'],
+      ['NAME', spec.tag_name || line.product_name || '—'],
+      ['SIZE', 'Accordingly'],
+    ];
+    const top4 = y;
+    tagRows.forEach(([l, v]) => {
+      doc.fontSize(8.5).font('Helvetica-Bold').fillColor(MID).text(l, ML + 8, y + 6, { lineBreak: false });
+      doc.fontSize(10).font('Helvetica').fillColor(NAVY).text(String(v), ML + 100, y + 5, { width: W - 120, lineBreak: false });
+      y += 22;
+    });
+    doc.rect(ML, top4, Math.min(320, W), y - top4).strokeColor(BORDER).lineWidth(1).stroke();
+    y += 14;
+
+    // ── Reference images ──
+    const refs = images.filter(i => i.kind === 'reference');
+    for (const img of refs) {
+      y = ensure(y, 300);
+      if (img.caption) {
+        doc.fontSize(9).font('Helvetica-Bold').fillColor(NAVY).text(img.caption, ML, y, { width: W });
+        y = doc.y + 6;
+      }
+      try {
+        doc.image(Buffer.from(img.data, 'base64'), ML, y, { fit: [W, 300] });
+      } catch (e) { /* skip unreadable image */ }
+      y += 310;
+    }
+
+    doc.end();
+  } catch (err) {
+    console.error('[supplier-order] PDF error:', err.message);
+    if (!res.headersSent) res.status(500).send(err.message);
+  }
 });
 
 app.delete('/api/production-orders/:id', async (req, res) => {
