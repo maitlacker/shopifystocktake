@@ -7542,7 +7542,7 @@ app.put('/api/stock-receipts/:id', requireAuth, async (req, res) => {
       : [
       'receipt_type','style_name','supplier','invoice_number','po_number','po_id',
       'product_code','shopify_product_id','shopify_product_title','receipt_date',
-      'processed_by','stock_matches_invoice','on_rack_for_photoshoot',
+      'processed_by','stock_matches_invoice','on_rack_for_photoshoot','expected_total',
       'cost_price','discount_percent','freight_price','final_price',
       'fabric','stretch_allowance','product_features','notes',
     ];
@@ -8069,8 +8069,22 @@ app.get('/api/stock-receipts/:id/pdf', requireAuth, async (req, res) => {
     field('STRETCH ALLOWANCE',  r.stretch_allowance, ML + c2 + 12, c2, y);
     y += 34;
 
-    field('STOCK MATCHES INVOICE',  r.stock_matches_invoice  == null ? '—' : (r.stock_matches_invoice  ? 'Yes ✓' : 'No ✗'), ML,           c2, y);
-    field('ON RACK FOR PHOTOSHOOT', r.on_rack_for_photoshoot == null ? '—' : (r.on_rack_for_photoshoot ? 'Yes ✓' : 'No ✗'), ML + c2 + 12, c2, y);
+    // Expected vs counted totals — the counted figure comes from the size rows
+    const countedTotal = sizes.reduce((s2, sz) => s2 + (sz.qty || 0), 0);
+    let matchStr;
+    if (r.expected_total != null) {
+      const diff = countedTotal - r.expected_total;
+      matchStr = diff === 0 ? 'Yes ✓'
+        : `No ✗ (${diff > 0 ? `${diff} over` : `${-diff} short`})`;
+    } else {
+      matchStr = r.stock_matches_invoice == null ? '—' : (r.stock_matches_invoice ? 'Yes ✓' : 'No ✗');
+    }
+    const c3b = W / 3 - 6;
+    field('EXPECTED TOTAL', r.expected_total != null ? `${r.expected_total} units` : '—', ML, c3b, y);
+    field('COUNTED TOTAL',  `${countedTotal} units`, ML + c3b + 10, c3b, y);
+    field('TOTALS MATCH',   matchStr, ML + (c3b + 10) * 2, c3b, y);
+    y += 34;
+    field('ON RACK FOR PHOTOSHOOT', r.on_rack_for_photoshoot == null ? '—' : (r.on_rack_for_photoshoot ? 'Yes ✓' : 'No ✗'), ML, c2, y);
     y += 34 + 6;
     hLine(y);
     y += 10;

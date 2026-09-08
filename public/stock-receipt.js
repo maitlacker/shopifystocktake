@@ -222,11 +222,8 @@ function renderBody(r, sizes, photos, audit) {
       </div>
       <div class="srf-row cols-2">
         <div class="srf-field">
-          <label>Stock Matches Invoice?</label>
-          <div class="srf-toggle-row">
-            <button class="srf-toggle" id="tog-inv-yes" onclick="setToggle('invoice',true)"${ro_dis}>Yes</button>
-            <button class="srf-toggle" id="tog-inv-no"  onclick="setToggle('invoice',false)"${ro_dis}>No</button>
-          </div>
+          <label>Expected Total Qty <span style="font-weight:400;color:#94a3b8;font-size:0.72rem">(from invoice/PO — compared to your count)</span></label>
+          <input type="number" id="f-expected-total" value="${r.expected_total ?? ''}" placeholder="e.g. 400" min="0" step="1"${ro_attr} oninput="updateTotal()" />
         </div>
         <div class="srf-field">
           <label>On Rack for Photoshoot?</label>
@@ -270,7 +267,7 @@ function renderBody(r, sizes, photos, audit) {
     <!-- Notes -->
     <div class="srf-section">
       <div class="srf-section-title">Notes</div>
-      <textarea id="f-notes" placeholder="Any additional notes…"${roSoft_attr}>${escHtml(r.notes || '')}</textarea>
+      <textarea id="f-notes" placeholder="Any additional notes…" style="min-height:180px;resize:vertical"${roSoft_attr}>${escHtml(r.notes || '')}</textarea>
     </div>
 
     <!-- Photos -->
@@ -403,20 +400,39 @@ function renderSizeGrid(sizes) {
       <tbody>${rows}</tbody>
       <tfoot>
         <tr>
-          <td>Total</td>
+          <td>Total <span id="total-compare"></span></td>
           <td id="size-total" style="font-weight:700">${totalQty}</td>
           <td></td>
           ${mFields.map(() => '<td></td>').join('')}
         </tr>
       </tfoot>
     </table>`;
+  updateTotal();
 }
 
 function updateTotal() {
   let t = 0;
-  document.querySelectorAll('.qty-input').forEach(i => { t += Number(i.value) || 0; });
+  const qtyInputs = document.querySelectorAll('.qty-input');
+  if (qtyInputs.length) {
+    qtyInputs.forEach(i => { t += Number(i.value) || 0; });
+  } else {
+    // Read-only grid (completed receipt) — total from stored data
+    t = sizesData.reduce((s, r) => s + (r.qty || 0), 0);
+  }
   const el = document.getElementById('size-total');
   if (el) el.textContent = t;
+
+  // Compare against the expected total from the header
+  const cmp = document.getElementById('total-compare');
+  if (!cmp) return;
+  const expRaw = document.getElementById('f-expected-total')?.value;
+  const expected = expRaw !== undefined && expRaw !== null && String(expRaw).trim() !== ''
+    ? parseInt(expRaw, 10) : null;
+  if (expected === null || isNaN(expected)) { cmp.innerHTML = ''; return; }
+  const diff = t - expected;
+  cmp.innerHTML = diff === 0
+    ? `<span style="background:#dcfce7;color:#15803d;border-radius:99px;padding:2px 10px;font-size:0.75rem;font-weight:700;margin-left:8px">✓ matches expected (${expected})</span>`
+    : `<span style="background:#fee2e2;color:#b91c1c;border-radius:99px;padding:2px 10px;font-size:0.75rem;font-weight:700;margin-left:8px">⚠ ${Math.abs(diff)} ${diff > 0 ? 'OVER' : 'SHORT of'} expected (${expected})</span>`;
 }
 
 function buildSizeGridData() {
@@ -764,7 +780,18 @@ function setSaveStatus(state, msg) {
 function collectFields() {
   const features = Array.from(document.querySelectorAll('.feature-input')).map(i => i.value.trim());
   const num = s => { const n = parseFloat(s); return isNaN(n) ? null : n; };
+
+  // Expected vs counted — stock_matches_invoice is now derived, not ticked
+  const expRaw = document.getElementById('f-expected-total')?.value;
+  const expectedTotal = expRaw !== undefined && String(expRaw ?? '').trim() !== '' ? parseInt(expRaw, 10) : null;
+  let counted = 0;
+  const qtyInputs = document.querySelectorAll('.qty-input');
+  if (qtyInputs.length) qtyInputs.forEach(i => { counted += Number(i.value) || 0; });
+  else counted = sizesData.reduce((s, r) => s + (r.qty || 0), 0);
+  const matches = expectedTotal !== null && !isNaN(expectedTotal) ? counted === expectedTotal : invoiceVal;
+
   return {
+    expected_total:         expectedTotal !== null && !isNaN(expectedTotal) ? expectedTotal : null,
     style_name:             document.getElementById('f-style-name')?.value.trim()          || null,
     supplier:               document.getElementById('f-supplier')?.value.trim()            || null,
     receipt_date:           document.getElementById('f-receipt-date')?.value               || null,
@@ -779,7 +806,7 @@ function collectFields() {
     final_price:            num(document.getElementById('f-final-price')?.value),
     fabric:                 document.getElementById('f-fabric')?.value.trim()              || null,
     stretch_allowance:      document.getElementById('f-stretch-allowance')?.value.trim()   || null,
-    stock_matches_invoice:  invoiceVal,
+    stock_matches_invoice:  matches,
     on_rack_for_photoshoot: rackVal,
     product_features:       features,
     notes:                  document.getElementById('f-notes')?.value.trim()               || null,

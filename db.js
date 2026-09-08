@@ -945,6 +945,7 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_srf_audit_receipt
       ON stock_receipt_audit(receipt_id, changed_at DESC);
 
+    ALTER TABLE stock_receipts ADD COLUMN IF NOT EXISTS expected_total INT;
     ALTER TABLE stock_receipt_sizes ADD COLUMN IF NOT EXISTS weight_grams NUMERIC(10,3);
 
     -- Widen the original NUMERIC(8,1) weight column — 1dp silently rounded
