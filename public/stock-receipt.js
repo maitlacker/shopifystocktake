@@ -359,17 +359,17 @@ function renderSizeGrid(sizes) {
       const mv = m[field] != null ? m[field] : '';
       return ro
         ? `<td><input type="number" value="${escHtml(String(mv))}" readonly /></td>`
-        : `<td><input type="number" class="meas-input" data-sidx="${idx}" data-field="${escHtml(field)}" value="${escHtml(String(mv))}" step="0.1" min="0" /></td>`;
+        : `<td><input type="number" class="meas-input" data-sidx="${idx}" data-field="${escHtml(field)}" value="${escHtml(String(mv))}" step="any" min="0" /></td>`;
     }).join('');
 
     const qtyCell = ro
       ? `<input type="number" value="${s.qty ?? ''}" readonly />`
       : `<input type="number" class="qty-input" data-sidx="${idx}" value="${s.qty ?? ''}" min="0" step="1" oninput="updateTotal()" />`;
 
-    const wv = s.weight_grams != null ? s.weight_grams : '';
+    const wv = s.weight_grams != null ? parseFloat(s.weight_grams) : '';
     const weightCell = ro
       ? `<input type="number" value="${escHtml(String(wv))}" readonly />`
-      : `<input type="number" class="weight-input" data-sidx="${idx}" value="${escHtml(String(wv))}" min="0" step="0.1" placeholder="g" />`;
+      : `<input type="number" class="weight-input" data-sidx="${idx}" value="${escHtml(String(wv))}" min="0" step="any" placeholder="g" />`;
 
     return `<tr>
       <td class="srf-size-label">${escHtml(s.size_label)}</td>

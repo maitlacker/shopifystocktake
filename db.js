@@ -945,7 +945,21 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_srf_audit_receipt
       ON stock_receipt_audit(receipt_id, changed_at DESC);
 
-    ALTER TABLE stock_receipt_sizes ADD COLUMN IF NOT EXISTS weight_grams NUMERIC(8,1);
+    ALTER TABLE stock_receipt_sizes ADD COLUMN IF NOT EXISTS weight_grams NUMERIC(10,3);
+
+    -- Widen the original NUMERIC(8,1) weight column — 1dp silently rounded
+    -- entered values (0.52 and 0.54 both became 0.5). Guarded so the table
+    -- is only rewritten once, not on every restart.
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='stock_receipt_sizes' AND column_name='weight_grams'
+          AND (numeric_precision <> 10 OR numeric_scale <> 3)
+      ) THEN
+        ALTER TABLE stock_receipt_sizes ALTER COLUMN weight_grams TYPE NUMERIC(10,3);
+      END IF;
+    END $$;
 
     ALTER TABLE stock_receipts ADD COLUMN IF NOT EXISTS deleted_at  TIMESTAMPTZ;
     ALTER TABLE stock_receipts ADD COLUMN IF NOT EXISTS deleted_by  TEXT;
