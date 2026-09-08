@@ -3,6 +3,7 @@
 let receiptId         = null;
 let formData          = {};
 let sizesData         = [];
+let postEditable      = false;   // completed receipt with limited edits allowed
 let photosData        = [];
 let measurementFields = [];
 let suppliersConfig   = [];
@@ -37,7 +38,10 @@ async function init() {
     formData   = receipt;
     sizesData  = sizes;
     photosData = photos;
-    isReadOnly = receipt.status === 'complete';
+    isReadOnly   = receipt.status === 'complete';
+    // Completed (not archived) receipts stay editable for notes, features and
+    // size measurements/weights — quantities and core fields remain locked
+    postEditable = isReadOnly && !receipt.archived_at;
     typeVal    = receipt.receipt_type || 'restock';
     invoiceVal = receipt.stock_matches_invoice;
     rackVal    = receipt.on_rack_for_photoshoot;
@@ -79,8 +83,13 @@ function renderActionBar(r) {
   if (delBtn)    delBtn.style.display    = (!isArchived && !isReadOnly) ? 'inline-flex' : 'none';
 
   if (isReadOnly || isArchived) {
-    document.getElementById('srf-save-btn').style.display     = 'none';
     document.getElementById('srf-complete-btn').style.display = 'none';
+  }
+  if (isArchived) {
+    document.getElementById('srf-save-btn').style.display = 'none';
+  } else if (postEditable) {
+    // Completed but editable in a limited way
+    document.getElementById('srf-save-btn').textContent = 'Save Edits';
   }
 }
 
@@ -98,9 +107,17 @@ function renderBody(r, sizes, photos, audit) {
 
   const ro_attr   = ro ? ' readonly' : '';
   const ro_dis    = ro ? ' disabled' : '';
+  // Soft lock: fields that stay editable after completion (until archived)
+  const roSoft      = ro && !postEditable;
+  const roSoft_attr = roSoft ? ' readonly' : '';
   const v = (s) => `value="${escHtml(String(s ?? ''))}"`;
 
   document.getElementById('srf-body').innerHTML = `
+    ${postEditable ? `
+    <div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;padding:10px 14px;font-size:0.86rem;color:#92400e;margin-bottom:16px">
+      🔒 Receipt completed — quantities and order details are locked.
+      Notes, product features, measurements and weights can still be edited.
+    </div>` : ''}
 
     <!-- Details -->
     <div class="srf-section">
@@ -234,7 +251,7 @@ function renderBody(r, sizes, photos, audit) {
         ${features.map((f, i) => `
           <div class="srf-feature-row">
             <span class="srf-feature-num">${i+1}.</span>
-            <input type="text" class="feature-input" data-idx="${i}" value="${escHtml(f)}" placeholder="Feature ${i+1}…" maxlength="120"${ro_attr} />
+            <input type="text" class="feature-input" data-idx="${i}" value="${escHtml(f)}" placeholder="Feature ${i+1}…" maxlength="120"${roSoft_attr} />
           </div>`).join('')}
       </div>
     </div>
@@ -253,7 +270,7 @@ function renderBody(r, sizes, photos, audit) {
     <!-- Notes -->
     <div class="srf-section">
       <div class="srf-section-title">Notes</div>
-      <textarea id="f-notes" placeholder="Any additional notes…"${ro_attr}>${escHtml(r.notes || '')}</textarea>
+      <textarea id="f-notes" placeholder="Any additional notes…"${roSoft_attr}>${escHtml(r.notes || '')}</textarea>
     </div>
 
     <!-- Photos -->
@@ -346,7 +363,8 @@ function renderSizeGrid(sizes) {
     return;
   }
 
-  const ro     = isReadOnly;
+  const ro     = isReadOnly;                 // qty lock: applies once completed
+  const roMeas = isReadOnly && !postEditable; // measurements/weight stay editable after completion
   const mFields = measurementFields;
   let totalQty  = 0;
   sizes.forEach(s => { totalQty += s.qty || 0; });
@@ -357,17 +375,17 @@ function renderSizeGrid(sizes) {
     const m = typeof s.measurements === 'string' ? JSON.parse(s.measurements) : (s.measurements || {});
     const mCells = mFields.map(field => {
       const mv = m[field] != null ? m[field] : '';
-      return ro
+      return roMeas
         ? `<td><input type="number" value="${escHtml(String(mv))}" readonly /></td>`
         : `<td><input type="number" class="meas-input" data-sidx="${idx}" data-field="${escHtml(field)}" value="${escHtml(String(mv))}" step="any" min="0" /></td>`;
     }).join('');
 
     const qtyCell = ro
-      ? `<input type="number" value="${s.qty ?? ''}" readonly />`
+      ? `<input type="number" value="${s.qty ?? ''}" readonly style="background:#f8fafc" title="Quantities are locked once the receipt is completed" />`
       : `<input type="number" class="qty-input" data-sidx="${idx}" value="${s.qty ?? ''}" min="0" step="1" oninput="updateTotal()" />`;
 
     const wv = s.weight_grams != null ? parseFloat(s.weight_grams) : '';
-    const weightCell = ro
+    const weightCell = roMeas
       ? `<input type="number" value="${escHtml(String(wv))}" readonly />`
       : `<input type="number" class="weight-input" data-sidx="${idx}" value="${escHtml(String(wv))}" min="0" step="any" placeholder="g" />`;
 
@@ -771,7 +789,7 @@ function collectFields() {
 }
 
 async function saveForm() {
-  if (isReadOnly) return;
+  if (isReadOnly && !postEditable) return;
   setSaveStatus('saving', 'Saving…');
   const btn = document.getElementById('srf-save-btn');
   if (btn) btn.disabled = true;

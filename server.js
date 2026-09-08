@@ -7527,12 +7527,19 @@ app.put('/api/stock-receipts/:id', requireAuth, async (req, res) => {
 
     const existingRes = await pool.query('SELECT * FROM stock_receipts WHERE id=$1', [id]);
     if (!existingRes.rows.length) return res.status(404).json({ error: 'Not found' });
-    if (existingRes.rows[0].status === 'complete') return res.status(400).json({ error: 'Completed forms cannot be edited' });
 
     const prev = existingRes.rows[0];
+    if (prev.archived_at) return res.status(400).json({ error: 'Archived receipts cannot be edited' });
+
+    // Completed receipts allow limited edits: notes, product features, and
+    // size measurements/weights. Quantities and all other fields stay locked
+    // (enforced here, not just in the UI).
+    const postCompletion = prev.status === 'complete';
     const body = req.body;
 
-    const UPDATABLE = [
+    const UPDATABLE = postCompletion
+      ? ['product_features','notes']
+      : [
       'receipt_type','style_name','supplier','invoice_number','po_number','po_id',
       'product_code','shopify_product_id','shopify_product_title','receipt_date',
       'processed_by','stock_matches_invoice','on_rack_for_photoshoot',
@@ -7572,25 +7579,37 @@ app.put('/api/stock-receipts/:id', requireAuth, async (req, res) => {
       setParams
     );
 
-    // Replace size rows
+    // Replace size rows. On completed receipts the submitted qty is IGNORED —
+    // the stored qty per size label is carried over so quantities can't change.
     if (Array.isArray(body.sizes)) {
+      let lockedQty = null;
+      if (postCompletion) {
+        const { rows: existingSizes } = await pool.query(
+          'SELECT size_label, qty FROM stock_receipt_sizes WHERE receipt_id=$1', [id]);
+        lockedQty = {};
+        existingSizes.forEach(r => { lockedQty[r.size_label] = r.qty; });
+      }
       await pool.query('DELETE FROM stock_receipt_sizes WHERE receipt_id=$1', [id]);
       for (let i = 0; i < body.sizes.length; i++) {
         const s = body.sizes[i];
+        const qty = postCompletion
+          ? (lockedQty[s.size_label] !== undefined ? lockedQty[s.size_label] : null)
+          : (s.qty ?? null);
         await pool.query(
           `INSERT INTO stock_receipt_sizes (receipt_id, size_label, sort_order, qty, measurements, weight_grams)
            VALUES ($1,$2,$3,$4,$5,$6)`,
-          [id, s.size_label, i, s.qty ?? null, JSON.stringify(s.measurements || {}), s.weight_grams ?? null]
+          [id, s.size_label, i, qty, JSON.stringify(s.measurements || {}), s.weight_grams ?? null]
         );
       }
-      auditEntries.push({ field_name: 'sizes', old_value: null, new_value: `${body.sizes.length} rows` });
+      auditEntries.push({ field_name: 'sizes', old_value: null, new_value: `${body.sizes.length} rows${postCompletion ? ' (qty locked)' : ''}` });
     }
 
     for (const entry of auditEntries) {
       await pool.query(
         `INSERT INTO stock_receipt_audit (receipt_id, action, field_name, old_value, new_value, changed_by)
-         VALUES ($1,'updated',$2,$3,$4,$5)`,
-        [id, entry.field_name, entry.old_value, entry.new_value, user]
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [id, postCompletion ? 'post-completion edit' : 'updated',
+         entry.field_name, entry.old_value, entry.new_value, user]
       );
     }
 
