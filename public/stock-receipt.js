@@ -406,7 +406,32 @@ function renderSizeGrid(sizes) {
           ${mFields.map(() => '<td></td>').join('')}
         </tr>
       </tfoot>
-    </table>`;
+    </table>
+    <div id="influencer-row" style="display:none;margin-top:12px;background:#faf5ff;border:1.5px solid #e9d5ff;border-radius:10px;padding:10px 14px">
+      <label style="display:inline-flex;align-items:center;gap:8px;font-size:0.9rem;color:#6d28d9;font-weight:600;cursor:pointer">
+        <input type="checkbox" id="inf-check" style="accent-color:#7c3aed"
+          ${formData.influencer_qty != null ? 'checked' : ''} ${ro ? 'disabled' : ''}
+          onchange="toggleInfluencer()" />
+        Items sent to influencer?
+      </label>
+      <span id="inf-qty-wrap" style="margin-left:14px;${formData.influencer_qty != null ? '' : 'display:none'}">
+        <label style="font-size:0.8rem;color:#64748b;margin-right:6px">Qty</label>
+        <input type="number" id="f-influencer-qty" value="${formData.influencer_qty ?? ''}" min="0" step="1"
+          style="width:80px;padding:6px 8px;border:1.5px solid #e9d5ff;border-radius:8px" ${ro ? 'readonly' : ''}
+          oninput="updateTotal()" />
+      </span>
+    </div>`;
+  updateTotal();
+}
+
+function toggleInfluencer() {
+  const checked = document.getElementById('inf-check')?.checked;
+  const wrap = document.getElementById('inf-qty-wrap');
+  if (wrap) wrap.style.display = checked ? '' : 'none';
+  if (!checked) {
+    const q = document.getElementById('f-influencer-qty');
+    if (q) q.value = '';
+  }
   updateTotal();
 }
 
@@ -422,17 +447,34 @@ function updateTotal() {
   const el = document.getElementById('size-total');
   if (el) el.textContent = t;
 
-  // Compare against the expected total from the header
+  // Compare against the expected total — influencer items count toward it
   const cmp = document.getElementById('total-compare');
   if (!cmp) return;
   const expRaw = document.getElementById('f-expected-total')?.value;
   const expected = expRaw !== undefined && expRaw !== null && String(expRaw).trim() !== ''
     ? parseInt(expRaw, 10) : null;
-  if (expected === null || isNaN(expected)) { cmp.innerHTML = ''; return; }
-  const diff = t - expected;
+
+  const infChecked = document.getElementById('inf-check')?.checked;
+  const infQty = infChecked ? (parseInt(document.getElementById('f-influencer-qty')?.value, 10) || 0) : 0;
+
+  const infRow = document.getElementById('influencer-row');
+  if (expected === null || isNaN(expected)) {
+    cmp.innerHTML = '';
+    // Keep the row visible only if a qty is already recorded
+    if (infRow) infRow.style.display = infQty > 0 || infChecked ? '' : 'none';
+    return;
+  }
+
+  const effective = t + infQty;
+  const diff = effective - expected;
+  const infNote = infQty > 0 ? ` incl. ${infQty} to influencers` : '';
   cmp.innerHTML = diff === 0
-    ? `<span style="background:#dcfce7;color:#15803d;border-radius:99px;padding:2px 10px;font-size:0.75rem;font-weight:700;margin-left:8px">✓ matches expected (${expected})</span>`
-    : `<span style="background:#fee2e2;color:#b91c1c;border-radius:99px;padding:2px 10px;font-size:0.75rem;font-weight:700;margin-left:8px">⚠ ${Math.abs(diff)} ${diff > 0 ? 'OVER' : 'SHORT of'} expected (${expected})</span>`;
+    ? `<span style="background:#dcfce7;color:#15803d;border-radius:99px;padding:2px 10px;font-size:0.75rem;font-weight:700;margin-left:8px">✓ matches expected (${expected}${infNote})</span>`
+    : `<span style="background:#fee2e2;color:#b91c1c;border-radius:99px;padding:2px 10px;font-size:0.75rem;font-weight:700;margin-left:8px">⚠ ${Math.abs(diff)} ${diff > 0 ? 'OVER' : 'SHORT of'} expected (${expected}${infNote})</span>`;
+
+  // Offer the influencer explanation whenever the raw count mismatches,
+  // and keep it visible once ticked/recorded
+  if (infRow) infRow.style.display = (t !== expected || infChecked || infQty > 0) ? '' : 'none';
 }
 
 function buildSizeGridData() {
@@ -788,10 +830,18 @@ function collectFields() {
   const qtyInputs = document.querySelectorAll('.qty-input');
   if (qtyInputs.length) qtyInputs.forEach(i => { counted += Number(i.value) || 0; });
   else counted = sizesData.reduce((s, r) => s + (r.qty || 0), 0);
-  const matches = expectedTotal !== null && !isNaN(expectedTotal) ? counted === expectedTotal : invoiceVal;
+
+  const infChecked = document.getElementById('inf-check')?.checked;
+  const infRaw = document.getElementById('f-influencer-qty')?.value;
+  const influencerQty = infChecked && String(infRaw ?? '').trim() !== '' ? parseInt(infRaw, 10) : null;
+
+  const matches = expectedTotal !== null && !isNaN(expectedTotal)
+    ? (counted + (influencerQty || 0)) === expectedTotal
+    : invoiceVal;
 
   return {
     expected_total:         expectedTotal !== null && !isNaN(expectedTotal) ? expectedTotal : null,
+    influencer_qty:         influencerQty !== null && !isNaN(influencerQty) ? influencerQty : null,
     style_name:             document.getElementById('f-style-name')?.value.trim()          || null,
     supplier:               document.getElementById('f-supplier')?.value.trim()            || null,
     receipt_date:           document.getElementById('f-receipt-date')?.value               || null,
