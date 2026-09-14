@@ -10,6 +10,7 @@ let suppliersConfig   = [];
 let isReadOnly        = false;
 let typeVal           = 'restock';
 let invoiceVal        = null;
+let priceCurrency     = 'AUD';
 let rackVal           = null;
 
 function escHtml(s) {
@@ -43,7 +44,8 @@ async function init() {
     // size measurements/weights — quantities and core fields remain locked
     postEditable = isReadOnly && !receipt.archived_at;
     typeVal    = receipt.receipt_type || 'restock';
-    invoiceVal = receipt.stock_matches_invoice;
+    invoiceVal    = receipt.stock_matches_invoice;
+    priceCurrency = receipt.price_currency || 'AUD';
     rackVal    = receipt.on_rack_for_photoshoot;
 
     const ft = config.formTypes.find(f => f.id === receipt.form_type_id);
@@ -187,9 +189,23 @@ function renderBody(r, sizes, photos, audit) {
     <!-- Pricing -->
     <div class="srf-section">
       <div class="srf-section-title">Pricing</div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        <span style="font-size:0.74rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Invoice Currency</span>
+        <div class="srf-toggle-row">
+          <button class="srf-toggle" id="cur-aud" onclick="setCurrency('AUD')"${ro_dis}>AUD</button>
+          <button class="srf-toggle" id="cur-usd" onclick="setCurrency('USD')"${ro_dis}>USD</button>
+        </div>
+        <span id="fx-wrap" style="display:none;font-size:0.84rem;color:#64748b">
+          1 USD =
+          <input type="number" id="f-usd-rate" value="${r.usd_exchange_rate ?? ''}" step="0.0001" min="0.0001"
+            style="width:92px;padding:5px 8px;border:1.5px solid #e2e8f0;border-radius:6px;margin:0 4px"${ro_attr}
+            oninput="calcFinal()" />
+          AUD <span style="color:#94a3b8">(auto-fetched — edit to override)</span>
+        </span>
+      </div>
       <div class="srf-row cols-4">
         <div class="srf-field">
-          <label>Cost Price ($)</label>
+          <label>Cost Price (<span class="cur-sym">A$</span>)</label>
           <input type="number" id="f-cost-price" value="${r.cost_price ?? ''}" placeholder="0.00" step="0.01" min="0"${ro_attr} oninput="calcFinal()" />
         </div>
         <div class="srf-field">
@@ -197,12 +213,13 @@ function renderBody(r, sizes, photos, audit) {
           <input type="number" id="f-discount-percent" value="${r.discount_percent ?? ''}" placeholder="0" step="0.01" min="0" max="100"${ro_attr} oninput="calcFinal()" />
         </div>
         <div class="srf-field">
-          <label>Freight ($)</label>
+          <label>Freight (<span class="cur-sym">A$</span>)</label>
           <input type="number" id="f-freight-price" value="${r.freight_price ?? ''}" placeholder="0.00" step="0.01" min="0"${ro_attr} oninput="calcFinal()" />
         </div>
         <div class="srf-field">
-          <label>Final Cost Price ($) <span style="font-weight:400;color:#94a3b8;font-size:0.72rem">per unit</span></label>
+          <label>Final Cost Price (A$ AUD) <span style="font-weight:400;color:#94a3b8;font-size:0.72rem">per unit — for accounting</span></label>
           <input type="number" id="f-final-price" value="${r.final_price ?? ''}" placeholder="auto" step="0.01" min="0"${ro_attr} />
+          <div id="fx-note" style="font-size:0.72rem;color:#94a3b8;margin-top:3px"></div>
         </div>
       </div>
     </div>
@@ -292,6 +309,7 @@ function renderBody(r, sizes, photos, audit) {
   applyTypeButtons();
   applyToggleButtons();
   renderSizeGrid(sizes);
+  applyCurrencyUI();
   renderPhotos(photos);
 }
 
@@ -345,9 +363,65 @@ function calcFinal() {
   const cost     = parseFloat(document.getElementById('f-cost-price')?.value)     || 0;
   const discount = parseFloat(document.getElementById('f-discount-percent')?.value) || 0;
   const freight  = parseFloat(document.getElementById('f-freight-price')?.value)   || 0;
-  if (!cost) return;
+  const note     = document.getElementById('fx-note');
+  if (!cost) { if (note) note.textContent = ''; return; }
+
+  const invoiceTotal = (cost * (1 - discount / 100)) + freight;
   const el = document.getElementById('f-final-price');
-  if (el) el.value = ((cost * (1 - discount / 100)) + freight).toFixed(2);
+
+  if (priceCurrency === 'USD') {
+    const rate = parseFloat(document.getElementById('f-usd-rate')?.value) || 0;
+    if (!rate) {
+      if (note) note.textContent = '⚠ Waiting for USD→AUD rate…';
+      return;
+    }
+    if (el) el.value = (invoiceTotal * rate).toFixed(2);
+    if (note) note.textContent = `US$${invoiceTotal.toFixed(2)} × ${rate} = A$${(invoiceTotal * rate).toFixed(2)}`;
+  } else {
+    if (el) el.value = invoiceTotal.toFixed(2);
+    if (note) note.textContent = '';
+  }
+}
+
+// ── Pricing currency (AUD/USD with auto conversion) ───────────────
+function setCurrency(cur) {
+  if (isReadOnly) return;
+  priceCurrency = cur;
+  applyCurrencyUI();
+  if (cur === 'USD') {
+    const rateEl = document.getElementById('f-usd-rate');
+    if (rateEl && !parseFloat(rateEl.value)) fetchUsdRate();
+  }
+  calcFinal();
+}
+
+function applyCurrencyUI() {
+  const aud = document.getElementById('cur-aud');
+  const usd = document.getElementById('cur-usd');
+  if (!aud || !usd) return;
+  aud.className = 'srf-toggle' + (priceCurrency === 'AUD' ? ' active-yes' : '');
+  usd.className = 'srf-toggle' + (priceCurrency === 'USD' ? ' active-yes' : '');
+  document.getElementById('fx-wrap').style.display = priceCurrency === 'USD' ? '' : 'none';
+  document.querySelectorAll('.cur-sym').forEach(s => { s.textContent = priceCurrency === 'USD' ? 'US$' : 'A$'; });
+  if (priceCurrency === 'USD') {
+    const rateEl = document.getElementById('f-usd-rate');
+    if (rateEl && !parseFloat(rateEl.value) && !isReadOnly) fetchUsdRate();
+  }
+  calcFinal();
+}
+
+async function fetchUsdRate() {
+  try {
+    const r = await fetch('/api/exchange-rate?base=USD');
+    if (!r.ok) return;
+    const data = await r.json();
+    const rate = data.rates?.AUD;
+    const el = document.getElementById('f-usd-rate');
+    if (rate && el && !parseFloat(el.value)) {
+      el.value = Number(rate).toFixed(4);
+      calcFinal();
+    }
+  } catch (_) {}
 }
 
 // ── Size grid ─────────────────────────────────────────────────────
@@ -850,6 +924,8 @@ function collectFields() {
     invoice_number:         document.getElementById('f-invoice-number')?.value.trim()      || null,
     product_code:           document.getElementById('f-product-code')?.value.trim()        || null,
     receipt_type:           typeVal,
+    price_currency:         priceCurrency,
+    usd_exchange_rate:      priceCurrency === 'USD' ? num(document.getElementById('f-usd-rate')?.value) : null,
     cost_price:             num(document.getElementById('f-cost-price')?.value),
     discount_percent:       num(document.getElementById('f-discount-percent')?.value),
     freight_price:          num(document.getElementById('f-freight-price')?.value),

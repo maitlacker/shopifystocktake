@@ -947,6 +947,8 @@ async function initDb() {
 
     ALTER TABLE stock_receipts ADD COLUMN IF NOT EXISTS expected_total INT;
     ALTER TABLE stock_receipts ADD COLUMN IF NOT EXISTS influencer_qty INT;
+    ALTER TABLE stock_receipts ADD COLUMN IF NOT EXISTS price_currency TEXT NOT NULL DEFAULT 'AUD';
+    ALTER TABLE stock_receipts ADD COLUMN IF NOT EXISTS usd_exchange_rate NUMERIC(10,4);
     ALTER TABLE stock_receipt_sizes ADD COLUMN IF NOT EXISTS weight_grams NUMERIC(10,3);
 
     -- Widen the original NUMERIC(8,1) weight column — 1dp silently rounded

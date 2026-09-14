@@ -7543,6 +7543,7 @@ app.put('/api/stock-receipts/:id', requireAuth, async (req, res) => {
       'receipt_type','style_name','supplier','invoice_number','po_number','po_id',
       'product_code','shopify_product_id','shopify_product_title','receipt_date',
       'processed_by','stock_matches_invoice','on_rack_for_photoshoot','expected_total','influencer_qty',
+      'price_currency','usd_exchange_rate',
       'cost_price','discount_percent','freight_price','final_price',
       'fabric','stretch_allowance','product_features','notes',
     ];
@@ -8058,11 +8059,17 @@ app.get('/api/stock-receipts/:id/pdf', requireAuth, async (req, res) => {
     // ── Pricing & Product Info ──────────────────────────────────────
     y = sectionBand('PRICING & PRODUCT INFO', y);
 
-    field('COST PRICE',  r.cost_price       != null ? `$${Number(r.cost_price).toFixed(2)}`      : '—', ML,        c4 - 6, y);
+    const curSym = r.price_currency === 'USD' ? 'US$' : 'A$';
+    field(`COST PRICE (${r.price_currency || 'AUD'})`, r.cost_price != null ? `${curSym}${Number(r.cost_price).toFixed(2)}` : '—', ML, c4 - 6, y);
     field('DISCOUNT',    r.discount_percent != null ? `${r.discount_percent}%`                   : '—', ML + c4,   c4 - 6, y);
-    field('FREIGHT',     r.freight_price    != null ? `$${Number(r.freight_price).toFixed(2)}`   : '—', ML + c4*2, c4 - 6, y);
-    field('FINAL COST PRICE', r.final_price != null ? `$${Number(r.final_price).toFixed(2)}`     : '—', ML + c4*3, c4 - 6, y);
+    field(`FREIGHT (${r.price_currency || 'AUD'})`, r.freight_price != null ? `${curSym}${Number(r.freight_price).toFixed(2)}` : '—', ML + c4*2, c4 - 6, y);
+    field('FINAL COST PRICE (AUD)', r.final_price != null ? `A$${Number(r.final_price).toFixed(2)}` : '—', ML + c4*3, c4 - 6, y);
     y += 34;
+    if (r.price_currency === 'USD' && r.usd_exchange_rate != null) {
+      doc.fontSize(8).font('Helvetica').fillColor(C.mid)
+        .text(`Converted at 1 USD = ${Number(r.usd_exchange_rate).toFixed(4)} AUD`, ML, y - 6, { lineBreak: false });
+      y += 12;
+    }
 
     const c2 = W / 2 - 6;
     field('FABRIC',             r.fabric,            ML,           c2, y);
