@@ -609,7 +609,7 @@ function onStyleSearch(q) {
       const list = document.getElementById('style-ac');
       if (!list || !results.length) { if (list) list.style.display = 'none'; return; }
       list.innerHTML = results.map(p =>
-        `<div class="srf-ac-item" data-id="${p.id}" data-title="${escHtml(p.title)}" onmousedown="selectStyleProduct(this)">
+        `<div class="srf-ac-item" data-id="${p.id}" data-title="${escHtml(p.title)}" data-skubase="${escHtml(p.sku_base || '')}" onmousedown="selectStyleProduct(this)">
           ${escHtml(p.title)}
           ${p.sku ? `<div class="srf-ac-sub">SKU: ${escHtml(p.sku)}</div>` : ''}
         </div>`
@@ -624,6 +624,17 @@ function selectStyleProduct(el) {
   if (inp) inp.value = el.dataset.title;
   hideAc('style-ac');
   linkProduct(Number(el.dataset.id), el.dataset.title);
+  applySkuBase(el.dataset.skubase);
+}
+
+// Auto-fill Product Code from the selected product's SKU base (size suffix
+// stripped). User can still edit the field afterwards to override.
+function applySkuBase(skuBase, onlyIfEmpty) {
+  if (!skuBase) return;
+  const pc = document.getElementById('f-product-code');
+  if (!pc || pc.readOnly || pc.disabled) return;
+  if (onlyIfEmpty && pc.value.trim()) return;
+  pc.value = skuBase;
 }
 
 // ── Standalone Shopify search section ────────────────────────────
@@ -639,7 +650,7 @@ function onShopifySearch(q) {
       const list = document.getElementById('shopify-ac');
       if (!list || !results.length) { if (list) list.style.display = 'none'; return; }
       list.innerHTML = results.map(p =>
-        `<div class="srf-ac-item" data-id="${p.id}" data-title="${escHtml(p.title)}" onmousedown="selectShopifyProd(this)">
+        `<div class="srf-ac-item" data-id="${p.id}" data-title="${escHtml(p.title)}" data-skubase="${escHtml(p.sku_base || '')}" onmousedown="selectShopifyProd(this)">
           ${escHtml(p.title)}
           ${p.sku ? `<div class="srf-ac-sub">SKU: ${escHtml(p.sku)}</div>` : ''}
         </div>`
@@ -656,6 +667,7 @@ function selectShopifyProd(el) {
   if (inp) inp.value = '';
   hideAc('shopify-ac');
   linkProduct(id, t);
+  applySkuBase(el.dataset.skubase, true);
   const sec = document.getElementById('shopify-link-section');
   if (sec) sec.style.display = 'none';
 }

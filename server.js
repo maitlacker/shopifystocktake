@@ -7282,6 +7282,34 @@ app.get('/api/srf/po-search', requireAuth, async (req, res) => {
   }
 });
 
+// Derive the style-level SKU base from a product's variant SKUs, e.g.
+// PD-KD13814-CHOC-6 / PD-KD13814-CHOC-8 → PD-KD13814-CHOC
+function skuBaseFromVariants(variants) {
+  const skus = (variants || []).map(v => (v.sku || '').trim()).filter(Boolean);
+  if (!skus.length) return null;
+  const SIZE_SEG = /^(\d{1,3}(\.\d)?|XXS|XS|S|M|L|XL|XXL|XXXL|2XL|3XL|4XL|OS|OSFA|ONE ?SIZE)$/i;
+  const stripSize = (sku) => {
+    const parts = sku.split('-');
+    if (parts.length >= 2 && SIZE_SEG.test(parts[parts.length - 1])) {
+      return parts.slice(0, -1).join('-');
+    }
+    return sku;
+  };
+  const unique = [...new Set(skus)];
+  if (unique.length === 1) return stripSize(unique[0]);
+  // Longest common prefix across all SKUs, trimmed back to a dash boundary
+  let prefix = unique[0];
+  for (const s of unique.slice(1)) {
+    let i = 0;
+    while (i < prefix.length && i < s.length && prefix[i] === s[i]) i++;
+    prefix = prefix.slice(0, i);
+    if (!prefix) break;
+  }
+  const cut = prefix.lastIndexOf('-');
+  if (cut >= 3) return prefix.slice(0, cut);
+  return stripSize(unique[0]);
+}
+
 app.get('/api/srf/style-search', requireAuth, async (req, res) => {
   try {
     const q = (req.query.q || '').toLowerCase().trim();
@@ -7296,10 +7324,11 @@ app.get('/api/srf/style-search', requireAuth, async (req, res) => {
       if (titleMatch || skuMatch) {
         seen.add(p.id);
         results.push({
-          id:    p.id,
-          title: p.title,
-          image: (p.images || [])[0]?.src || null,
-          sku:   skuMatch ? skuMatch.sku : null,
+          id:       p.id,
+          title:    p.title,
+          image:    (p.images || [])[0]?.src || null,
+          sku:      skuMatch ? skuMatch.sku : null,
+          sku_base: skuBaseFromVariants(p.variants),
         });
         if (results.length >= 12) break;
       }
