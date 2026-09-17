@@ -968,7 +968,13 @@ app.get('/api/picking/orders', async (req, res) => {
       }
     }
 
-    items.sort((a, b) => a.orderNumber - b.orderNumber);
+    // Within each order, sort items alphabetically by product name — the
+    // warehouse is shelved alphabetically, so this matches the picker's walk
+    items.sort((a, b) =>
+      (a.orderNumber - b.orderNumber) ||
+      String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' }) ||
+      String(a.variantTitle || '').localeCompare(String(b.variantTitle || ''))
+    );
     const orders = [...orderNumbersSeen].sort((a, b) => a - b);
 
     res.json({ orders, orderCount: orders.length, items, removedItems });
