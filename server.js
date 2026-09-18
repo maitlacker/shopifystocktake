@@ -7517,6 +7517,122 @@ app.get('/api/stock-receipts/backfill-po-received', requireAuth, async (req, res
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── PO Reconciliation ─────────────────────────────────────────────
+// Match completed stock receipts (many were never linked to a PO) against
+// confirmed-but-not-received production orders so those POs can be rolled
+// over to Received.
+
+app.get('/api/po-reconcile', requireAuth, async (req, res) => {
+  try {
+    const [poRes, srRes] = await Promise.all([
+      pool.query(`
+        SELECT po.id, po.po_number, po.supplier_name, po.status, po.order_date,
+               po.delivery_date, po.freight_mode,
+               COALESCE((SELECT SUM(pol.total_qty) FROM production_order_lines pol
+                         WHERE pol.order_id = po.id), 0)::int AS total_qty,
+               COALESCE((SELECT json_agg(json_build_object(
+                           'code', pol.product_code, 'name', pol.product_name,
+                           'qty', pol.total_qty) ORDER BY pol.line_number)
+                         FROM production_order_lines pol WHERE pol.order_id = po.id),
+                        '[]'::json) AS lines
+        FROM production_orders po
+        WHERE po.status = 'confirmed' AND po.archived_at IS NULL
+        ORDER BY po.po_number`),
+      pool.query(`
+        SELECT sr.id, sr.style_name, sr.product_code, sr.supplier, sr.po_number,
+               sr.po_id, sr.receipt_date, sr.completed_at, sr.shopify_product_title,
+               COALESCE((SELECT SUM(s.qty) FROM stock_receipt_sizes s
+                         WHERE s.receipt_id = sr.id), 0)::int AS counted_qty,
+               mpo.id AS matched_po_id, mpo.po_number AS matched_po_number,
+               mpo.status AS matched_po_status
+        FROM stock_receipts sr
+        LEFT JOIN production_orders mpo
+          ON mpo.id = sr.po_id
+          OR (sr.po_id IS NULL AND sr.po_number IS NOT NULL AND TRIM(sr.po_number) <> ''
+              AND UPPER(TRIM(mpo.po_number)) = UPPER(TRIM(sr.po_number)))
+        WHERE sr.status = 'complete' AND sr.deleted_at IS NULL
+        ORDER BY sr.completed_at DESC NULLS LAST, sr.id DESC`),
+    ]);
+
+    const receipts = srRes.rows.map(r => {
+      let po_state;
+      if (r.matched_po_id) {
+        po_state = r.matched_po_status === 'received' ? 'linked_received' : 'linked_open';
+      } else if (r.po_number && String(r.po_number).trim()) {
+        po_state = 'unmatched';   // number recorded but no such PO exists
+      } else {
+        po_state = 'none';
+      }
+      return { ...r, po_state };
+    });
+
+    res.json({ pos: poRes.rows, receipts });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Link a completed receipt to a PO and roll the PO over to Received
+app.post('/api/po-reconcile/link', requireAuth, async (req, res) => {
+  try {
+    const receiptId = Number(req.body.receipt_id);
+    const poId      = Number(req.body.po_id);
+    if (!receiptId || !poId) return res.status(400).json({ error: 'receipt_id and po_id are required' });
+    const user = req.user?.email || 'unknown';
+
+    const srRes = await pool.query(
+      `SELECT id, po_number, po_id, style_name FROM stock_receipts
+       WHERE id=$1 AND status='complete' AND deleted_at IS NULL`, [receiptId]);
+    if (!srRes.rows.length) return res.status(404).json({ error: 'Completed receipt not found' });
+
+    const poQ = await pool.query(
+      `SELECT id, po_number, supplier_name, status FROM production_orders
+       WHERE id=$1 AND archived_at IS NULL`, [poId]);
+    if (!poQ.rows.length) return res.status(404).json({ error: 'Production order not found' });
+    const po = poQ.rows[0];
+    if (po.status === 'cancelled') return res.status(400).json({ error: `PO ${po.po_number} is cancelled` });
+
+    await pool.query(
+      `UPDATE stock_receipts SET po_id=$1, po_number=$2, updated_at=NOW(), updated_by=$3 WHERE id=$4`,
+      [po.id, po.po_number, user, receiptId]);
+    await pool.query(
+      `INSERT INTO stock_receipt_audit (receipt_id, action, field_name, new_value, changed_by)
+       VALUES ($1,'updated','po_number',$2,$3)`,
+      [receiptId, `Linked to PO ${po.po_number} via reconciliation`, user]);
+
+    let poMarkedReceived = false;
+    if (po.status !== 'received') {
+      await pool.query(
+        `UPDATE production_orders SET status='received', updated_at=NOW() WHERE id=$1`, [po.id]);
+      poMarkedReceived = true;
+      await pool.query(
+        `INSERT INTO stock_receipt_audit (receipt_id, action, field_name, new_value, changed_by)
+         VALUES ($1,'updated','production_order',$2,$3)`,
+        [receiptId, `PO ${po.po_number} marked received`, user]);
+      console.log(`[srf] Reconcile: receipt #${receiptId} linked → PO ${po.po_number} marked received by ${user}`);
+      restockSync.runAnalysis().catch(err =>
+        console.error('[srf] Post-reconcile restock refresh failed:', err.message));
+    }
+
+    res.json({ ok: true, receipt_id: receiptId, po_number: po.po_number, po_marked_received: poMarkedReceived });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Roll a confirmed PO to Received without a receipt (e.g. receipt never entered)
+app.post('/api/po-reconcile/mark-received', requireAuth, async (req, res) => {
+  try {
+    const poId = Number(req.body.po_id);
+    if (!poId) return res.status(400).json({ error: 'po_id is required' });
+    const { rows } = await pool.query(
+      `UPDATE production_orders SET status='received', updated_at=NOW()
+       WHERE id=$1 AND status NOT IN ('received','cancelled')
+       RETURNING id, po_number`, [poId]);
+    if (!rows.length) return res.status(404).json({ error: 'PO not found or already received/cancelled' });
+    console.log(`[srf] Reconcile: PO ${rows[0].po_number} marked received (no receipt) by ${req.user?.email}`);
+    restockSync.runAnalysis().catch(err =>
+      console.error('[srf] Post-reconcile restock refresh failed:', err.message));
+    res.json({ ok: true, po_number: rows[0].po_number });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/stock-receipts/:id', requireAuth, async (req, res) => {
   try {
     const id = Number(req.params.id);

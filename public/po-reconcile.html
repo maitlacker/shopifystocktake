@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PO Reconciliation — The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .rec-header { display:flex; align-items:center; justify-content:space-between;
+                  margin-bottom:6px; flex-wrap:wrap; gap:10px; }
+    .rec-header h1 { font-size:1.4rem; font-weight:700; color:#1e293b; margin:0; }
+    .rec-sub { color:#64748b; font-size:0.85rem; margin:0 0 18px; }
+
+    .rec-chips { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:22px; }
+    .rec-chip { background:#fff; border:1px solid #e2e8f0; border-radius:12px;
+                padding:10px 16px; min-width:130px; }
+    .rec-chip .n { font-size:1.3rem; font-weight:800; color:#1e293b; }
+    .rec-chip .l { font-size:0.72rem; font-weight:600; color:#64748b;
+                   text-transform:uppercase; letter-spacing:0.04em; }
+    .rec-chip.blue .n   { color:#1d4ed8; }
+    .rec-chip.amber .n  { color:#b45309; }
+    .rec-chip.purple .n { color:#7c3aed; }
+
+    h2.rec-sec { font-size:1.02rem; font-weight:700; color:#1e293b; margin:26px 0 4px; }
+    .rec-sec-sub { color:#64748b; font-size:0.8rem; margin:0 0 10px; }
+
+    .rec-table-wrap { background:#fff; border-radius:12px; border:1px solid #e2e8f0;
+                      overflow-x:auto; }
+    .rec-table { width:100%; border-collapse:collapse; font-size:0.84rem; min-width:940px; }
+    .rec-table th { background:#f8fafc; color:#64748b; font-weight:600; font-size:0.73rem;
+                    text-transform:uppercase; letter-spacing:0.05em; padding:10px 12px;
+                    border-bottom:1px solid #e2e8f0; text-align:left; white-space:nowrap; }
+    .rec-table td { padding:10px 12px; border-bottom:1px solid #f1f5f9; color:#334155;
+                    vertical-align:top; }
+    .rec-table tr:last-child td { border-bottom:none; }
+    .rec-table tr.suggested td { background:#fefce8; }
+
+    .po-num { font-weight:700; color:#6366f1; white-space:nowrap; }
+    .rec-code { font-size:0.74rem; color:#94a3b8; }
+    .rec-style { font-weight:600; color:#1e293b; }
+    .rec-line { margin-bottom:3px; }
+    .rec-line:last-child { margin-bottom:0; }
+
+    .rec-badge { display:inline-block; padding:2px 9px; border-radius:20px;
+                 font-size:0.68rem; font-weight:700; text-transform:uppercase;
+                 white-space:nowrap; }
+    .rec-badge.none      { background:#fee2e2; color:#991b1b; }
+    .rec-badge.unmatched { background:#fef3c7; color:#92400e; }
+    .rec-badge.suggest   { background:#fef9c3; color:#854d0e; }
+
+    .rec-select { padding:6px 8px; border:1.5px solid #e2e8f0; border-radius:8px;
+                  font-size:0.8rem; color:#1e293b; max-width:280px; background:#fff; }
+    .rec-select:focus { outline:none; border-color:#6366f1; }
+    .rec-actions { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+    .btn-link-po { padding:6px 12px; border:none; border-radius:8px; background:#6366f1;
+                   color:#fff; font-size:0.78rem; font-weight:700; cursor:pointer; }
+    .btn-link-po:disabled { background:#c7d2fe; cursor:not-allowed; }
+    .btn-mark-rec { padding:6px 12px; border:1.5px solid #15803d; border-radius:8px;
+                    background:#fff; color:#15803d; font-size:0.78rem; font-weight:700;
+                    cursor:pointer; white-space:nowrap; }
+    .btn-mark-rec:hover { background:#f0fdf4; }
+
+    .empty-cell { text-align:center; color:#94a3b8; padding:40px; font-size:0.9rem; }
+    .rec-msg { margin:12px 0; padding:10px 14px; border-radius:10px; font-size:0.85rem;
+               font-weight:600; display:none; }
+    .rec-msg.ok  { background:#dcfce7; color:#166534; display:block; }
+    .rec-msg.err { background:#fee2e2; color:#991b1b; display:block; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main class="container" style="padding:28px 20px">
+
+    <div class="rec-header">
+      <h1>PO Reconciliation</h1>
+      <button class="btn" onclick="loadData()">↻ Refresh</button>
+    </div>
+    <p class="rec-sub">Match completed stock receipts to confirmed Production Orders that were never
+      marked received. Linking a receipt rolls the PO over to Received automatically.</p>
+
+    <div class="rec-chips" id="rec-chips"></div>
+    <div class="rec-msg" id="rec-msg"></div>
+
+    <h2 class="rec-sec">Confirmed POs — awaiting receipt</h2>
+    <p class="rec-sec-sub">These POs are confirmed but not yet received. Rows highlighted yellow have a
+      suggested receipt match based on product code / style name.</p>
+    <div class="rec-table-wrap">
+      <table class="rec-table">
+        <thead>
+          <tr>
+            <th>PO #</th><th>Supplier</th><th>Products</th>
+            <th style="text-align:center">Qty</th><th>Order Date</th><th>Due Date</th>
+            <th>Match a Completed Receipt</th>
+          </tr>
+        </thead>
+        <tbody id="po-tbody"><tr><td colspan="7" class="empty-cell">Loading…</td></tr></tbody>
+      </table>
+    </div>
+
+    <h2 class="rec-sec">Completed receipts without a matching PO</h2>
+    <p class="rec-sec-sub">Receipts that have no PO number at all, or a PO number that doesn't match any
+      Production Order. Link them to the correct PO below.</p>
+    <div class="rec-table-wrap">
+      <table class="rec-table">
+        <thead>
+          <tr>
+            <th>Completed</th><th>Style</th><th>Product Code</th><th>Supplier</th>
+            <th style="text-align:center">Qty</th><th>PO # Entered</th>
+            <th>Link to PO</th>
+          </tr>
+        </thead>
+        <tbody id="sr-tbody"><tr><td colspan="7" class="empty-cell">Loading…</td></tr></tbody>
+      </table>
+    </div>
+
+  </main>
+  <script src="po-reconcile.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>
