@@ -20,6 +20,7 @@
     .rec-chip.blue .n   { color:#1d4ed8; }
     .rec-chip.amber .n  { color:#b45309; }
     .rec-chip.purple .n { color:#7c3aed; }
+    .rec-chip.red .n    { color:#dc2626; }
 
     h2.rec-sec { font-size:1.02rem; font-weight:700; color:#1e293b; margin:26px 0 4px; }
     .rec-sec-sub { color:#64748b; font-size:0.8rem; margin:0 0 10px; }
@@ -81,35 +82,65 @@
     <div class="rec-chips" id="rec-chips"></div>
     <div class="rec-msg" id="rec-msg"></div>
 
-    <h2 class="rec-sec">Confirmed POs — awaiting receipt</h2>
-    <p class="rec-sec-sub">These POs are confirmed but not yet received. Rows highlighted yellow have a
-      suggested receipt match based on product code / style name.</p>
+    <h2 class="rec-sec">1 · Receipts with a PO number</h2>
+    <p class="rec-sec-sub">Completed receipts that have a PO number entered. The dropdown lists POs
+      carrying the same product name; a ★ PO number match is preselected — just click Link &amp; Receive.</p>
+    <div class="rec-table-wrap">
+      <table class="rec-table">
+        <thead>
+          <tr>
+            <th>Product Name</th><th>PO # Entered</th>
+            <th style="text-align:center">Qty</th><th>Completed</th>
+            <th>Match to PO</th>
+          </tr>
+        </thead>
+        <tbody id="withpo-tbody"><tr><td colspan="5" class="empty-cell">Loading…</td></tr></tbody>
+      </table>
+    </div>
+
+    <h2 class="rec-sec">2 · Receipts with no PO</h2>
+    <p class="rec-sec-sub">Completed receipts with no PO number at all. The dropdown lists POs carrying
+      the same product name.</p>
+    <div class="rec-table-wrap">
+      <table class="rec-table">
+        <thead>
+          <tr>
+            <th>Product Name</th><th style="text-align:center">Qty</th>
+            <th>Delivery Date</th><th>Match to PO</th>
+          </tr>
+        </thead>
+        <tbody id="nopo-tbody"><tr><td colspan="4" class="empty-cell">Loading…</td></tr></tbody>
+      </table>
+    </div>
+
+    <h2 class="rec-sec">3 · Left over — smart match</h2>
+    <p class="rec-sec-sub">Receipts whose product name didn't line up with any PO. The dropdown is sorted
+      by name similarity (★ with a % score) — names may be worded slightly differently.</p>
+    <div class="rec-table-wrap">
+      <table class="rec-table">
+        <thead>
+          <tr>
+            <th>Product Name</th><th>PO #</th>
+            <th style="text-align:center">Qty</th><th>Completed</th>
+            <th>Closest POs</th>
+          </tr>
+        </thead>
+        <tbody id="fuzzy-tbody"><tr><td colspan="5" class="empty-cell">Loading…</td></tr></tbody>
+      </table>
+    </div>
+
+    <h2 class="rec-sec">Confirmed POs still not received</h2>
+    <p class="rec-sec-sub">Everything still open after matching. If stock arrived but a receipt was never
+      entered, mark the PO received directly.</p>
     <div class="rec-table-wrap">
       <table class="rec-table">
         <thead>
           <tr>
             <th>PO #</th><th>Supplier</th><th>Products</th>
-            <th style="text-align:center">Qty</th><th>Order Date</th><th>Due Date</th>
-            <th>Match a Completed Receipt</th>
+            <th style="text-align:center">Qty</th><th>Due Date</th><th></th>
           </tr>
         </thead>
-        <tbody id="po-tbody"><tr><td colspan="7" class="empty-cell">Loading…</td></tr></tbody>
-      </table>
-    </div>
-
-    <h2 class="rec-sec">Completed receipts without a matching PO</h2>
-    <p class="rec-sec-sub">Receipts that have no PO number at all, or a PO number that doesn't match any
-      Production Order. Link them to the correct PO below.</p>
-    <div class="rec-table-wrap">
-      <table class="rec-table">
-        <thead>
-          <tr>
-            <th>Completed</th><th>Style</th><th>Product Code</th><th>Supplier</th>
-            <th style="text-align:center">Qty</th><th>PO # Entered</th>
-            <th>Link to PO</th>
-          </tr>
-        </thead>
-        <tbody id="sr-tbody"><tr><td colspan="7" class="empty-cell">Loading…</td></tr></tbody>
+        <tbody id="po-tbody"><tr><td colspan="6" class="empty-cell">Loading…</td></tr></tbody>
       </table>
     </div>
 
