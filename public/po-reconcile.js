@@ -123,7 +123,8 @@ function render() {
 
 function poOption(po, { star = false, hint = '' } = {}) {
   const names = (po.lines || []).map(l => l.name).filter(Boolean);
-  const label = `PO ${po.po_number} · ${names.join(', ') || po.supplier_name || '—'}${hint ? ` (${hint})` : ''}`;
+  const label = `PO ${po.po_number} · ${names.join(', ') || po.supplier_name || '—'}` +
+    ` · ${po.total_qty} pcs · due ${fmtDate(po.delivery_date)}${hint ? ` (${hint})` : ''}`;
   return { id: po.id, label: (star ? '★ ' : '') + label };
 }
 
