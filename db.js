@@ -823,7 +823,7 @@ async function initDb() {
       AND NOT EXISTS (SELECT 1 FROM srf_size_groups WHERE name='Jeans 6-18');
 
     INSERT INTO srf_form_types (name, measurement_fields, sort_order) VALUES
-      ('Tops/Dresses', '["Bust/Chest","Waist","Body Length","Hip Width","Sleeve Length","Shoulder Width"]', 1),
+      ('Tops/Dresses', '["Bust/Chest","Waist","Body Length","Hip Width","Sleeve Length","Sleeve Width"]', 1),
       ('Bottoms', '["Waist","Hip","Thigh","Inseam","Length"]', 2),
       ('Jeans', '["Waist","Hip","Thigh","Inseam","Rise"]', 3),
       ('Accessories', '["Width","Height","Depth"]', 4),
@@ -837,7 +837,7 @@ async function initDb() {
 
     -- Add Waist to Tops/Dresses on DBs seeded before it existed
     UPDATE srf_form_types
-      SET measurement_fields = '["Bust/Chest","Waist","Body Length","Hip Width","Sleeve Length","Shoulder Width"]'
+      SET measurement_fields = '["Bust/Chest","Waist","Body Length","Hip Width","Sleeve Length","Sleeve Width"]'
       WHERE name = 'Tops/Dresses' AND NOT (measurement_fields ? 'Waist');
 
     -- Rename Rise → Length on Bottoms only (Jeans keeps its Rise measurement)
@@ -856,11 +856,23 @@ async function initDb() {
 
     -- Rename Hem Width → Hip Width in the form type and in stored receipt measurements
     UPDATE srf_form_types
-      SET measurement_fields = '["Bust/Chest","Waist","Body Length","Hip Width","Sleeve Length","Shoulder Width"]'
+      SET measurement_fields = '["Bust/Chest","Waist","Body Length","Hip Width","Sleeve Length","Sleeve Width"]'
       WHERE name = 'Tops/Dresses' AND measurement_fields ? 'Hem Width';
     UPDATE stock_receipt_sizes
       SET measurements = (measurements - 'Hem Width') || jsonb_build_object('Hip Width', measurements->'Hem Width')
       WHERE measurements ? 'Hem Width';
+
+    -- Rename Shoulder Width → Sleeve Width in the form type and in stored receipt measurements
+    UPDATE srf_form_types
+      SET measurement_fields = (
+        SELECT jsonb_agg(CASE WHEN f = '"Shoulder Width"'::jsonb THEN '"Sleeve Width"'::jsonb ELSE f END)
+        FROM jsonb_array_elements(measurement_fields) f
+      )
+      WHERE measurement_fields ? 'Shoulder Width';
+    UPDATE stock_receipt_sizes
+      SET measurements = (measurements - 'Shoulder Width') || jsonb_build_object('Sleeve Width', measurements->'Shoulder Width')
+      WHERE measurements ? 'Shoulder Width'
+        AND NOT (measurements ? 'Sleeve Width');
 
     CREATE TABLE IF NOT EXISTS stock_receipts (
       id                     SERIAL PRIMARY KEY,
