@@ -295,6 +295,26 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_meta_ads_daily_campaign
       ON meta_ads_daily(campaign_id, date DESC);
 
+    -- Ad-level daily performance for the Creative Strategy report
+    CREATE TABLE IF NOT EXISTS meta_ad_perf_daily (
+      ad_id            TEXT NOT NULL,
+      date             DATE NOT NULL,
+      ad_name          TEXT,
+      adset_name       TEXT,
+      campaign_name    TEXT,
+      spend            DECIMAL(12,2) NOT NULL DEFAULT 0,
+      impressions      BIGINT NOT NULL DEFAULT 0,
+      clicks           BIGINT NOT NULL DEFAULT 0,
+      link_clicks      BIGINT NOT NULL DEFAULT 0,
+      reach            BIGINT NOT NULL DEFAULT 0,
+      purchases        DECIMAL(10,2) NOT NULL DEFAULT 0,
+      purchase_value   DECIMAL(12,2) NOT NULL DEFAULT 0,
+      synced_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (ad_id, date)
+    );
+    CREATE INDEX IF NOT EXISTS idx_meta_ad_perf_date
+      ON meta_ad_perf_daily(date DESC);
+
     CREATE TABLE IF NOT EXISTS xero_financials (
       id           SERIAL PRIMARY KEY,
       period_start DATE NOT NULL,

@@ -16,6 +16,7 @@ const labelMatcher     = require('./label-matcher');
 const Anthropic        = require('@anthropic-ai/sdk');
 const ideasCron        = require('./ideas-cron');
 const metaAds          = require('./meta-ads-sync');
+const creativeStrategy = require('./creative-strategy');
 const xeroSync         = require('./xero-sync');
 const weeklyPulse      = require('./weekly-pulse');
 const opsSync          = require('./ops-sync');
@@ -3829,6 +3830,47 @@ app.post('/api/meta/sync', requireAuth, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── Creative Strategy report ───────────────────────────────────────
+
+// Run the analysis over synced ad-level data for a date range
+app.get('/api/creative-strategy', requireAuth, async (req, res) => {
+  try {
+    const until = req.query.until || new Date().toISOString().slice(0, 10);
+    let since = req.query.since;
+    if (!since) { // default: last 24 hours (yesterday + today)
+      const d = new Date(); d.setDate(d.getDate() - 1);
+      since = d.toISOString().slice(0, 10);
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(since) || !/^\d{4}-\d{2}-\d{2}$/.test(until)) {
+      return res.status(400).json({ error: 'since/until must be YYYY-MM-DD' });
+    }
+    const result = await creativeStrategy.analyze(pool, since, until, {
+      minSpend: req.query.min_spend, minPurchases: req.query.min_purchases,
+    });
+    // Data freshness for the header
+    const { rows: meta } = await pool.query(
+      `SELECT MIN(date) AS oldest, MAX(date) AS newest, MAX(synced_at) AS last_synced,
+              COUNT(DISTINCT ad_id) AS ad_count
+       FROM meta_ad_perf_daily`);
+    result.data_status = meta[0];
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Kick off an ad-level sync in the background (backfill or top-up)
+app.post('/api/creative-strategy/sync', requireAuth, async (req, res) => {
+  const days = Math.min(parseInt(req.body.days) || 7, 365);
+  const status = metaAds.getAdPerfStatus();
+  if (status.isRunning) return res.status(409).json({ error: 'Sync already running', status });
+  metaAds.syncAdPerf(days).catch(err =>
+    console.error('[meta-ads] Background ad perf sync failed:', err.message));
+  res.json({ started: true, days });
+});
+
+app.get('/api/creative-strategy/sync-status', requireAuth, (req, res) => {
+  res.json(metaAds.getAdPerfStatus());
 });
 
 app.get('/api/meta/campaigns', requireAuth, async (req, res) => {

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Creative Strategy — The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .cs-header { display:flex; align-items:center; justify-content:space-between;
+                 margin-bottom:6px; flex-wrap:wrap; gap:10px; }
+    .cs-header h1 { font-size:1.4rem; font-weight:700; color:#1e293b; margin:0; }
+    .cs-sub { color:#64748b; font-size:0.85rem; margin:0 0 14px; }
+
+    .cs-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+    .cs-preset { padding:6px 14px; border-radius:20px; border:1.5px solid #e2e8f0;
+                 background:#fff; color:#64748b; font-size:0.82rem; font-weight:600; cursor:pointer; }
+    .cs-preset.active { background:#6366f1; color:#fff; border-color:#6366f1; }
+    .cs-date { padding:6px 8px; border:1.5px solid #e2e8f0; border-radius:8px; font-size:0.82rem; color:#1e293b; }
+    .cs-status { font-size:0.78rem; color:#64748b; margin-left:auto; }
+
+    .cs-chips { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px; }
+    .cs-chip { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:10px 16px; min-width:130px; }
+    .cs-chip .n { font-size:1.25rem; font-weight:800; color:#1e293b; }
+    .cs-chip .l { font-size:0.7rem; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:0.04em; }
+    .cs-chip.good .n { color:#15803d; }
+    .cs-chip.warn .n { color:#b45309; }
+
+    h2.cs-sec { font-size:1.02rem; font-weight:700; color:#1e293b; margin:26px 0 4px; }
+    .cs-sec-sub { color:#64748b; font-size:0.78rem; margin:0 0 10px; }
+
+    .cs-table-wrap { background:#fff; border-radius:12px; border:1px solid #e2e8f0; overflow-x:auto; margin-bottom:14px; }
+    .cs-table { width:100%; border-collapse:collapse; font-size:0.82rem; }
+    .cs-table th { background:#1e293b; color:#f8fafc; font-weight:600; font-size:0.7rem;
+                   text-transform:uppercase; letter-spacing:0.05em; padding:8px 10px;
+                   text-align:right; white-space:nowrap; }
+    .cs-table th:first-child { text-align:left; }
+    .cs-table td { padding:7px 10px; border-bottom:1px solid #f1f5f9; color:#334155;
+                   text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .cs-table td:first-child { text-align:left; font-weight:600; color:#1e293b; max-width:280px;
+                               overflow:hidden; text-overflow:ellipsis; }
+    .cs-table tr:last-child td { border-bottom:none; }
+    .cs-table tr.net td { background:#f1f5f9; font-weight:700; border-top:2px solid #e2e8f0; }
+
+    .cs-grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    @media (max-width:1100px) { .cs-grid2 { grid-template-columns:1fr; } }
+
+    details.cs-persona { background:#fff; border:1px solid #e2e8f0; border-radius:12px;
+                         margin-bottom:12px; overflow:hidden; }
+    details.cs-persona > summary { list-style:none; cursor:pointer; padding:14px 18px;
+                                   display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+    details.cs-persona > summary::-webkit-details-marker { display:none; }
+    details.cs-persona[open] > summary { border-bottom:1px solid #e2e8f0; }
+    .cs-p-name { font-size:1rem; font-weight:800; color:#1e293b; }
+    .cs-p-rank { display:inline-block; background:#6366f1; color:#fff; border-radius:8px;
+                 padding:2px 9px; font-size:0.75rem; font-weight:800; }
+    .cs-p-stats { display:flex; gap:14px; margin-left:auto; flex-wrap:wrap; }
+    .cs-p-stat { font-size:0.78rem; color:#64748b; }
+    .cs-p-stat b { color:#1e293b; font-size:0.88rem; }
+    .cs-p-body { padding:14px 18px; }
+    .cs-seg-label { font-size:0.72rem; font-weight:800; text-transform:uppercase;
+                    letter-spacing:0.06em; margin:10px 0 4px; }
+    .cs-seg-label.new { color:#1d4ed8; } .cs-seg-label.engaged { color:#b45309; }
+    .cs-seg-label.existing { color:#15803d; } .cs-seg-label.unclassified { color:#64748b; }
+    .cs-lead { background:#eef2ff; border-radius:8px; padding:7px 12px; font-size:0.8rem;
+               color:#3730a3; font-weight:600; margin:4px 0 10px; }
+    .cs-none { color:#94a3b8; font-size:0.78rem; padding:6px 0 10px; }
+
+    .cs-badge { display:inline-block; padding:2px 8px; border-radius:20px; font-size:0.66rem;
+                font-weight:700; text-transform:uppercase; }
+    .cs-badge.low { background:#f1f5f9; color:#64748b; }
+
+    .cs-msg { margin:12px 0; padding:10px 14px; border-radius:10px; font-size:0.85rem;
+              font-weight:600; display:none; }
+    .cs-msg.ok  { background:#dcfce7; color:#166534; display:block; }
+    .cs-msg.err { background:#fee2e2; color:#991b1b; display:block; }
+    .empty-cell { text-align:center; color:#94a3b8; padding:36px; font-size:0.88rem; }
+    .cs-notes { font-size:0.74rem; color:#94a3b8; margin-top:18px; line-height:1.5; }
+    .cs-mini-list { font-size:0.78rem; color:#475569; line-height:1.6; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <main class="container" style="padding:28px 20px">
+
+    <div class="cs-header">
+      <h1>Creative Strategy</h1>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" onclick="startSync(7)">Sync last 7 days</button>
+        <button class="btn" onclick="startSync(90)" style="background:#1e293b;color:#fff">Backfill 90 days</button>
+      </div>
+    </div>
+    <p class="cs-sub">Which personas win, and which creative styles and angles win within each customer
+      segment. Ranked on CPA (lowest first). Data syncs from Meta daily at 2:30am.</p>
+
+    <div class="cs-toolbar">
+      <button class="cs-preset active" data-days="1" onclick="setPreset(this)">Last 24h</button>
+      <button class="cs-preset" data-days="7" onclick="setPreset(this)">7 days</button>
+      <button class="cs-preset" data-days="14" onclick="setPreset(this)">14 days</button>
+      <button class="cs-preset" data-days="30" onclick="setPreset(this)">30 days</button>
+      <button class="cs-preset" data-days="90" onclick="setPreset(this)">90 days</button>
+      <input type="date" class="cs-date" id="cs-since" onchange="customRange()" />
+      <span style="color:#94a3b8">→</span>
+      <input type="date" class="cs-date" id="cs-until" onchange="customRange()" />
+      <span class="cs-status" id="cs-status"></span>
+    </div>
+
+    <div class="cs-msg" id="cs-msg"></div>
+    <div id="cs-content"><div class="empty-cell">Loading…</div></div>
+
+  </main>
+  <script src="creative-strategy.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

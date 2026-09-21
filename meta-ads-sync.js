@@ -258,6 +258,103 @@ async function syncInfluencerAdInsights(adIds, daysBack = 7) {
   return { rows: total };
 }
 
+// ── Ad-level performance sync (Creative Strategy report) ──────────
+
+const adPerfState = { isRunning: false, lastRun: null, lastError: null, progress: null };
+
+// Pull ad-level daily insights for the whole account into meta_ad_perf_daily.
+// Chunked into ≤30-day windows so a 90-day backfill pages cleanly.
+async function syncAdPerf(daysBack = 7) {
+  if (!_pool) throw new Error('DB pool not initialised');
+  if (adPerfState.isRunning) throw new Error('Ad-level sync already running');
+  const token = await getAccessToken();
+  if (!token) throw new Error('Meta not connected — connect Meta Ads on the Syncing page');
+  const adAccountId = process.env.META_AD_ACCOUNT_ID;
+  if (!adAccountId) throw new Error('META_AD_ACCOUNT_ID env var not set');
+
+  adPerfState.isRunning = true;
+  adPerfState.lastError = null;
+  adPerfState.progress  = { daysBack, chunksDone: 0, chunksTotal: 0, rows: 0 };
+
+  try {
+    const fields = 'ad_id,ad_name,adset_name,campaign_name,spend,impressions,clicks,' +
+      'inline_link_clicks,reach,actions,action_values';
+
+    // Build 30-day chunks, oldest first
+    const chunks = [];
+    let end = new Date();
+    let remaining = daysBack;
+    while (remaining > 0) {
+      const span = Math.min(remaining, 30);
+      const start = new Date(end);
+      start.setDate(start.getDate() - span + 1);
+      chunks.unshift({ since: start.toISOString().slice(0, 10), until: end.toISOString().slice(0, 10) });
+      end = new Date(start);
+      end.setDate(end.getDate() - 1);
+      remaining -= span;
+    }
+    adPerfState.progress.chunksTotal = chunks.length;
+
+    let total = 0;
+    for (const chunk of chunks) {
+      let url = `${BASE_URL}/act_${adAccountId}/insights?level=ad&fields=${encodeURIComponent(fields)}` +
+        `&time_range={"since":"${chunk.since}","until":"${chunk.until}"}` +
+        `&time_increment=1&limit=500&access_token=${token}`;
+      while (url) {
+        const res  = await fetch(url);
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          if (data.error?.code === 190) { await saveAccessToken(''); throw new Error('Meta token expired — reconnect on the Syncing page'); }
+          throw new Error(data.error?.message || `Meta API error ${res.status}`);
+        }
+        for (const row of (data.data || [])) {
+          const purchases     = parseFloat((row.actions || []).find(a => a.action_type === 'purchase')?.value || 0);
+          const purchaseValue = parseFloat((row.action_values || []).find(a => a.action_type === 'purchase')?.value || 0);
+          await _pool.query(
+            `INSERT INTO meta_ad_perf_daily
+               (ad_id, date, ad_name, adset_name, campaign_name,
+                spend, impressions, clicks, link_clicks, reach, purchases, purchase_value, synced_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
+             ON CONFLICT (ad_id, date) DO UPDATE SET
+               ad_name=EXCLUDED.ad_name, adset_name=EXCLUDED.adset_name,
+               campaign_name=EXCLUDED.campaign_name, spend=EXCLUDED.spend,
+               impressions=EXCLUDED.impressions, clicks=EXCLUDED.clicks,
+               link_clicks=EXCLUDED.link_clicks, reach=EXCLUDED.reach,
+               purchases=EXCLUDED.purchases, purchase_value=EXCLUDED.purchase_value,
+               synced_at=NOW()`,
+            [row.ad_id, row.date_start, row.ad_name || null, row.adset_name || null,
+             row.campaign_name || null,
+             parseFloat(row.spend || 0), parseInt(row.impressions || 0),
+             parseInt(row.clicks || 0), parseInt(row.inline_link_clicks || 0),
+             parseInt(row.reach || 0), purchases, purchaseValue]
+          );
+          total++;
+        }
+        url = data.paging?.next || null;
+        adPerfState.progress.rows = total;
+      }
+      adPerfState.progress.chunksDone++;
+    }
+    console.log(`[meta-ads] Ad-level perf sync: ${total} daily rows (${daysBack} days)`);
+    adPerfState.lastRun = new Date();
+    return { rows: total, daysBack };
+  } catch (err) {
+    adPerfState.lastError = err.message;
+    throw err;
+  } finally {
+    adPerfState.isRunning = false;
+  }
+}
+
+function getAdPerfStatus() {
+  return {
+    isRunning: adPerfState.isRunning,
+    lastRun:   adPerfState.lastRun ? adPerfState.lastRun.toISOString() : null,
+    lastError: adPerfState.lastError,
+    progress:  adPerfState.progress,
+  };
+}
+
 // ── Status helpers ─────────────────────────────────────────────────
 async function getConnectionStatus() {
   const token = await getAccessToken();
@@ -305,6 +402,12 @@ function startCron(pool) {
     } catch (err) {
       console.error('[meta-ads] Influencer ad sync error:', err.message);
     }
+    // Ad-level performance for the Creative Strategy report
+    try {
+      await syncAdPerf(7);
+    } catch (err) {
+      console.error('[meta-ads] Ad-level perf sync error:', err.message);
+    }
   });
   console.log(`[meta-ads] Cron scheduled: ${schedule}`);
 }
@@ -313,4 +416,4 @@ function getStatus() {
   return { isRunning, lastRun: lastRun?.toISOString() || null, lastResult };
 }
 
-module.exports = { startCron, syncDateRange, getConnectionStatus, getLastSync, handleOAuthCallback, getStatus, browseAds, syncInfluencerAdInsights };
+module.exports = { startCron, syncDateRange, getConnectionStatus, getLastSync, handleOAuthCallback, getStatus, browseAds, syncInfluencerAdInsights, syncAdPerf, getAdPerfStatus };
