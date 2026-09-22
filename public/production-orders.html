@@ -10,6 +10,15 @@
                       margin-bottom:18px; flex-wrap:wrap; gap:10px; }
     .po-list-header h1 { font-size:1.4rem; font-weight:700; color:#1e293b; margin:0; }
 
+    .po-months { display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+                 margin-bottom:12px; }
+    .po-month-btn { padding:8px 16px; border-radius:10px; border:1.5px solid #e2e8f0;
+                    background:#fff; color:#475569; font-size:0.85rem; font-weight:700;
+                    cursor:pointer; transition:all 0.15s; }
+    .po-month-btn:hover:not(.active) { border-color:#6366f1; color:#6366f1; }
+    .po-month-btn.active { background:#1e293b; color:#fff; border-color:#1e293b; }
+    .po-month-btn .cnt { font-weight:600; font-size:0.75rem; opacity:0.65; margin-left:4px; }
+
     .po-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap;
                   margin-bottom:14px; }
     .po-filter-btn { padding:6px 14px; border-radius:20px; border:1.5px solid #e2e8f0;
@@ -94,6 +103,8 @@
         <button class="btn" onclick="window.location.href='/production-order.html'">+ New PO</button>
       </div>
     </div>
+
+    <div class="po-months" id="po-months"></div>
 
     <div class="po-toolbar">
       <button class="po-filter-btn active" onclick="setFilter('all',this)">All</button>

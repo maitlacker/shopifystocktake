@@ -6,6 +6,44 @@ let currentFilter = 'all';
 let groupByMonth  = false;
 let viewArchived  = false;
 let selectedIds   = new Set();
+let monthFilter   = monthKeyOffset(0);   // default: current month ('all' shows everything)
+
+function monthKeyOffset(offset) {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + offset);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function deliveryMonthOf(o) {
+  return o.delivery_date ? String(o.delivery_date).slice(0, 7) : 'no-date';
+}
+
+function buildMonthButtons() {
+  const el = document.getElementById('po-months');
+  if (!el) return;
+  const counts = {};
+  for (const o of allOrders) {
+    const k = deliveryMonthOf(o);
+    counts[k] = (counts[k] || 0) + 1;
+  }
+  const btn = (key, label, count) =>
+    `<button class="po-month-btn ${monthFilter === key ? 'active' : ''}" onclick="setMonth('${key}')">
+      ${label}${count ? `<span class="cnt">(${count})</span>` : ''}</button>`;
+  let html = btn('all', 'All Months', allOrders.length);
+  for (let i = 0; i <= 6; i++) {
+    const key = monthKeyOffset(i);
+    const [y, m] = key.split('-');
+    html += btn(key, `${MONTH_NAMES[parseInt(m) - 1]} ${y.slice(2)}`, counts[key] || 0);
+  }
+  el.innerHTML = html;
+}
+
+function setMonth(key) {
+  monthFilter = key;
+  buildMonthButtons();
+  render();
+}
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const NUMERIC_SIZES = ['6','8','10','12','14','16','18'];
@@ -21,6 +59,7 @@ async function loadOrders() {
     const r = await fetch(`/api/production-orders${viewArchived ? '?view=archived' : ''}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     allOrders = await r.json();
+    buildMonthButtons();
     render();
   } catch (err) {
     document.getElementById('po-tbody').innerHTML =
@@ -166,6 +205,10 @@ function render() {
     ? allOrders
     : allOrders.filter(o => o.status === currentFilter);
 
+  if (monthFilter !== 'all') {
+    orders = orders.filter(o => deliveryMonthOf(o) === monthFilter);
+  }
+
   const q = (document.getElementById('po-search')?.value || '').toLowerCase().trim();
   if (q) {
     orders = orders.filter(o =>
@@ -177,9 +220,12 @@ function render() {
 
   const tbody = document.getElementById('po-tbody');
   if (!orders.length) {
+    const monthNote = monthFilter !== 'all'
+      ? ` with a delivery date in ${MONTH_NAMES[parseInt(monthFilter.slice(5)) - 1]} ${monthFilter.slice(0, 4)} — click "All Months" to widen`
+      : '';
     tbody.innerHTML = q
-      ? `<tr><td colspan="11" class="empty-cell">No orders match "${escHtml(q)}".</td></tr>`
-      : `<tr><td colspan="11" class="empty-cell">${viewArchived ? 'No archived orders.' : 'No orders found — <a href="/production-order.html" style="color:#6366f1">create one</a>.'}</td></tr>`;
+      ? `<tr><td colspan="11" class="empty-cell">No orders match "${escHtml(q)}"${monthNote}.</td></tr>`
+      : `<tr><td colspan="11" class="empty-cell">${viewArchived ? `No archived orders${monthNote}.` : `No orders found${monthNote}.`}</td></tr>`;
     return;
   }
 
