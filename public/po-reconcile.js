@@ -28,11 +28,13 @@ function receiptName(sr) { return sr.style_name || sr.shopify_product_title || `
 
 // ── Matching ───────────────────────────────────────────────────────
 
-// Strict name match: receipt name appears in a PO line name or vice versa
+function openLines(po) { return (po.lines || []).filter(l => !l.received); }
+
+// Strict name match: receipt name appears in an UNRECEIVED PO line name or vice versa
 function poNameMatches(sr, po) {
   const rName = norm(receiptName(sr));
   const rCode = norm(sr.product_code);
-  for (const l of (po.lines || [])) {
+  for (const l of openLines(po)) {
     const pName = norm(l.name);
     if (rName.length >= 5 && pName.length >= 5 &&
         (pName.includes(rName) || rName.includes(pName))) return true;
@@ -48,7 +50,7 @@ function poSimScore(sr, po) {
   const rWords = new Set(words(receiptName(sr)));
   if (!rWords.size) return 0;
   let best = 0;
-  for (const l of (po.lines || [])) {
+  for (const l of openLines(po)) {
     const pWords = words(l.name);
     if (!pWords.length) continue;
     let shared = 0;
@@ -122,9 +124,11 @@ function render() {
 }
 
 function poOption(po, { star = false, hint = '' } = {}) {
-  const names = (po.lines || []).map(l => l.name).filter(Boolean);
+  const names = (po.lines || []).map(l => (l.received ? '✓' : '') + (l.name || '')).filter(n => n && n !== '✓');
+  const done = (po.lines || []).filter(l => l.received).length;
+  const progress = done > 0 ? ` · ${done}/${(po.lines || []).length} received` : '';
   const label = `PO ${po.po_number} · ${names.join(', ') || po.supplier_name || '—'}` +
-    ` · ${po.total_qty} pcs · due ${fmtDate(po.delivery_date)}${hint ? ` (${hint})` : ''}`;
+    ` · ${po.total_qty} pcs · due ${fmtDate(po.delivery_date)}${progress}${hint ? ` (${hint})` : ''}`;
   return { id: po.id, label: (star ? '★ ' : '') + label };
 }
 
@@ -233,7 +237,7 @@ function renderPos() {
   }
   tbody.innerHTML = POS.map(po => {
     const linesHtml = (po.lines || []).map(l =>
-      `<div class="rec-line"><span class="rec-style">${escHtml(l.name || '—')}</span>
+      `<div class="rec-line">${l.received ? '<span style="color:#15803d;font-weight:800">✓ </span>' : ''}<span class="rec-style">${escHtml(l.name || '—')}</span>
         <span class="rec-code">${escHtml(l.code || '')}${l.qty ? ` · ${l.qty} pcs` : ''}</span></div>`).join('') || '—';
     return `
       <tr>
@@ -266,8 +270,17 @@ async function doLink(receiptId, poId, btn) {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-    showMsg(`Receipt linked to PO ${data.po_number}` +
-      (data.po_marked_received ? ' — PO marked as Received ✓' : ' (PO was already received)'), true);
+    let msg = `Receipt linked to PO ${data.po_number}`;
+    if (data.po_marked_received) {
+      msg += ' — all styles received, PO marked as Received ✓';
+    } else if (data.matched_line) {
+      msg += ` — "${data.matched_line}" ticked off (${data.received_count}/${data.line_count} styles received)`;
+    } else if (data.line_count > 0) {
+      msg += ' — linked, but no style line matched this receipt\'s product code/name; the PO stays open';
+    } else {
+      msg += ' (PO was already received)';
+    }
+    showMsg(msg, true);
     await loadData();
   } catch (err) {
     showMsg('Link failed: ' + err.message, false);

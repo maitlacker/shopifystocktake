@@ -1678,6 +1678,74 @@ app.delete('/api/suppliers/:id', async (req, res) => {
 });
 
 // ── Production Orders ──────────────────────────────────────────────
+
+// SQL expression for a line's stable key (product code, else product name)
+const PO_LINE_KEY_SQL = `COALESCE(NULLIF(TRIM(l.product_code), ''), l.product_name)`;
+
+function normCodeCmp(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+// Mark the style line on a PO matching this receipt as received. Rolls the
+// whole PO to status='received' only when every line has been received.
+// receipt: { id, product_code, style_name, shopify_product_title }
+async function markPoLineReceived(poId, receipt, user) {
+  const { rows: lines } = await pool.query(
+    `SELECT COALESCE(NULLIF(TRIM(l.product_code), ''), l.product_name) AS line_key,
+            l.product_code, l.product_name
+     FROM production_order_lines l WHERE l.order_id=$1`, [poId]);
+
+  const rollReceived = async () => {
+    await pool.query(
+      `UPDATE production_orders SET status='received', updated_at=NOW()
+       WHERE id=$1 AND status NOT IN ('received','cancelled')`, [poId]);
+  };
+
+  if (!lines.length) {
+    // Legacy PO with no lines — nothing to track per style
+    await rollReceived();
+    return { matchedLine: null, matchedName: null, allReceived: true, receivedCount: 0, lineCount: 0 };
+  }
+
+  const keys = [...new Set(lines.map(l => l.line_key))];
+  const rCode = normCodeCmp(receipt.product_code);
+  const rName = normCodeCmp(receipt.style_name || receipt.shopify_product_title);
+
+  let matched = null;
+  if (rCode.length >= 4) {
+    matched = lines.find(l => normCodeCmp(l.product_code) === rCode)
+      || lines.find(l => {
+           const c = normCodeCmp(l.product_code);
+           return c.length >= 4 && (c.startsWith(rCode) || rCode.startsWith(c));
+         });
+  }
+  if (!matched && rName.length >= 5) {
+    matched = lines.find(l => {
+      const n = normCodeCmp(l.product_name);
+      return n.length >= 5 && (n.includes(rName) || rName.includes(n));
+    });
+  }
+  if (!matched && keys.length === 1) matched = lines[0]; // single-style PO
+
+  if (matched) {
+    await pool.query(
+      `INSERT INTO production_order_line_receipts (order_id, line_key, receipt_id, received_by)
+       VALUES ($1,$2,$3,$4) ON CONFLICT (order_id, line_key) DO NOTHING`,
+      [poId, matched.line_key, receipt.id || null, user || null]);
+  }
+
+  const { rows: recd } = await pool.query(
+    `SELECT line_key FROM production_order_line_receipts WHERE order_id=$1`, [poId]);
+  const recdSet = new Set(recd.map(r => r.line_key));
+  const receivedCount = keys.filter(k => recdSet.has(k)).length;
+  const allReceived = receivedCount === keys.length;
+  if (allReceived) await rollReceived();
+
+  return {
+    matchedLine: matched ? matched.line_key : null,
+    matchedName: matched ? (matched.product_name || matched.line_key) : null,
+    allReceived, receivedCount, lineCount: keys.length,
+  };
+}
+
 app.get('/api/production-orders', async (req, res) => {
   try {
     const { rows } = await pool.query(`
@@ -1694,7 +1762,11 @@ app.get('/api/production-orders', async (req, res) => {
             'name', l.product_name,
             'qty',  l.total_qty,
             'quantities', l.quantities,
-            'size_set',   l.size_set
+            'size_set',   l.size_set,
+            'received', EXISTS (
+              SELECT 1 FROM production_order_line_receipts plr
+              WHERE plr.order_id = po.id
+                AND plr.line_key = ${PO_LINE_KEY_SQL})
           ) ORDER BY l.line_number)
           FROM production_order_lines l WHERE l.order_id=po.id)
         , '[]'::json) AS line_summaries
@@ -7574,7 +7646,12 @@ app.get('/api/po-reconcile', requireAuth, async (req, res) => {
                          WHERE pol.order_id = po.id), 0)::int AS total_qty,
                COALESCE((SELECT json_agg(json_build_object(
                            'code', pol.product_code, 'name', pol.product_name,
-                           'qty', pol.total_qty) ORDER BY pol.line_number)
+                           'qty', pol.total_qty,
+                           'received', EXISTS (
+                             SELECT 1 FROM production_order_line_receipts plr
+                             WHERE plr.order_id = po.id
+                               AND plr.line_key = COALESCE(NULLIF(TRIM(pol.product_code), ''), pol.product_name))
+                         ) ORDER BY pol.line_number)
                          FROM production_order_lines pol WHERE pol.order_id = po.id),
                         '[]'::json) AS lines
         FROM production_orders po
@@ -7586,7 +7663,9 @@ app.get('/api/po-reconcile', requireAuth, async (req, res) => {
                COALESCE((SELECT SUM(s.qty) FROM stock_receipt_sizes s
                          WHERE s.receipt_id = sr.id), 0)::int AS counted_qty,
                mpo.id AS matched_po_id, mpo.po_number AS matched_po_number,
-               mpo.status AS matched_po_status
+               mpo.status AS matched_po_status,
+               EXISTS (SELECT 1 FROM production_order_line_receipts plr
+                       WHERE plr.receipt_id = sr.id) AS line_received
         FROM stock_receipts sr
         LEFT JOIN production_orders mpo
           ON mpo.id = sr.po_id
@@ -7598,7 +7677,9 @@ app.get('/api/po-reconcile', requireAuth, async (req, res) => {
 
     const receipts = srRes.rows.map(r => {
       let po_state;
-      if (r.matched_po_id) {
+      if (r.line_received) {
+        po_state = 'linked_received';   // already consumed by a PO style line
+      } else if (r.matched_po_id) {
         po_state = r.matched_po_status === 'received' ? 'linked_received' : 'linked_open';
       } else if (r.po_number && String(r.po_number).trim()) {
         po_state = 'unmatched';   // number recorded but no such PO exists
@@ -7621,9 +7702,11 @@ app.post('/api/po-reconcile/link', requireAuth, async (req, res) => {
     const user = req.user?.email || 'unknown';
 
     const srRes = await pool.query(
-      `SELECT id, po_number, po_id, style_name FROM stock_receipts
+      `SELECT id, po_number, po_id, style_name, product_code, shopify_product_title
+       FROM stock_receipts
        WHERE id=$1 AND status='complete' AND deleted_at IS NULL`, [receiptId]);
     if (!srRes.rows.length) return res.status(404).json({ error: 'Completed receipt not found' });
+    const sr = srRes.rows[0];
 
     const poQ = await pool.query(
       `SELECT id, po_number, supplier_name, status FROM production_orders
@@ -7640,21 +7723,37 @@ app.post('/api/po-reconcile/link', requireAuth, async (req, res) => {
        VALUES ($1,'updated','po_number',$2,$3)`,
       [receiptId, `Linked to PO ${po.po_number} via reconciliation`, user]);
 
-    let poMarkedReceived = false;
+    // Mark the matching STYLE line received; the PO only rolls to received
+    // once every line has been
+    let lineResult = { matchedLine: null, matchedName: null, allReceived: false, receivedCount: 0, lineCount: 0 };
     if (po.status !== 'received') {
-      await pool.query(
-        `UPDATE production_orders SET status='received', updated_at=NOW() WHERE id=$1`, [po.id]);
-      poMarkedReceived = true;
-      await pool.query(
-        `INSERT INTO stock_receipt_audit (receipt_id, action, field_name, new_value, changed_by)
-         VALUES ($1,'updated','production_order',$2,$3)`,
-        [receiptId, `PO ${po.po_number} marked received`, user]);
-      console.log(`[srf] Reconcile: receipt #${receiptId} linked → PO ${po.po_number} marked received by ${user}`);
-      restockSync.runAnalysis().catch(err =>
-        console.error('[srf] Post-reconcile restock refresh failed:', err.message));
+      lineResult = await markPoLineReceived(po.id, {
+        id: receiptId, product_code: sr.product_code,
+        style_name: sr.style_name, shopify_product_title: sr.shopify_product_title,
+      }, user);
+      if (lineResult.matchedLine) {
+        await pool.query(
+          `INSERT INTO stock_receipt_audit (receipt_id, action, field_name, new_value, changed_by)
+           VALUES ($1,'updated','production_order',$2,$3)`,
+          [receiptId, `PO ${po.po_number}: "${lineResult.matchedName}" marked received (${lineResult.receivedCount}/${lineResult.lineCount} styles)`, user]);
+      }
+      if (lineResult.allReceived) {
+        await pool.query(
+          `INSERT INTO stock_receipt_audit (receipt_id, action, field_name, new_value, changed_by)
+           VALUES ($1,'updated','production_order',$2,$3)`,
+          [receiptId, `PO ${po.po_number} marked received — all styles received`, user]);
+        console.log(`[srf] Reconcile: receipt #${receiptId} linked → PO ${po.po_number} fully received by ${user}`);
+        restockSync.runAnalysis().catch(err =>
+          console.error('[srf] Post-reconcile restock refresh failed:', err.message));
+      }
     }
 
-    res.json({ ok: true, receipt_id: receiptId, po_number: po.po_number, po_marked_received: poMarkedReceived });
+    res.json({
+      ok: true, receipt_id: receiptId, po_number: po.po_number,
+      matched_line: lineResult.matchedName,
+      received_count: lineResult.receivedCount, line_count: lineResult.lineCount,
+      po_marked_received: lineResult.allReceived,
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -7833,40 +7932,49 @@ app.post('/api/stock-receipts/:id/complete', requireAuth, async (req, res) => {
       [id, user]
     );
 
-    // Cross-reference production orders — mark matching PO(s) as received
+    // Cross-reference production orders — mark this receipt's STYLE line as
+    // received; the PO itself only rolls to received once every line has been
     let receivedPOs = [];
     try {
       const r = existingRes.rows[0];
-      let poResult = { rows: [] };
+      let po = null;
       if (r.po_id) {
-        poResult = await pool.query(
-          `UPDATE production_orders SET status='received', updated_at=NOW()
-           WHERE id=$1 AND status NOT IN ('received','cancelled')
-           RETURNING id, po_number`,
-          [r.po_id]
-        );
-      } else if (r.po_number) {
-        poResult = await pool.query(
-          `UPDATE production_orders SET status='received', updated_at=NOW()
-           WHERE UPPER(TRIM(po_number))=UPPER(TRIM($1)) AND status NOT IN ('received','cancelled')
-           RETURNING id, po_number`,
-          [r.po_number]
-        );
+        const q = await pool.query(`SELECT id, po_number, status FROM production_orders WHERE id=$1`, [r.po_id]);
+        po = q.rows[0] || null;
       }
-      receivedPOs = poResult.rows;
-      for (const po of receivedPOs) {
-        await pool.query(
-          `INSERT INTO stock_receipt_audit (receipt_id, action, field_name, new_value, changed_by)
-           VALUES ($1,'updated','production_order',$2,$3)`,
-          [id, `PO ${po.po_number || po.id} marked received`, user]
-        );
-        console.log(`[srf] Receipt #${id} complete → PO ${po.po_number || po.id} marked received`);
+      if (!po && r.po_number && String(r.po_number).trim()) {
+        const q = await pool.query(
+          `SELECT id, po_number, status FROM production_orders
+           WHERE UPPER(TRIM(po_number))=UPPER(TRIM($1)) LIMIT 1`, [r.po_number]);
+        po = q.rows[0] || null;
       }
-      // Refresh the restock analysis so the PO drops out of incoming and
-      // live Shopify stock is re-read — fire and forget
-      if (receivedPOs.length) {
-        restockSync.runAnalysis().catch(err =>
-          console.error('[srf] Post-receipt restock refresh failed:', err.message));
+      if (po && po.status !== 'received' && po.status !== 'cancelled') {
+        const result = await markPoLineReceived(po.id, {
+          id, product_code: r.product_code,
+          style_name: r.style_name, shopify_product_title: r.shopify_product_title,
+        }, user);
+        if (result.matchedLine) {
+          await pool.query(
+            `INSERT INTO stock_receipt_audit (receipt_id, action, field_name, new_value, changed_by)
+             VALUES ($1,'updated','production_order',$2,$3)`,
+            [id, `PO ${po.po_number || po.id}: "${result.matchedName}" marked received (${result.receivedCount}/${result.lineCount} styles)`, user]
+          );
+          console.log(`[srf] Receipt #${id} complete → PO ${po.po_number || po.id} line "${result.matchedName}" received (${result.receivedCount}/${result.lineCount})`);
+        } else if (result.lineCount > 0) {
+          console.log(`[srf] Receipt #${id} complete → PO ${po.po_number || po.id}: no style line matched product code "${r.product_code}"`);
+        }
+        if (result.allReceived) {
+          receivedPOs = [po];
+          await pool.query(
+            `INSERT INTO stock_receipt_audit (receipt_id, action, field_name, new_value, changed_by)
+             VALUES ($1,'updated','production_order',$2,$3)`,
+            [id, `PO ${po.po_number || po.id} marked received — all styles received`, user]
+          );
+          // Refresh the restock analysis so the PO drops out of incoming and
+          // live Shopify stock is re-read — fire and forget
+          restockSync.runAnalysis().catch(err =>
+            console.error('[srf] Post-receipt restock refresh failed:', err.message));
+        }
       }
     } catch (poErr) {
       console.error('[srf] PO cross-reference failed:', poErr.message);

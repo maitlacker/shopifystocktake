@@ -294,14 +294,22 @@ function orderRow(o) {
   const lines    = o.line_summaries || [];
   const audTotal = getAudTotal(o);
 
-  // Products + codes column
+  // Products + codes column — ✓ per style already received
   const productsHtml = lines.length
-    ? lines.map(l => `
+    ? lines.map(l => {
+        const recd = l.received || o.status === 'received';
+        return `
         <div class="po-line-block">
-          <div class="po-product-name" title="${escHtml(l.name)}">${escHtml(l.name || '—')}</div>
+          <div class="po-product-name" title="${escHtml(l.name)}">${recd ? '<span style="color:#15803d;font-weight:800">✓ </span>' : ''}${escHtml(l.name || '—')}</div>
           ${l.code ? `<div class="po-product-code">${escHtml(l.code)}</div>` : ''}
-        </div>`).join('')
+        </div>`;
+      }).join('')
     : '<span style="color:#94a3b8">—</span>';
+
+  const recdCount = lines.filter(l => l.received).length;
+  const partialHtml = (o.status !== 'received' && recdCount > 0)
+    ? `<div class="po-aud-gst" style="color:#15803d;font-weight:700">${recdCount}/${lines.length} styles received</div>`
+    : '';
 
   // Size / QTY breakdown column
   const qtyHtml = lines.length
@@ -344,7 +352,7 @@ function orderRow(o) {
     <td style="white-space:nowrap">${delivDate}</td>
     <td>${freight}</td>
     <td>${audHtml}</td>
-    <td><span class="po-status ${o.status}">${o.status}</span></td>
+    <td><span class="po-status ${o.status}">${o.status}</span>${partialHtml}</td>
   </tr>`;
 }
 

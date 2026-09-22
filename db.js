@@ -564,6 +564,22 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_po_lines_order
       ON production_order_lines(order_id, line_number);
 
+    -- Per-style received tracking. Line ids are unstable (edits delete +
+    -- reinsert lines) so rows are keyed by order + line key (product code,
+    -- falling back to product name). The PO itself only rolls to
+    -- status='received' once every line has a row here.
+    CREATE TABLE IF NOT EXISTS production_order_line_receipts (
+      id           SERIAL PRIMARY KEY,
+      order_id     INT NOT NULL,
+      line_key     TEXT NOT NULL,
+      receipt_id   INT,
+      received_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      received_by  TEXT,
+      UNIQUE(order_id, line_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_po_line_receipts_order
+      ON production_order_line_receipts(order_id);
+
     CREATE TABLE IF NOT EXISTS production_budgets (
       id         SERIAL PRIMARY KEY,
       year       INT NOT NULL,
