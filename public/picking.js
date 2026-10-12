@@ -343,6 +343,10 @@ function renderList(data) {
       ? `<span class="pick-modified-badge" title="Original order qty: ${item.originalQty}">Qty reduced ${item.originalQty}→${item.qty}</span>`
       : '';
 
+    const finalSaleHtml = item.finalSale
+      ? `<span class="pick-finalsale-badge" title="This item is in the Final Sale area">🏷 FINAL SALE AREA</span>`
+      : '';
+
     const noteHtml = item.note
       ? `<button class="pick-note-btn" data-note="${escHtml(item.note)}" title="Order note">&#128203;</button>`
       : '';
@@ -355,6 +359,7 @@ function renderList(data) {
           <div class="pick-sku">${escHtml(item.sku || '—')}</div>
           <div class="pick-title">${escHtml(item.title)}</div>
           ${variantHtml}
+          ${finalSaleHtml}
           ${modifiedHtml}
         </div>
         <div class="pick-right">

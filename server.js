@@ -96,7 +96,7 @@ function shopifyHeaders() {
 
 async function fetchAllProducts() {
   const products = [];
-  let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products.json?limit=250&status=active&fields=id,title,variants,images,published_at`;
+  let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/products.json?limit=250&status=active&fields=id,title,variants,images,published_at,tags`;
 
   while (url) {
     const res = await fetch(url, { headers: shopifyHeaders() });
@@ -874,6 +874,21 @@ app.get('/api/picking/report', async (req, res) => {
 });
 
 // ── Order Picking ─────────────────────────────────────────────────
+
+// Final Sale items live in a separate warehouse area. The store marks them
+// with product tags (variants seen live: "final sale", "Final_Sale",
+// "__label:Final Sale"), so flag by tag from the products cache.
+const FINAL_SALE_TAG_RE = /^(__label:)?final[\s_-]*sale$/i;
+
+function buildFinalSaleIds(products) {
+  const ids = new Set();
+  for (const p of products) {
+    const tags = String(p.tags || '').split(',');
+    if (tags.some(t => FINAL_SALE_TAG_RE.test(t.trim()))) ids.add(p.id);
+  }
+  return ids;
+}
+
 app.get('/api/picking/orders', async (req, res) => {
   const start = parseInt(req.query.start);
   const end   = parseInt(req.query.end);
@@ -889,6 +904,9 @@ app.get('/api/picking/orders', async (req, res) => {
     // Always refresh products cache when loading a pick run — ensures stock numbers are live
     productsCache = await fetchAllProducts();
     lastFetched   = new Date();
+
+    // Final Sale items live in a separate area — flag them by product tag
+    const finalSaleIds = buildFinalSaleIds(productsCache);
 
     // Build variant→image and variant→stock maps from products cache
     const variantImageMap = {};
@@ -955,6 +973,7 @@ app.get('/api/picking/orders', async (req, res) => {
             image:        variantImageMap[String(item.variant_id)] || null,
             stock:        variantStockMap[String(item.variant_id)] ?? null,
             note:         order.note || null,
+            finalSale:    finalSaleIds.has(item.product_id),
           });
         }
       }
