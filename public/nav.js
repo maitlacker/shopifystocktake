@@ -50,6 +50,7 @@
     {
       label: 'Production',
       children: [
+        { label: 'Production Dashboard', href: '/production-dashboard.html' },
         { label: 'Production Orders', href: '/production-orders.html' },
         { label: 'PO Reconciliation', href: '/po-reconcile.html' },
         { label: 'Monthly Budgets',   href: '/production-budget.html' },

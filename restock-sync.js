@@ -34,10 +34,6 @@ const SHOPIFY_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const API_VERSION   = '2024-01';
 const APP_URL       = (process.env.APP_URL || '').replace(/\/$/, '');
 
-// Name of the Shopify collection to exclude from restock alerts (case-insensitive).
-// Override via FINAL_SALE_COLLECTION_TITLE env var if your collection has a different name.
-const FINAL_SALE_TITLE = (process.env.FINAL_SALE_COLLECTION_TITLE || 'final sale').toLowerCase().trim();
-
 // Runway threshold for the CRITICAL alert tier (days).
 const CRITICAL_DAYS = 14;
 
@@ -85,49 +81,21 @@ async function fetchOrdersSince(sinceDate) {
   return orders;
 }
 
-// Returns the Set of Shopify product IDs in the Final Sale collection.
-// Fails gracefully — returns an empty set if the collection isn't found.
-async function fetchFinalSaleProductIds() {
-  try {
-    // Search custom collections for one matching FINAL_SALE_TITLE
-    let colUrl = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/custom_collections.json` +
-      `?fields=id,title&limit=250`;
-    let colId = null;
-    while (colUrl && !colId) {
-      const r = await fetch(colUrl, { headers: shopifyHeaders() });
-      if (!r.ok) break;
-      const data = await r.json();
-      const match = (data.custom_collections || []).find(c =>
-        c.title.toLowerCase().trim() === FINAL_SALE_TITLE
-      );
-      if (match) { colId = match.id; break; }
-      const link = r.headers.get('link') || '';
-      const m = link.match(/<([^>]+)>;\s*rel="next"/);
-      colUrl = m ? m[1] : null;
-    }
-    if (!colId) {
-      console.log(`[restock] Final Sale collection "${FINAL_SALE_TITLE}" not found — no exclusions`);
-      return new Set();
-    }
-    // Collect all product IDs in that collection
-    const productIds = new Set();
-    let collectUrl = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/collects.json` +
-      `?collection_id=${colId}&fields=product_id&limit=250`;
-    while (collectUrl) {
-      const cr = await fetch(collectUrl, { headers: shopifyHeaders() });
-      if (!cr.ok) break;
-      const cd = await cr.json();
-      (cd.collects || []).forEach(c => productIds.add(String(c.product_id)));
-      const link = cr.headers.get('link') || '';
-      const m = link.match(/<([^>]+)>;\s*rel="next"/);
-      collectUrl = m ? m[1] : null;
-    }
-    console.log(`[restock] Final Sale collection: ${productIds.size} products excluded from alerts`);
-    return productIds;
-  } catch (e) {
-    console.error('[restock] fetchFinalSaleProductIds error:', e.message);
-    return new Set();
+// Returns the Set of Shopify product IDs marked Final Sale. The store marks
+// these with product TAGS (live variants: "final sale", "Final_Sale",
+// "__label:Final Sale") — there is no Final Sale collection on Shopify.
+// Final Sale = price dropped to clear, so it will not be restocked: rated F,
+// no alerts, highlighted (not hidden) in the planner and dashboard.
+const FINAL_SALE_TAG_RE = /^(__label:)?final[\s_-]*sale$/i;
+
+function finalSaleIdsFromProducts(products) {
+  const ids = new Set();
+  for (const p of products) {
+    const tags = String(p.tags || '').split(',');
+    if (tags.some(t => FINAL_SALE_TAG_RE.test(t.trim()))) ids.add(String(p.id));
   }
+  console.log(`[restock] Final Sale (by tag): ${ids.size} products excluded from restock suggestions`);
+  return ids;
 }
 
 // ── Selling rating ─────────────────────────────────────────────────
@@ -480,11 +448,11 @@ async function runAnalysis() {
     );
     const alertSentSet = new Set(alertRows.map(r => `${r.product_id}:${r.alert_type}`));
 
-    // 6. Final Sale collection — products in here are never alerted
-    const finalSaleIds = await fetchFinalSaleProductIds();
-
     // 7. Shopify data
     const products = await fetchAllProducts();
+
+    // 6. Final Sale (by product tag) — never alerted or suggested, highlighted instead
+    const finalSaleIds = finalSaleIdsFromProducts(products);
     const since = new Date();
     since.setDate(since.getDate() - velocity_days);
     const orders = await fetchOrdersSince(since);

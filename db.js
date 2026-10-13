@@ -781,6 +781,18 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_spec_images_spec
       ON production_order_spec_images(spec_id, sort_order);
 
+    -- Order form activity (saves + downloads) for the Production Dashboard
+    CREATE TABLE IF NOT EXISTS order_form_log (
+      id           SERIAL PRIMARY KEY,
+      order_id     INT NOT NULL,
+      product_code TEXT NOT NULL,
+      action       TEXT NOT NULL CHECK (action IN ('saved','downloaded')),
+      at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      by_email     TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_order_form_log_at
+      ON order_form_log(at DESC);
+
     ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS freight_terms TEXT;
 
     ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;

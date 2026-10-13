@@ -1764,6 +1764,162 @@ app.post('/api/restock/create-pos', requireAuth, async (req, res) => {
   }
 });
 
+// ── Production Dashboard ────────────────────────────────────────────
+
+app.get('/api/production-dashboard', requireAuth, async (req, res) => {
+  try {
+    const { rows: aRows } = await pool.query(
+      `SELECT value FROM app_settings WHERE key='restock_analysis'`);
+    const analysis = aRows.length ? JSON.parse(aRows[0].value) : {};
+    const products = analysis.products || [];
+
+    // Month buckets: current month + next 5
+    const months = [];
+    const d = new Date(); d.setDate(1);
+    for (let i = 0; i < 6; i++) {
+      months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+      d.setMonth(d.getMonth() + 1);
+    }
+
+    // Column 1 — top 20 AA+/A restocks with no or insufficient incoming
+    const alerts = products
+      .map(p => {
+        const buffer = p.velocityBuffer || 1.0;
+        const suggested = (p.variants || []).reduce((s, v) => s + Math.ceil((v.suggestedSeaQty || 0) * buffer), 0);
+        const incoming  = (p.incomingOrders || []).reduce((s, o) => s + (o.totalQty || 0), 0);
+        return { p, suggested, incoming };
+      })
+      .filter(x =>
+        (x.p.rating === 'AA+' || x.p.rating === 'A') &&
+        !x.p.isFinalSale && x.p.restockEnabled !== false &&
+        x.p.minDaysRemaining !== null &&
+        x.suggested > 0 && x.incoming < x.suggested)
+      .sort((a, b) => a.p.minDaysRemaining - b.p.minDaysRemaining)
+      .slice(0, 20)
+      .map(x => ({
+        productId: x.p.productId, title: x.p.title, image: x.p.image,
+        rating: x.p.rating, runwayDays: x.p.minDaysRemaining,
+        velocity: x.p.adjustedDailyVel || x.p.avgDailyVel,
+        suggested: x.suggested, incoming: x.incoming, shortfall: x.suggested - x.incoming,
+      }));
+
+    // Column 2 — draft POs awaiting confirmation
+    const { rows: drafts } = await pool.query(`
+      SELECT po.id, po.po_number, po.supplier_name, po.freight_mode, po.created_at, po.delivery_date,
+        COALESCE((SELECT COUNT(*) FROM production_order_lines l WHERE l.order_id=po.id),0)::int AS line_count,
+        COALESCE((SELECT SUM(l.total_qty) FROM production_order_lines l WHERE l.order_id=po.id),0)::int AS total_qty,
+        COALESCE((SELECT string_agg(l.product_name, ', ' ORDER BY l.line_number)
+                  FROM production_order_lines l WHERE l.order_id=po.id), '') AS styles
+      FROM production_orders po
+      WHERE po.status='draft' AND po.archived_at IS NULL
+      ORDER BY po.created_at DESC LIMIT 20`);
+
+    // Column 3 — 10 most recent order forms (latest save/download per style)
+    const { rows: recentForms } = await pool.query(`
+      SELECT * FROM (
+        SELECT DISTINCT ON (l.order_id, l.product_code)
+          l.order_id, l.product_code, l.action, l.at, l.by_email, po.po_number,
+          (SELECT pol.product_name FROM production_order_lines pol
+           WHERE pol.order_id=l.order_id AND pol.product_code=l.product_code LIMIT 1) AS product_name,
+          (SELECT pol.line_type FROM production_order_lines pol
+           WHERE pol.order_id=l.order_id AND pol.product_code=l.product_code LIMIT 1) AS line_type
+        FROM order_form_log l
+        JOIN production_orders po ON po.id = l.order_id
+        ORDER BY l.order_id, l.product_code, l.at DESC
+      ) latest ORDER BY at DESC LIMIT 10`);
+
+    // Bottom grid — per-product incoming units by month
+    const grid = products.map(p => {
+      const incoming = {};
+      let total = 0, later = 0;
+      for (const o of (p.incomingOrders || [])) {
+        const key = String(o.expectedDelivery || '').slice(0, 7);
+        const qty = o.totalQty || 0;
+        total += qty;
+        if (months.includes(key)) incoming[key] = (incoming[key] || 0) + qty;
+        else later += qty;
+      }
+      return {
+        productId: p.productId, title: p.title, image: p.image,
+        rating: p.rating, isFinalSale: !!p.isFinalSale,
+        stock: p.totalInventory, runwayDays: p.minDaysRemaining,
+        velocity: p.adjustedDailyVel || p.avgDailyVel || 0,
+        incoming, incomingTotal: total, incomingLater: later,
+      };
+    });
+
+    // Last AI gap analysis (if any)
+    const { rows: gRows } = await pool.query(
+      `SELECT value FROM app_settings WHERE key='production_gap_analysis'`);
+    const gapAnalysis = gRows.length ? JSON.parse(gRows[0].value) : null;
+
+    res.json({
+      generatedAt: analysis.generatedAt || null,
+      months, alerts, drafts, recentForms, products: grid, gapAnalysis,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// AI gap analysis — highlights understocked / under-ordered styles
+app.post('/api/production-dashboard/gap-analysis', requireAuth, async (req, res) => {
+  if (!anthropicClient) {
+    return res.status(503).json({ error: 'ANTHROPIC_API_KEY is not configured on this server.' });
+  }
+  try {
+    const { rows: aRows } = await pool.query(
+      `SELECT value FROM app_settings WHERE key='restock_analysis'`);
+    if (!aRows.length) return res.status(400).json({ error: 'No restock analysis yet — run one first' });
+    const analysis = JSON.parse(aRows[0].value);
+    const products = analysis.products || [];
+
+    const compact = products
+      .filter(p => p.rating && p.rating !== 'F' && !p.isFinalSale && p.restockEnabled !== false)
+      .sort((a, b) => (b.adjustedDailyVel || b.avgDailyVel || 0) - (a.adjustedDailyVel || a.avgDailyVel || 0))
+      .slice(0, 60)
+      .map(p => {
+        const buffer = p.velocityBuffer || 1.0;
+        const suggested = (p.variants || []).reduce((s, v) => s + Math.ceil((v.suggestedSeaQty || 0) * buffer), 0);
+        return {
+          title: p.title, rating: p.rating,
+          unitsPerDay: p.adjustedDailyVel || p.avgDailyVel,
+          runwayDays: p.minDaysRemaining, stock: p.totalInventory,
+          seaLeadDays: p.effectiveSeaLeadDays, airLeadDays: p.effectiveAirLeadDays,
+          suggestedOrder: suggested,
+          incoming: (p.incomingOrders || []).map(o => ({ due: String(o.expectedDelivery).slice(0, 10), qty: o.totalQty })),
+        };
+      });
+    const finalSaleCount = products.filter(p => p.isFinalSale).length;
+
+    const message = await anthropicClient.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 1600,
+      messages: [{
+        role: 'user',
+        content: `You are the production planning analyst for an Australian womenswear e-commerce retailer. Below is today's restock analysis for the top-selling styles (Final Sale clearance styles are already excluded; there are ${finalSaleCount} of those which will never be restocked).
+
+For each style: unitsPerDay is current demand, runwayDays is days of stock left (including incoming), suggestedOrder is the recommended reorder quantity, incoming lists confirmed purchase-order deliveries.
+
+Write a concise gap analysis in markdown (use ### headings, bold style names). Cover:
+1. **Critical gaps** — styles that will stock out before any incoming delivery arrives (compare runwayDays against sea/air lead times and incoming due dates). Say whether air freight could still save them.
+2. **Under-ordered** — styles where incoming quantities are materially below the suggested order.
+3. **Timing risks** — incoming stock that lands too late relative to runway.
+4. **Well covered** — one short paragraph, no list.
+Be specific with numbers and dates. Lead with the single most urgent action. No preamble.
+
+DATA:
+${JSON.stringify(compact)}`,
+      }],
+    });
+    const content = message.content?.[0]?.text || '';
+    const payload = { generatedAt: new Date().toISOString(), content };
+    await pool.query(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES ('production_gap_analysis', $1, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [JSON.stringify(payload)]);
+    res.json(payload);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // GET /api/restock/config
 app.get('/api/restock/config', async (req, res) => {
   try {
@@ -2350,6 +2506,9 @@ app.put('/api/production-orders/:id/specs/:code', requireAuth, async (req, res) 
        fit_notes||null, questions||null, JSON.stringify(bom||[]), JSON.stringify(pretreatment||{}),
        JSON.stringify(spec_chart||[]), tag_code||null, tag_colour||null, tag_name||null, req.user.email]
     );
+    await pool.query(
+      `INSERT INTO order_form_log (order_id, product_code, action, by_email) VALUES ($1,$2,'saved',$3)`,
+      [req.params.id, req.params.code, req.user.email]).catch(() => {});
     res.json({ ok: true, spec_id: rows[0].id });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2540,6 +2699,9 @@ app.get('/api/production-orders/:id/supplier-order/:code', requireAuth, async (r
       images = rows;
     }
     const formTitle = line.line_type === 'new' ? 'NEW ORDER FORM' : 'RESTOCK ORDER FORM';
+    pool.query(
+      `INSERT INTO order_form_log (order_id, product_code, action, by_email) VALUES ($1,$2,'downloaded',$3)`,
+      [req.params.id, code, req.user?.email || null]).catch(() => {});
 
     const sizes = SPEC_SIZE_SETS[line.size_set] || SPEC_SIZE_SETS.numeric;
     const qtys  = line.quantities || {};
