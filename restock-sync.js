@@ -245,7 +245,7 @@ function formatSlackAlert(product, alertType, coverWeeks) {
     : null;
 
   const plannerLink = APP_URL
-    ? `📋 <${APP_URL}/restock.html|Open Restock Planner>`
+    ? `📋 <${APP_URL}/restock.html|Open Restock Planner>  ·  🛒 <${APP_URL}/restock.html?addpo=${product.productId}|Add to PO draft>`
     : null;
 
   return [
@@ -300,7 +300,7 @@ function formatCriticalAlert(product, coverWeeks) {
     : null;
 
   const plannerLink = APP_URL
-    ? `📋 <${APP_URL}/restock.html|Open Restock Planner>`
+    ? `📋 <${APP_URL}/restock.html|Open Restock Planner>  ·  🛒 <${APP_URL}/restock.html?addpo=${product.productId}|Add to PO draft>`
     : null;
 
   return [

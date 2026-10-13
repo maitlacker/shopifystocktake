@@ -404,6 +404,29 @@ function selectProduct(lid, productId, title, sku) {
   if (codeEl) codeEl.value = sku;
   if (nameEl) { nameEl.value = title; nameEl.setAttribute('readonly', true); }
   hideAutocomplete(lid);
+  prefillLastPrice(lid, productId, sku);
+}
+
+// Price memory: pre-fill unit price from the most recent PO line for this
+// product (only when the price field is still empty — never overwrites)
+async function prefillLastPrice(lid, productId, sku) {
+  try {
+    const r = await fetch(`/api/production-orders/last-price?product_id=${productId || ''}&code=${encodeURIComponent(sku || '')}`);
+    if (!r.ok) return;
+    const data = await r.json();
+    if (!data.found || !data.unit_price) return;
+    const priceEl = document.getElementById(`l-price-${lid}`);
+    if (!priceEl) return;
+    const hint = `Last paid ${Number(data.unit_price).toFixed(2)} ${data.currency} on PO ${data.po_number}`;
+    const audEl = document.getElementById(`l-aud-${lid}`);
+    if (!parseFloat(priceEl.value)) {
+      priceEl.value = Number(data.unit_price).toFixed(2);
+      onPriceChange(lid);
+      if (audEl) audEl.textContent = hint + ' (prefilled)';
+    } else if (audEl && !audEl.textContent) {
+      audEl.textContent = hint;
+    }
+  } catch (_) {}
 }
 
 // ── Totals ─────────────────────────────────────────────────────────
@@ -604,19 +627,27 @@ function escJs(str) {
   return String(str ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
 }
 
-// ── Supplier Order Specs (new styles) ──────────────────────────────
+// ── Supplier Order Forms (all styles) ───────────────────────────────
+// New styles: spec entered here → "New Order Form" PDF. Restock lines:
+// spec auto-seeded from when the style was new (editable per-PO) →
+// "Restock Order Form" PDF.
 let specsData = {};       // product_code → saved spec (incl. images meta)
 const specOpen = {};      // product_code → editor expanded?
+const specSeedNote = {};  // product_code → "Prefilled from PO X" note
 
 function specSizes(sizeSet) {
   return sizeSet === 'alpha' ? ALPHA_SIZES : sizeSet === 'pants' ? PANTS_SIZES : NUMERIC_SIZES;
 }
 
+function specLines() {
+  return lines.filter(l => (l.productCode || '').trim());
+}
+
 async function loadSpecs() {
   const section = document.getElementById('po-specs-section');
   if (!section) return;
-  const newLines = lines.filter(l => l.lineType === 'new' && (l.productCode || '').trim());
-  if (!poId || !newLines.length) { section.style.display = 'none'; return; }
+  const sl = specLines();
+  if (!poId || !sl.length) { section.style.display = 'none'; return; }
   section.style.display = '';
   try {
     const r = await fetch(`/api/production-orders/${poId}/specs`);
@@ -624,38 +655,61 @@ async function loadSpecs() {
     specsData = {};
     (data.specs || []).forEach(s => { specsData[s.product_code] = s; });
   } catch (_) { specsData = {}; }
-  renderSpecs(newLines);
+  renderSpecs(sl);
 }
 
-function renderSpecs(newLines) {
+function renderSpecs(sl) {
   const wrap = document.getElementById('po-specs-container');
-  wrap.innerHTML = newLines.map(l => {
+  wrap.innerHTML = sl.map(l => {
     const code = l.productCode.trim();
     const spec = specsData[code];
     const open = !!specOpen[code];
     const hasSpec = !!(spec && (spec.fabric || spec.fit_notes || (spec.images || []).length));
+    const isNew = l.lineType === 'new';
+    const formName = isNew ? 'New Order Form' : 'Restock Order Form';
+    const typeBadge = isNew
+      ? '<span style="font-size:0.7rem;font-weight:700;background:#ede9fe;color:#5b21b6;border-radius:99px;padding:2px 8px;margin-left:8px">NEW STYLE</span>'
+      : '<span style="font-size:0.7rem;font-weight:700;background:#e0f2fe;color:#0369a1;border-radius:99px;padding:2px 8px;margin-left:8px">RESTOCK</span>';
+    const seedNote = specSeedNote[code]
+      ? `<div style="font-size:0.76rem;color:#0369a1;background:#f0f9ff;border-top:1px solid #e0f2fe;padding:6px 16px">${escHtml(specSeedNote[code])} — edit freely, the original is untouched</div>` : '';
     return `
       <div style="border:1.5px solid #e2e8f0;border-radius:12px;margin-bottom:12px;background:#fff">
         <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;flex-wrap:wrap">
           <div style="flex:1;min-width:200px">
             <span style="font-weight:700;color:#1e293b">${escHtml(l.productName || code)}</span>
             <span style="font-family:ui-monospace,monospace;font-size:0.8rem;color:#64748b;margin-left:8px">${escHtml(code)}</span>
+            ${typeBadge}
             ${hasSpec ? '<span style="font-size:0.7rem;font-weight:700;background:#dcfce7;color:#15803d;border-radius:99px;padding:2px 8px;margin-left:8px">SPEC ✓</span>'
                       : '<span style="font-size:0.7rem;font-weight:700;background:#fef3c7;color:#92400e;border-radius:99px;padding:2px 8px;margin-left:8px">NO SPEC YET</span>'}
           </div>
           <button class="btn btn-secondary" style="padding:6px 14px;font-size:0.82rem"
             onclick="toggleSpec('${escJs(code)}')">${open ? 'Close' : 'Edit Spec'}</button>
           <a class="btn" style="padding:6px 14px;font-size:0.82rem;background:#4f46e5;color:#fff;text-decoration:none"
-            href="/api/production-orders/${poId}/supplier-order/${encodeURIComponent(code)}" target="_blank">⬇ Supplier Order PDF</a>
+            href="/api/production-orders/${poId}/supplier-order/${encodeURIComponent(code)}" target="_blank">⬇ ${formName}</a>
         </div>
+        ${seedNote}
         ${open ? specEditor(l, code, spec || {}) : ''}
       </div>`;
   }).join('');
 }
 
-function toggleSpec(code) {
-  specOpen[code] = !specOpen[code];
-  renderSpecs(lines.filter(l => l.lineType === 'new' && (l.productCode || '').trim()));
+async function toggleSpec(code) {
+  const opening = !specOpen[code];
+  specOpen[code] = opening;
+  // Opening a style with no spec on this PO? Seed it from the spec entered
+  // when the style was new (copied, so edits here stay on this PO only).
+  if (opening && !specsData[code]) {
+    try {
+      const r = await fetch(`/api/production-orders/${poId}/specs/${encodeURIComponent(code)}/seed`, { method: 'POST' });
+      const data = await r.json();
+      if (data.seeded) {
+        specSeedNote[code] = `Prefilled from PO ${data.from_po_number} (when this style was new)`;
+        await loadSpecs();
+        return;
+      }
+    } catch (_) {}
+  }
+  renderSpecs(specLines());
 }
 
 function specEditor(l, code, s) {

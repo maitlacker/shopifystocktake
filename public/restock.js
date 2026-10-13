@@ -152,6 +152,7 @@ async function silentRefreshAnalysis() {
 function renderAnalysis(data) {
   window._lastGeneratedAt = data.generatedAt;
   allProducts = data.products || [];
+  maybeHandleAddPoParam();
 
   // Load product configs
   fetch('/api/restock/config')
@@ -480,8 +481,18 @@ function expandRow(p, expanded) {
       </button>
     </div>`;
 
-  const logBtn = `<button class="btn btn-primary" style="padding:9px 20px;font-size:0.85rem"
-    onclick="openModal(${p.productId},event)">+ Log Restock Order</button>`;
+  const buffer   = p.velocityBuffer || 1.0;
+  const seaTotal = p.variants.reduce((s, v) => s + Math.ceil((v.suggestedSeaQty || 0) * buffer), 0);
+  const airTotal = p.variants.reduce((s, v) => s + Math.ceil((v.suggestedAirQty || 0) * buffer), 0);
+  const inBasket = poBasket.some(b => b.productId === p.productId);
+  const logBtn = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn btn-primary" style="padding:9px 20px;font-size:0.85rem"
+        onclick="addToBasket(${p.productId},'sea',event)">🛒 Add to PO — 🚢 Sea qtys (${seaTotal})</button>
+      <button class="btn btn-secondary" style="padding:9px 20px;font-size:0.85rem"
+        onclick="addToBasket(${p.productId},'air',event)">🛒 Add to PO — ✈️ Air qtys (${airTotal})</button>
+      ${inBasket ? '<span style="color:#15803d;font-weight:800;font-size:0.82rem">✓ in basket</span>' : ''}
+    </div>`;
 
   return `<tr class="rs-expand${expanded ? ' open' : ''}" id="expand-${p.productId}">
     <td colspan="9">
@@ -761,6 +772,220 @@ async function submitOrder() {
 document.getElementById('rs-modal').addEventListener('click', function(e) {
   if (e.target === this) closeModal();
 });
+
+// ── PO Basket — planner → draft Production Orders ──────────────────
+let poBasket = [];
+try { poBasket = JSON.parse(localStorage.getItem('rs-po-basket') || '[]'); } catch (_) { poBasket = []; }
+
+function saveBasket() {
+  try { localStorage.setItem('rs-po-basket', JSON.stringify(poBasket)); } catch (_) {}
+  renderBasketBar();
+}
+
+function addToBasket(productId, mode, e) {
+  if (e) e.stopPropagation();
+  const p = allProducts.find(x => x.productId === productId);
+  if (!p) return;
+  const buffer = p.velocityBuffer || 1.0;
+  const sugKey = mode === 'air' ? 'suggestedAirQty' : 'suggestedSeaQty';
+  const qtyByVariant = {};
+  let total = 0;
+  for (const v of p.variants) {
+    const q = Math.ceil((v[sugKey] || 0) * buffer);
+    if (q > 0) { qtyByVariant[v.title] = q; total += q; }
+  }
+  if (!total) { showToast('Fully covered — nothing suggested for this freight mode'); return; }
+  poBasket = poBasket.filter(b => b.productId !== productId); // replace if re-added
+  poBasket.push({
+    productId, title: p.title, image: p.image || null,
+    supplierName: p.supplierName || null,
+    freightMode: mode, qtyByVariant, totalQty: total,
+  });
+  saveBasket();
+  showToast(`${p.title} added to PO basket (${total} units, ${mode})`);
+  applyFilterAndRender();
+}
+
+function removeFromBasket(productId) {
+  poBasket = poBasket.filter(b => b.productId !== productId);
+  saveBasket();
+  renderBasketModal();
+  applyFilterAndRender();
+}
+
+function clearBasket() {
+  poBasket = [];
+  saveBasket();
+  closeBasketModal();
+  applyFilterAndRender();
+}
+
+function renderBasketBar() {
+  let bar = document.getElementById('rs-basket-bar');
+  if (!poBasket.length) { if (bar) bar.remove(); return; }
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'rs-basket-bar';
+    bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:900;background:#1e293b;' +
+      'color:#fff;display:flex;align-items:center;gap:14px;padding:12px 22px;flex-wrap:wrap;' +
+      'box-shadow:0 -4px 16px rgba(0,0,0,0.25)';
+    document.body.appendChild(bar);
+  }
+  const units = poBasket.reduce((s, b) => s + b.totalQty, 0);
+  const suppliers = new Set(poBasket.map(b => b.supplierName || '(no supplier yet)'));
+  bar.innerHTML = `
+    <span style="font-weight:800">🛒 PO Basket</span>
+    <span style="font-size:0.88rem">${poBasket.length} style${poBasket.length !== 1 ? 's' : ''} · ${units} units · ${suppliers.size} supplier${suppliers.size !== 1 ? 's' : ''}</span>
+    <button onclick="openBasketModal()" style="margin-left:auto;background:#6366f1;border:none;color:#fff;font-weight:800;padding:9px 20px;border-radius:10px;cursor:pointer;font-size:0.88rem">Review &amp; Create POs</button>
+    <button onclick="clearBasket()" style="background:none;border:1.5px solid #475569;color:#cbd5e1;font-weight:700;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:0.82rem">Clear</button>`;
+}
+
+function openBasketModal() {
+  let overlay = document.getElementById('rs-basket-modal');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'rs-basket-modal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.55);z-index:1000;' +
+      'display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeBasketModal(); });
+    document.body.appendChild(overlay);
+  }
+  overlay.style.display = 'flex';
+  renderBasketModal();
+}
+
+function closeBasketModal() {
+  const overlay = document.getElementById('rs-basket-modal');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function renderBasketModal() {
+  const overlay = document.getElementById('rs-basket-modal');
+  if (!overlay) return;
+  if (!poBasket.length) { closeBasketModal(); return; }
+
+  // Group preview by supplier + freight (mirrors how POs will be created)
+  const groups = {};
+  for (const b of poBasket) {
+    const key = `${b.supplierName || '(no supplier — set on draft)'}|${b.freightMode}`;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(b);
+  }
+
+  const itemHtml = (b) => {
+    const sizeInputs = Object.entries(b.qtyByVariant).map(([size, q]) => `
+      <label style="display:inline-flex;align-items:center;gap:4px;font-size:0.78rem;color:#475569;margin:2px 6px 2px 0">
+        ${escHtml(size)}
+        <input type="number" min="0" value="${q}" data-bpid="${b.productId}" data-bsize="${escHtml(size)}"
+          oninput="updateBasketQty(this)"
+          style="width:58px;padding:4px 6px;border:1.5px solid #e2e8f0;border-radius:6px;font-size:0.8rem" />
+      </label>`).join('');
+    return `
+      <div style="border:1.5px solid #e2e8f0;border-radius:10px;padding:10px 14px;margin-bottom:8px;background:#fff">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <strong style="color:#1e293b">${escHtml(b.title)}</strong>
+          <span style="font-size:0.74rem;font-weight:700;color:${b.freightMode === 'air' ? '#7c3aed' : '#0369a1'}">${b.freightMode === 'air' ? '✈️ AIR' : '🚢 SEA'}</span>
+          <span style="font-size:0.8rem;color:#64748b" id="btot-${b.productId}">${b.totalQty} units</span>
+          <button onclick="removeFromBasket(${b.productId})"
+            style="margin-left:auto;background:none;border:none;color:#ef4444;font-weight:800;cursor:pointer;font-size:0.9rem">✕</button>
+        </div>
+        <div style="margin-top:6px">${sizeInputs}</div>
+      </div>`;
+  };
+
+  const groupsHtml = Object.entries(groups).map(([key, items]) => {
+    const [supplier, mode] = key.split('|');
+    return `
+      <div style="margin-bottom:14px">
+        <div style="font-size:0.76rem;font-weight:800;color:#6366f1;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">
+          → Draft PO: ${escHtml(supplier)} · ${mode.toUpperCase()}</div>
+        ${items.map(itemHtml).join('')}
+      </div>`;
+  }).join('');
+
+  overlay.innerHTML = `
+    <div style="background:#f8fafc;border-radius:16px;max-width:680px;width:100%;max-height:85vh;overflow-y:auto;padding:22px" onclick="event.stopPropagation()">
+      <div style="display:flex;align-items:center;margin-bottom:6px">
+        <h2 style="margin:0;font-size:1.1rem;color:#1e293b">Review &amp; Create Draft POs</h2>
+        <button onclick="closeBasketModal()" style="margin-left:auto;background:none;border:none;font-size:1.3rem;color:#64748b;cursor:pointer">✕</button>
+      </div>
+      <p style="font-size:0.8rem;color:#64748b;margin:0 0 14px">One draft Production Order is created per supplier + freight group below —
+        pre-filled with supplier, currency, FX, delivery date from lead times, and last-paid unit prices. Adjust quantities here or on the draft.</p>
+      <div id="rs-basket-items">${groupsHtml}</div>
+      <div id="rs-basket-result"></div>
+      <div style="display:flex;gap:10px;margin-top:14px">
+        <button id="rs-create-pos-btn" onclick="createPosFromBasket()"
+          style="background:#6366f1;border:none;color:#fff;font-weight:800;padding:11px 24px;border-radius:10px;cursor:pointer;font-size:0.9rem">Create Draft PO${Object.keys(groups).length !== 1 ? 's' : ''} (${Object.keys(groups).length})</button>
+        <button onclick="closeBasketModal()" style="background:#fff;border:1.5px solid #e2e8f0;color:#475569;font-weight:700;padding:11px 20px;border-radius:10px;cursor:pointer;font-size:0.88rem">Keep Shopping</button>
+      </div>
+    </div>`;
+}
+
+function updateBasketQty(input) {
+  const pid  = Number(input.dataset.bpid);
+  const size = input.dataset.bsize;
+  const b = poBasket.find(x => x.productId === pid);
+  if (!b) return;
+  const q = parseInt(input.value) || 0;
+  if (q > 0) b.qtyByVariant[size] = q; else delete b.qtyByVariant[size];
+  b.totalQty = Object.values(b.qtyByVariant).reduce((s, n) => s + n, 0);
+  const totEl = document.getElementById(`btot-${pid}`);
+  if (totEl) totEl.textContent = `${b.totalQty} units`;
+  saveBasket();
+}
+
+async function createPosFromBasket() {
+  const btn = document.getElementById('rs-create-pos-btn');
+  btn.disabled = true;
+  btn.textContent = 'Creating…';
+  try {
+    const items = poBasket.filter(b => b.totalQty > 0).map(b => ({
+      productId: b.productId, title: b.title,
+      freightMode: b.freightMode, qtyByVariant: b.qtyByVariant,
+    }));
+    const r = await fetch('/api/restock/create-pos', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    poBasket = [];
+    saveBasket();
+    const resultEl = document.getElementById('rs-basket-result');
+    document.getElementById('rs-basket-items').innerHTML = '';
+    btn.style.display = 'none';
+    resultEl.innerHTML = `
+      <div style="background:#dcfce7;border-radius:10px;padding:14px 16px;margin-bottom:10px">
+        <div style="font-weight:800;color:#166534;margin-bottom:8px">✓ ${data.created.length} draft PO${data.created.length !== 1 ? 's' : ''} created — open to review &amp; confirm:</div>
+        ${data.created.map(po => `
+          <div style="padding:3px 0"><a href="/production-order.html?id=${po.id}" target="_blank"
+            style="color:#166534;font-weight:800;text-decoration:underline">PO ${escHtml(po.po_number)}</a>
+            <span style="font-size:0.82rem;color:#15803d"> — ${escHtml(po.supplier_name)} · ${po.freight_mode.toUpperCase()} · ${po.line_count} style${po.line_count !== 1 ? 's' : ''} · ${po.total_qty} units</span></div>`).join('')}
+      </div>
+      ${(data.warnings || []).length ? `
+        <div style="background:#fef3c7;border-radius:10px;padding:10px 14px;font-size:0.8rem;color:#92400e">
+          ${data.warnings.map(w => '⚠ ' + escHtml(w)).join('<br/>')}</div>` : ''}`;
+    applyFilterAndRender();
+  } catch (err) {
+    alert('Failed to create POs: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = 'Create Draft POs';
+  }
+}
+
+// Slack deep-link: restock.html?addpo=<productId> pre-adds that product
+let addPoParamHandled = false;
+function maybeHandleAddPoParam() {
+  if (addPoParamHandled) return;
+  const pid = Number(new URLSearchParams(window.location.search).get('addpo'));
+  if (!pid || !allProducts.length) return;
+  addPoParamHandled = true;
+  if (!poBasket.some(b => b.productId === pid)) addToBasket(pid, 'sea');
+  const p = allProducts.find(x => x.productId === pid);
+  if (p) { expandedRows.add(pid); applyFilterAndRender(); }
+}
+
+renderBasketBar();
 
 // ── Helpers ────────────────────────────────────────────────────────
 function escHtml(str) {

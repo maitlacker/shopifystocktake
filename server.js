@@ -1580,6 +1580,170 @@ app.delete('/api/restock/orders/:id', async (req, res) => {
   }
 });
 
+// ── Restock Planner → draft Production Orders ──────────────────────
+// Takes basket items (product + per-size quantities + freight mode) and
+// creates one DRAFT production order per supplier+freight group, fully
+// pre-filled: supplier/currency/FX from the supplier record, delivery date
+// from lead times, size set detected from the variant titles, and unit
+// price remembered from the most recent PO line for that product.
+
+const CREATE_PO_ALPHA   = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+const CREATE_PO_NUMERIC = ['6', '8', '10', '12', '14', '16', '18'];
+const CREATE_PO_PANTS   = ['6', '7', '8', '9', '10', '11', '12', '14', '16', '18'];
+
+function detectSizeSet(sizeLabels) {
+  const up = sizeLabels.map(s => String(s).trim().toUpperCase());
+  if (up.length && up.every(s => CREATE_PO_ALPHA.includes(s))) return 'alpha';
+  const nums = up.map(s => parseInt(s, 10));
+  if (up.length && nums.every(n => !isNaN(n))) {
+    return nums.some(n => n % 2 === 1) ? 'pants' : 'numeric';
+  }
+  return null;
+}
+
+app.post('/api/restock/create-pos', requireAuth, async (req, res) => {
+  const items = Array.isArray(req.body.items) ? req.body.items : [];
+  if (!items.length) return res.status(400).json({ error: 'items required' });
+  const user = req.user?.email || 'unknown';
+  const warnings = [];
+
+  const client = await pool.connect();
+  try {
+    // Global lead-time defaults
+    const { rows: sRows } = await pool.query('SELECT * FROM restock_settings WHERE id = 1');
+    const settings = sRows[0] || { sea_lead_days: 49, air_lead_days: 28 };
+
+    // Most recent PO line per product → supplier, last price, product code
+    const ids = items.map(i => Number(i.productId)).filter(Boolean);
+    const { rows: histRows } = await pool.query(`
+      SELECT DISTINCT ON (pol.product_id)
+        pol.product_id, pol.product_code, pol.unit_price,
+        po.supplier_id, po.supplier_name,
+        s.currency AS sup_currency, s.lead_time_sea, s.lead_time_air
+      FROM production_order_lines pol
+      JOIN production_orders po ON po.id = pol.order_id
+      LEFT JOIN suppliers s ON s.id = po.supplier_id
+      WHERE pol.product_id = ANY($1::bigint[])
+      ORDER BY pol.product_id, po.created_at DESC`, [ids]);
+    const histMap = {};
+    for (const h of histRows) histMap[String(h.product_id)] = h;
+
+    // SKU base fallback for products never ordered before
+    const cache = productsCache.length ? productsCache : await fetchAllProducts();
+    const cacheMap = {};
+    for (const p of cache) cacheMap[String(p.id)] = p;
+
+    // Build lines, grouped by supplier + freight mode
+    const groups = new Map(); // key → { supplier, freightMode, lines, noteLines }
+    for (const item of items) {
+      const pid  = Number(item.productId);
+      const hist = histMap[String(pid)] || {};
+      const freightMode = item.freightMode === 'air' ? 'air' : 'sea';
+      const qbv = item.qtyByVariant || {};
+
+      const sizeLabels = Object.keys(qbv).filter(k => (qbv[k] || 0) > 0);
+      if (!sizeLabels.length) { warnings.push(`${item.title}: no quantities — skipped`); continue; }
+      let sizeSet = detectSizeSet(sizeLabels);
+      if (!sizeSet) {
+        sizeSet = 'numeric';
+        warnings.push(`${item.title}: size labels (${sizeLabels.join(', ')}) don't map to a size grid — added to notes, enter quantities manually`);
+      }
+      const grid = sizeSet === 'alpha' ? CREATE_PO_ALPHA : sizeSet === 'pants' ? CREATE_PO_PANTS : CREATE_PO_NUMERIC;
+      const quantities = {};
+      let totalQty = 0;
+      const unmapped = [];
+      for (const label of sizeLabels) {
+        const key = sizeSet === 'alpha'
+          ? String(label).trim().toUpperCase()
+          : String(parseInt(label, 10));
+        if (grid.includes(key)) { quantities[key] = (quantities[key] || 0) + qbv[label]; totalQty += qbv[label]; }
+        else unmapped.push(`${label}×${qbv[label]}`);
+      }
+      const noteLine = unmapped.length
+        ? `${item.title}: sizes outside grid — ${unmapped.join(', ')} (add manually)` : null;
+      if (noteLine) warnings.push(noteLine);
+      if (!totalQty && !unmapped.length) { warnings.push(`${item.title}: nothing to order — skipped`); continue; }
+
+      const productCode = (hist.product_code || '').trim()
+        || skuBaseFromVariants(cacheMap[String(pid)]?.variants) || '';
+      const key = `${hist.supplier_id || 'none'}|${freightMode}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          supplierId:   hist.supplier_id || null,
+          supplierName: hist.supplier_name || '',
+          supCurrency:  hist.sup_currency || 'AUD',
+          leadSeaDays:  hist.lead_time_sea ? hist.lead_time_sea * 7 : settings.sea_lead_days,
+          leadAirDays:  hist.lead_time_air ? hist.lead_time_air * 7 : settings.air_lead_days,
+          freightMode, lines: [], noteLines: [],
+        });
+      }
+      const g = groups.get(key);
+      g.lines.push({
+        productId: pid, productCode, productName: item.title || '',
+        sizeSet, quantities, totalQty,
+        unitPrice: parseFloat(hist.unit_price) || 0,
+      });
+      if (noteLine) g.noteLines.push(noteLine);
+      if (!hist.supplier_id) warnings.push(`${item.title}: no PO history — supplier left blank, set it on the draft`);
+    }
+
+    if (!groups.size) return res.status(400).json({ error: 'Nothing orderable in the basket', warnings });
+
+    const created = [];
+    await client.query('BEGIN');
+    for (const g of groups.values()) {
+      const poNumber = await nextPoNumber(client);
+      let exchangeRate = 1.0;
+      if (g.supCurrency && g.supCurrency !== 'AUD') {
+        try {
+          const rates = await getExchangeRates(g.supCurrency);
+          if (rates?.AUD) exchangeRate = Number(rates.AUD.toFixed(4));
+        } catch (_) { /* leave 1.0 — editable on the draft */ }
+      }
+      const leadDays = g.freightMode === 'air' ? g.leadAirDays : g.leadSeaDays;
+      const delivery = new Date();
+      delivery.setDate(delivery.getDate() + leadDays);
+      const notes = ['Created from Restock Planner', ...g.noteLines].join('\n');
+
+      const { rows: [po] } = await client.query(
+        `INSERT INTO production_orders
+           (po_number, supplier_id, supplier_name, order_date, delivery_date,
+            freight_mode, currency, exchange_rate, shipping_cost, include_gst,
+            notes, status, po_type)
+         VALUES ($1,$2,$3,CURRENT_DATE,$4,$5,$6,$7,0,false,$8,'draft','restock')
+         RETURNING id, po_number`,
+        [poNumber, g.supplierId, g.supplierName, delivery.toISOString().slice(0, 10),
+         g.freightMode, g.supCurrency || 'AUD', exchangeRate, notes]);
+
+      for (let i = 0; i < g.lines.length; i++) {
+        const l = g.lines[i];
+        await client.query(
+          `INSERT INTO production_order_lines
+             (order_id, line_number, line_type, product_id, product_code,
+              product_name, size_set, quantities, total_qty, unit_price)
+           VALUES ($1,$2,'restock',$3,$4,$5,$6,$7,$8,$9)`,
+          [po.id, i + 1, l.productId, l.productCode, l.productName,
+           l.sizeSet, JSON.stringify(l.quantities), l.totalQty, l.unitPrice]);
+      }
+      created.push({
+        id: po.id, po_number: po.po_number,
+        supplier_name: g.supplierName || '(no supplier — set one)',
+        freight_mode: g.freightMode,
+        line_count: g.lines.length,
+        total_qty: g.lines.reduce((s, l) => s + l.totalQty, 0),
+      });
+    }
+    await client.query('COMMIT');
+    console.log(`[restock] ${created.length} draft PO(s) created from planner by ${user}: ${created.map(c => c.po_number).join(', ')}`);
+    res.json({ created, warnings });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 // GET /api/restock/config
 app.get('/api/restock/config', async (req, res) => {
   try {
@@ -1998,6 +2162,26 @@ app.get('/api/production-orders/next-number', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Last paid unit price for a product (price memory on PO lines).
+// NOTE: must register before /api/production-orders/:id
+app.get('/api/production-orders/last-price', requireAuth, async (req, res) => {
+  try {
+    const productId = Number(req.query.product_id) || null;
+    const code = (req.query.code || '').trim();
+    if (!productId && !code) return res.json({ found: false });
+    const { rows } = await pool.query(`
+      SELECT pol.unit_price, po.currency, po.po_number, po.order_date
+      FROM production_order_lines pol
+      JOIN production_orders po ON po.id = pol.order_id
+      WHERE po.status <> 'cancelled'
+        AND (($1::bigint IS NOT NULL AND pol.product_id = $1)
+          OR ($2 <> '' AND UPPER(TRIM(pol.product_code)) = UPPER($2)))
+      ORDER BY po.created_at DESC LIMIT 1`, [productId, code]);
+    if (!rows.length) return res.json({ found: false });
+    res.json({ found: true, ...rows[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/production-orders/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   try {
@@ -2182,6 +2366,49 @@ app.post('/api/production-orders/:id/specs/:code/images', requireAuth, async (re
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Seed this PO's spec for a style from the most recent spec carrying the
+// same product code (entered when the style was new). Copies the spec row
+// AND its images, so edits here never touch the original. No-op if this PO
+// already has a spec for the code.
+app.post('/api/production-orders/:id/specs/:code/seed', requireAuth, async (req, res) => {
+  try {
+    const orderId = Number(req.params.id);
+    const code = req.params.code;
+    const { rows: existing } = await pool.query(
+      `SELECT id FROM production_order_specs WHERE order_id=$1 AND product_code=$2`, [orderId, code]);
+    if (existing.length) return res.json({ seeded: false, reason: 'spec already exists' });
+
+    const { rows: prevRows } = await pool.query(
+      `SELECT s.*, p.po_number AS from_po_number FROM production_order_specs s
+       JOIN production_orders p ON p.id = s.order_id
+       WHERE UPPER(TRIM(s.product_code)) = UPPER(TRIM($1)) AND s.order_id <> $2
+       ORDER BY s.updated_at DESC LIMIT 1`, [code, orderId]);
+    if (!prevRows.length) return res.json({ seeded: false, reason: 'no previous spec for this code' });
+    const prev = prevRows[0];
+
+    const { rows: [copy] } = await pool.query(
+      `INSERT INTO production_order_specs
+         (order_id, product_code, season, fabric, colour, colour_code, fit_notes,
+          questions, bom, pretreatment, spec_chart, tag_code, tag_colour, tag_name, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       ON CONFLICT (order_id, product_code) DO NOTHING
+       RETURNING id`,
+      [orderId, code, prev.season, prev.fabric, prev.colour, prev.colour_code,
+       prev.fit_notes, prev.questions, JSON.stringify(prev.bom || []),
+       JSON.stringify(prev.pretreatment || {}), JSON.stringify(prev.spec_chart || []),
+       prev.tag_code, prev.tag_colour, prev.tag_name, req.user.email]);
+    if (!copy) return res.json({ seeded: false, reason: 'spec already exists' });
+
+    await pool.query(
+      `INSERT INTO production_order_spec_images (spec_id, kind, caption, mime, data, sort_order)
+       SELECT $1, kind, caption, mime, data, sort_order
+       FROM production_order_spec_images WHERE spec_id=$2`, [copy.id, prev.id]);
+
+    console.log(`[po] Spec for "${code}" on PO #${orderId} seeded from PO ${prev.from_po_number} by ${req.user.email}`);
+    res.json({ seeded: true, from_po_number: prev.from_po_number });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/spec-images/:imgId', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -2200,7 +2427,11 @@ app.delete('/api/spec-images/:imgId', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// The deliverable: one Bulk Order Form PDF per style
+// The deliverable: one supplier order form PDF per style.
+// New styles → "NEW ORDER FORM"; restock lines → "RESTOCK ORDER FORM",
+// starting from the spec entered when the style was new (dates/qtys from
+// this PO). If this PO has no spec of its own for the style, the most
+// recent spec for the same product code is used.
 app.get('/api/production-orders/:id/supplier-order/:code', requireAuth, async (req, res) => {
   try {
     const code = req.params.code;
@@ -2215,7 +2446,16 @@ app.get('/api/production-orders/:id/supplier-order/:code', requireAuth, async (r
     if (!lineRows.length) return res.status(404).send('Style not found on this PO');
     const po   = poRows[0];
     const line = lineRows[0];
-    const spec = specRows[0] || {};
+    let spec = specRows[0] || {};
+    if (!spec.id) {
+      // Fall back to the latest spec for this product code from any other PO
+      const { rows: prevRows } = await pool.query(
+        `SELECT s.* FROM production_order_specs s
+         JOIN production_orders p ON p.id = s.order_id
+         WHERE UPPER(TRIM(s.product_code)) = UPPER(TRIM($1)) AND s.order_id <> $2
+         ORDER BY s.updated_at DESC LIMIT 1`, [code, req.params.id]);
+      if (prevRows.length) spec = prevRows[0];
+    }
     let images = [];
     if (spec.id) {
       const { rows } = await pool.query(
@@ -2223,6 +2463,7 @@ app.get('/api/production-orders/:id/supplier-order/:code', requireAuth, async (r
          WHERE spec_id=$1 ORDER BY sort_order, id`, [spec.id]);
       images = rows;
     }
+    const formTitle = line.line_type === 'new' ? 'NEW ORDER FORM' : 'RESTOCK ORDER FORM';
 
     const sizes = SPEC_SIZE_SETS[line.size_set] || SPEC_SIZE_SETS.numeric;
     const qtys  = line.quantities || {};
@@ -2248,7 +2489,7 @@ app.get('/api/production-orders/:id/supplier-order/:code', requireAuth, async (r
 
     // ── Title ──
     doc.fontSize(20).font('Helvetica-Bold').fillColor(NAVY)
-      .text('BULK ORDER FORM', ML, 42, { lineBreak: false });
+      .text(formTitle, ML, 42, { lineBreak: false });
     doc.fontSize(14).font('Helvetica-Bold').fillColor(MID)
       .text(`PO#${po.po_number}`, ML, 46, { width: W, align: 'right', lineBreak: false });
     doc.moveTo(ML, 70).lineTo(MR, 70).strokeColor(NAVY).lineWidth(1.5).stroke();
