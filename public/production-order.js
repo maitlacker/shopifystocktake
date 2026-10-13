@@ -691,6 +691,84 @@ function renderSpecs(sl) {
         ${open ? specEditor(l, code, spec || {}) : ''}
       </div>`;
   }).join('');
+
+  // Populate Shopify image galleries for open editors
+  sl.forEach(l => {
+    const code = l.productCode.trim();
+    if (specOpen[code] && l.productId) loadShopifyGallery(code, l.productId);
+  });
+}
+
+// ── Shopify image picker (restock order forms) ──────────────────────
+// Shows every image the product has on Shopify; the team taps the best 2
+// and applies them as Front / Back on this PO's order form.
+const galPicks = {};  // code → [src, src]
+
+async function loadShopifyGallery(code, productId) {
+  const el = document.getElementById(`shopify-gallery-${cssId(code)}`);
+  if (!el || el.dataset.loaded) return;
+  el.dataset.loaded = '1';
+  try {
+    const r = await fetch(`/api/shopify-product-images?product_id=${productId}`);
+    if (!r.ok) return;
+    const data = await r.json();
+    const imgs = data.images || [];
+    if (!imgs.length) { el.innerHTML = ''; return; }
+    galPicks[code] = [];
+    const thumb = (src) => src.replace(/(\.[a-z]+)(\?.*)?$/i, '_180x240_crop_center$1$2');
+    el.innerHTML = `
+      <div style="font-size:0.72rem;font-weight:700;color:#0369a1;text-transform:uppercase;margin-bottom:6px">
+        Shopify Images — tap the best 2, then apply as Front / Back</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start">
+        ${imgs.map(im => `
+          <img src="${thumb(im.src)}" data-src="${escHtml(im.src)}" loading="lazy"
+            onclick="toggleGalPick('${escJs(code)}', this)"
+            style="width:84px;height:112px;object-fit:cover;border-radius:8px;border:3px solid transparent;cursor:pointer;background:#f1f5f9" />`).join('')}
+      </div>
+      <button class="btn" id="gal-apply-${cssId(code)}" style="margin-top:8px;display:none;background:#0369a1;color:#fff;padding:7px 16px;font-size:0.82rem"
+        onclick="applyGalPicks('${escJs(code)}')">Apply selected</button>`;
+  } catch (_) {}
+}
+
+function toggleGalPick(code, imgEl) {
+  const src = imgEl.dataset.src;
+  let picks = galPicks[code] || [];
+  if (picks.includes(src)) picks = picks.filter(s => s !== src);
+  else { picks.push(src); if (picks.length > 2) picks = picks.slice(-2); }
+  galPicks[code] = picks;
+  // Repaint selection borders + order badges
+  const gallery = document.getElementById(`shopify-gallery-${cssId(code)}`);
+  gallery.querySelectorAll('img[data-src]').forEach(im => {
+    const idx = picks.indexOf(im.dataset.src);
+    im.style.border = idx >= 0 ? '3px solid #0369a1' : '3px solid transparent';
+    im.title = idx === 0 ? 'Front' : idx === 1 ? 'Back' : '';
+  });
+  const btn = document.getElementById(`gal-apply-${cssId(code)}`);
+  if (btn) {
+    btn.style.display = picks.length ? '' : 'none';
+    btn.textContent = picks.length === 2 ? 'Apply as Front + Back' : 'Apply as Front';
+  }
+}
+
+async function applyGalPicks(code) {
+  const picks = galPicks[code] || [];
+  if (!picks.length) return;
+  const btn = document.getElementById(`gal-apply-${cssId(code)}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+  try {
+    const selections = picks.map((src, i) => ({ src, kind: i === 0 ? 'front' : 'back' }));
+    const r = await fetch(`/api/production-orders/${poId}/specs/${encodeURIComponent(code)}/shopify-images`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selections }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    delete galPicks[code];
+    await loadSpecs();   // re-render with the new front/back images
+  } catch (err) {
+    alert('Failed to attach images: ' + err.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Apply selected'; }
+  }
 }
 
 async function toggleSpec(code) {
@@ -747,6 +825,7 @@ function specEditor(l, code, s) {
       ${fld('Colour', `sp-colour-${cssId(code)}`, s.colour, 'e.g. Chocolate')}
       ${fld('Colour Code', `sp-colourcode-${cssId(code)}`, s.colour_code, 'e.g. CT46')}
     </div>
+    ${l.productId ? `<div id="shopify-gallery-${cssId(code)}" style="margin-bottom:14px"></div>` : ''}
     <div style="display:flex;gap:18px;margin-bottom:14px;flex-wrap:wrap">
       ${imgSlot('FRONT', front)}
       ${imgSlot('BACK', back)}

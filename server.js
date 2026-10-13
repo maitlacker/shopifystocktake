@@ -1731,9 +1731,29 @@ app.post('/api/restock/create-pos', requireAuth, async (req, res) => {
         freight_mode: g.freightMode,
         line_count: g.lines.length,
         total_qty: g.lines.reduce((s, l) => s + l.totalQty, 0),
+        _lines: g.lines,
       });
     }
     await client.query('COMMIT');
+
+    // Prefill each restock line's order form: seed the spec text from when
+    // the style was new, then attach its first two Shopify product images as
+    // front/back. The team can swap to better images from the gallery on the
+    // PO page. Failures here never fail the PO creation.
+    for (const c of created) {
+      for (const l of c._lines) {
+        if (!l.productCode) continue;
+        try { await seedSpecFromPrevious(c.id, l.productCode, user); } catch (_) {}
+        const shopImgs = (cacheMap[String(l.productId)]?.images || []).slice(0, 2);
+        const kinds = ['front', 'back'];
+        for (let i = 0; i < shopImgs.length; i++) {
+          try { await attachShopifyImageToSpec(c.id, l.productCode, shopImgs[i].src, kinds[i], user); }
+          catch (e) { warnings.push(`${l.productName}: Shopify image not attached (${e.message}) — pick one on the PO page`); }
+        }
+      }
+      delete c._lines;
+    }
+
     console.log(`[restock] ${created.length} draft PO(s) created from planner by ${user}: ${created.map(c => c.po_number).join(', ')}`);
     res.json({ created, warnings });
   } catch (err) {
@@ -2370,42 +2390,98 @@ app.post('/api/production-orders/:id/specs/:code/images', requireAuth, async (re
 // same product code (entered when the style was new). Copies the spec row
 // AND its images, so edits here never touch the original. No-op if this PO
 // already has a spec for the code.
+async function seedSpecFromPrevious(orderId, code, user) {
+  const { rows: existing } = await pool.query(
+    `SELECT id FROM production_order_specs WHERE order_id=$1 AND product_code=$2`, [orderId, code]);
+  if (existing.length) return { seeded: false, reason: 'spec already exists' };
+
+  const { rows: prevRows } = await pool.query(
+    `SELECT s.*, p.po_number AS from_po_number FROM production_order_specs s
+     JOIN production_orders p ON p.id = s.order_id
+     WHERE UPPER(TRIM(s.product_code)) = UPPER(TRIM($1)) AND s.order_id <> $2
+     ORDER BY s.updated_at DESC LIMIT 1`, [code, orderId]);
+  if (!prevRows.length) return { seeded: false, reason: 'no previous spec for this code' };
+  const prev = prevRows[0];
+
+  const { rows: [copy] } = await pool.query(
+    `INSERT INTO production_order_specs
+       (order_id, product_code, season, fabric, colour, colour_code, fit_notes,
+        questions, bom, pretreatment, spec_chart, tag_code, tag_colour, tag_name, updated_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+     ON CONFLICT (order_id, product_code) DO NOTHING
+     RETURNING id`,
+    [orderId, code, prev.season, prev.fabric, prev.colour, prev.colour_code,
+     prev.fit_notes, prev.questions, JSON.stringify(prev.bom || []),
+     JSON.stringify(prev.pretreatment || {}), JSON.stringify(prev.spec_chart || []),
+     prev.tag_code, prev.tag_colour, prev.tag_name, user]);
+  if (!copy) return { seeded: false, reason: 'spec already exists' };
+
+  await pool.query(
+    `INSERT INTO production_order_spec_images (spec_id, kind, caption, mime, data, sort_order)
+     SELECT $1, kind, caption, mime, data, sort_order
+     FROM production_order_spec_images WHERE spec_id=$2`, [copy.id, prev.id]);
+
+  console.log(`[po] Spec for "${code}" on PO #${orderId} seeded from PO ${prev.from_po_number} by ${user}`);
+  return { seeded: true, from_po_number: prev.from_po_number };
+}
+
 app.post('/api/production-orders/:id/specs/:code/seed', requireAuth, async (req, res) => {
   try {
-    const orderId = Number(req.params.id);
-    const code = req.params.code;
-    const { rows: existing } = await pool.query(
-      `SELECT id FROM production_order_specs WHERE order_id=$1 AND product_code=$2`, [orderId, code]);
-    if (existing.length) return res.json({ seeded: false, reason: 'spec already exists' });
+    res.json(await seedSpecFromPrevious(Number(req.params.id), req.params.code, req.user.email));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
-    const { rows: prevRows } = await pool.query(
-      `SELECT s.*, p.po_number AS from_po_number FROM production_order_specs s
-       JOIN production_orders p ON p.id = s.order_id
-       WHERE UPPER(TRIM(s.product_code)) = UPPER(TRIM($1)) AND s.order_id <> $2
-       ORDER BY s.updated_at DESC LIMIT 1`, [code, orderId]);
-    if (!prevRows.length) return res.json({ seeded: false, reason: 'no previous spec for this code' });
-    const prev = prevRows[0];
+// Download a Shopify CDN image and store it as a spec image on this PO, so
+// the order form PDF can embed it (PDFKit needs the bytes, not a URL).
+async function attachShopifyImageToSpec(orderId, code, src, kind, user) {
+  if (!/^https:\/\/cdn\.shopify\.com\//.test(String(src))) throw new Error('Not a Shopify CDN image URL');
+  const r = await fetch(src);
+  if (!r.ok) throw new Error(`Image fetch failed: ${r.status}`);
+  const ct = (r.headers.get('content-type') || '').split(';')[0].trim();
+  if (!['image/jpeg', 'image/png'].includes(ct)) throw new Error(`Unsupported image type ${ct} (JPEG/PNG only)`);
+  const buf = await r.buffer();
 
-    const { rows: [copy] } = await pool.query(
-      `INSERT INTO production_order_specs
-         (order_id, product_code, season, fabric, colour, colour_code, fit_notes,
-          questions, bom, pretreatment, spec_chart, tag_code, tag_colour, tag_name, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-       ON CONFLICT (order_id, product_code) DO NOTHING
-       RETURNING id`,
-      [orderId, code, prev.season, prev.fabric, prev.colour, prev.colour_code,
-       prev.fit_notes, prev.questions, JSON.stringify(prev.bom || []),
-       JSON.stringify(prev.pretreatment || {}), JSON.stringify(prev.spec_chart || []),
-       prev.tag_code, prev.tag_colour, prev.tag_name, req.user.email]);
-    if (!copy) return res.json({ seeded: false, reason: 'spec already exists' });
+  const { rows: specRows } = await pool.query(
+    `INSERT INTO production_order_specs (order_id, product_code, updated_by)
+     VALUES ($1,$2,$3)
+     ON CONFLICT (order_id, product_code) DO UPDATE SET updated_at=NOW()
+     RETURNING id`, [orderId, code, user]);
+  const specId = specRows[0].id;
+  const k = ['front', 'back', 'reference'].includes(kind) ? kind : 'reference';
+  if (k !== 'reference') {
+    await pool.query(`DELETE FROM production_order_spec_images WHERE spec_id=$1 AND kind=$2`, [specId, k]);
+  }
+  await pool.query(
+    `INSERT INTO production_order_spec_images (spec_id, kind, caption, mime, data, sort_order)
+     VALUES ($1,$2,'Shopify product image',$3,$4,
+       COALESCE((SELECT MAX(sort_order)+1 FROM production_order_spec_images WHERE spec_id=$1), 0))`,
+    [specId, k, ct, buf.toString('base64')]);
+}
 
-    await pool.query(
-      `INSERT INTO production_order_spec_images (spec_id, kind, caption, mime, data, sort_order)
-       SELECT $1, kind, caption, mime, data, sort_order
-       FROM production_order_spec_images WHERE spec_id=$2`, [copy.id, prev.id]);
+// The Shopify images available for a product — the gallery the production
+// team picks the best 2 from when finalising a restock order form.
+app.get('/api/shopify-product-images', requireAuth, async (req, res) => {
+  try {
+    const pid = Number(req.query.product_id);
+    if (!pid) return res.status(400).json({ error: 'product_id required' });
+    const cache = productsCache.length ? productsCache : await fetchAllProducts();
+    const p = cache.find(x => x.id === pid);
+    if (!p) return res.json({ images: [] });
+    res.json({ images: (p.images || []).map(im => ({ id: im.id, src: im.src })) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
-    console.log(`[po] Spec for "${code}" on PO #${orderId} seeded from PO ${prev.from_po_number} by ${req.user.email}`);
-    res.json({ seeded: true, from_po_number: prev.from_po_number });
+// Attach the team's picked Shopify images to the spec (front/back slots)
+app.post('/api/production-orders/:id/specs/:code/shopify-images', requireAuth, async (req, res) => {
+  try {
+    const selections = Array.isArray(req.body.selections) ? req.body.selections.slice(0, 4) : [];
+    if (!selections.length) return res.status(400).json({ error: 'selections required' });
+    const attached = [];
+    for (const sel of selections) {
+      await attachShopifyImageToSpec(Number(req.params.id), req.params.code, sel.src, sel.kind, req.user.email);
+      attached.push(sel.kind);
+    }
+    res.json({ ok: true, attached });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
