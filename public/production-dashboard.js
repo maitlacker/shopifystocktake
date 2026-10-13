@@ -141,7 +141,28 @@ function filteredProducts() {
   const q = (document.getElementById('pd-search').value || '').toLowerCase().trim();
   let list = DATA.products || [];
   if (q) list = list.filter(p => (p.title || '').toLowerCase().includes(q));
-  return list;
+  // Favourites always float to the top (stable within each group)
+  return [...list.filter(p => p.favourite), ...list.filter(p => !p.favourite)];
+}
+
+async function toggleFavourite(productId, e) {
+  if (e) e.stopPropagation();
+  const p = (DATA.products || []).find(x => x.productId === productId);
+  if (!p) return;
+  const want = !p.favourite;
+  p.favourite = want;        // optimistic — revert on failure
+  renderGrid();
+  try {
+    const r = await fetch('/api/production-dashboard/favourite', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product_id: productId, favourite: want }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  } catch (err) {
+    p.favourite = !want;
+    renderGrid();
+    alert('Could not save favourite: ' + err.message);
+  }
 }
 
 function renderGrid() {
@@ -176,6 +197,8 @@ function renderGrid() {
     <tr class="${p.isFinalSale ? 'pd-fs-row' : ''}">
       <td>
         <div style="display:flex;align-items:center;gap:8px">
+          <button onclick="toggleFavourite(${p.productId}, event)" title="${p.favourite ? 'Remove favourite' : 'Pin to top'}"
+            style="border:none;background:none;cursor:pointer;font-size:1.05rem;padding:0;line-height:1;color:${p.favourite ? '#f59e0b' : '#d7dde5'}">${p.favourite ? '★' : '☆'}</button>
           ${thumb(p.image)}
           <span style="font-weight:600;color:#1e293b">${escHtml(p.title)}</span>
           ${p.isFinalSale ? '<span class="pd-fs-badge">FINAL SALE</span>' : ''}

@@ -781,6 +781,13 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_spec_images_spec
       ON production_order_spec_images(spec_id, sort_order);
 
+    -- Favourite products pinned to the top of the Production Dashboard grid
+    CREATE TABLE IF NOT EXISTS product_favourites (
+      product_id BIGINT PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_by TEXT
+    );
+
     -- Order form activity (saves + downloads) for the Production Dashboard
     CREATE TABLE IF NOT EXISTS order_form_log (
       id           SERIAL PRIMARY KEY,

@@ -1828,6 +1828,10 @@ app.get('/api/production-dashboard', requireAuth, async (req, res) => {
         ORDER BY l.order_id, l.product_code, l.at DESC
       ) latest ORDER BY at DESC LIMIT 10`);
 
+    // Favourites — pinned to the top of the grid for everyone
+    const { rows: favRows } = await pool.query(`SELECT product_id FROM product_favourites`);
+    const favSet = new Set(favRows.map(r => String(r.product_id)));
+
     // Bottom grid — per-product incoming units by month
     const grid = products.map(p => {
       const incoming = {};
@@ -1842,6 +1846,7 @@ app.get('/api/production-dashboard', requireAuth, async (req, res) => {
       return {
         productId: p.productId, title: p.title, image: p.image,
         rating: p.rating, isFinalSale: !!p.isFinalSale,
+        favourite: favSet.has(String(p.productId)),
         stock: p.totalInventory, runwayDays: p.minDaysRemaining,
         velocity: p.adjustedDailyVel || p.avgDailyVel || 0,
         incoming, incomingTotal: total, incomingLater: later,
@@ -1857,6 +1862,22 @@ app.get('/api/production-dashboard', requireAuth, async (req, res) => {
       generatedAt: analysis.generatedAt || null,
       months, alerts, drafts, recentForms, products: grid, gapAnalysis,
     });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Toggle a product favourite (shared across all users)
+app.post('/api/production-dashboard/favourite', requireAuth, async (req, res) => {
+  try {
+    const pid = Number(req.body.product_id);
+    if (!pid) return res.status(400).json({ error: 'product_id required' });
+    if (req.body.favourite) {
+      await pool.query(
+        `INSERT INTO product_favourites (product_id, created_by) VALUES ($1,$2)
+         ON CONFLICT (product_id) DO NOTHING`, [pid, req.user?.email || null]);
+    } else {
+      await pool.query(`DELETE FROM product_favourites WHERE product_id=$1`, [pid]);
+    }
+    res.json({ ok: true, product_id: pid, favourite: !!req.body.favourite });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
