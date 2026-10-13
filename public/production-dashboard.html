@@ -106,13 +106,14 @@
     </div>
 
     <div class="pd-ai">
-      <div class="pd-ai-head">
+      <div class="pd-ai-head" onclick="toggleAi()" style="cursor:pointer;user-select:none">
+        <span id="pd-ai-chev" style="color:#64748b;font-size:0.8rem">▸</span>
         <strong style="color:#1e293b">🤖 AI Restock Gap Analysis</strong>
         <span id="pd-ai-when" style="font-size:0.76rem;color:#64748b"></span>
-        <button class="btn" id="pd-ai-btn" onclick="runGapAnalysis()"
+        <button class="btn" id="pd-ai-btn" onclick="runGapAnalysis(event)"
           style="margin-left:auto;background:#6366f1;color:#fff;padding:8px 18px;font-size:0.84rem">Run Analysis</button>
       </div>
-      <div class="pd-ai-content" id="pd-ai-content"><span style="color:#94a3b8;font-size:0.84rem">
+      <div class="pd-ai-content" id="pd-ai-content" style="display:none"><span style="color:#94a3b8;font-size:0.84rem">
         Run to get an AI read on understocked and under-ordered styles.</span></div>
     </div>
 

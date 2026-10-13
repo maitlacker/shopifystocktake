@@ -111,14 +111,29 @@ function mdToHtml(md) {
   return html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
 }
 
+// Collapsed by default so the product grid stays close; remembers your choice
+let aiOpen = false;
+try { aiOpen = localStorage.getItem('pd-ai-open') === '1'; } catch (_) {}
+
+function setAiOpen(open) {
+  aiOpen = open;
+  document.getElementById('pd-ai-content').style.display = open ? '' : 'none';
+  document.getElementById('pd-ai-chev').textContent = open ? '▾' : '▸';
+  try { localStorage.setItem('pd-ai-open', open ? '1' : '0'); } catch (_) {}
+}
+
+function toggleAi() { setAiOpen(!aiOpen); }
+
 function renderGapAnalysis(g) {
+  setAiOpen(aiOpen);
   if (!g || !g.content) return;
   document.getElementById('pd-ai-when').textContent =
     `Last run ${new Date(g.generatedAt).toLocaleString('en-AU')}`;
   document.getElementById('pd-ai-content').innerHTML = mdToHtml(g.content);
 }
 
-async function runGapAnalysis() {
+async function runGapAnalysis(e) {
+  if (e) e.stopPropagation();   // don't toggle the collapse
   const btn = document.getElementById('pd-ai-btn');
   btn.disabled = true;
   btn.textContent = 'Analysing… (~20s)';
@@ -127,6 +142,7 @@ async function runGapAnalysis() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
     renderGapAnalysis(data);
+    setAiOpen(true);            // show the fresh result
   } catch (err) {
     alert('Gap analysis failed: ' + err.message);
   } finally {
