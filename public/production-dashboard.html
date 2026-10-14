@@ -51,11 +51,13 @@
     .pd-ai-content strong { color:#1e293b; }
 
     /* Incoming grid */
-    .pd-grid-wrap { background:#fff; border:1px solid #e2e8f0; border-radius:14px; overflow-x:auto; }
-    .pd-grid { width:100%; border-collapse:collapse; font-size:0.83rem; min-width:860px; }
+    /* Scroll the rows inside the wrapper so the header row stays visible */
+    .pd-grid-wrap { background:#fff; border:1px solid #e2e8f0; border-radius:14px;
+                    overflow:auto; max-height:calc(100vh - 140px); }
+    .pd-grid { width:100%; border-collapse:separate; border-spacing:0; font-size:0.83rem; min-width:860px; }
     .pd-grid th { background:#1e293b; color:#f8fafc; font-weight:600; font-size:0.7rem;
                   text-transform:uppercase; letter-spacing:0.04em; padding:9px 10px;
-                  text-align:center; white-space:nowrap; position:sticky; top:0; }
+                  text-align:center; white-space:nowrap; position:sticky; top:0; z-index:5; }
     .pd-grid th:first-child { text-align:left; }
     .pd-grid td { padding:7px 10px; border-bottom:1px solid #f1f5f9; text-align:center;
                   font-variant-numeric:tabular-nums; color:#334155; }

@@ -155,9 +155,10 @@ async function runGapAnalysis(e) {
 
 function filteredProducts() {
   const q = (document.getElementById('pd-search').value || '').toLowerCase().trim();
-  let list = DATA.products || [];
+  let list = (DATA.products || []).slice();
   if (q) list = list.filter(p => (p.title || '').toLowerCase().includes(q));
-  // Favourites always float to the top (stable within each group)
+  // Alphabetical by product name; favourites always float to the top
+  list.sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' }));
   return [...list.filter(p => p.favourite), ...list.filter(p => !p.favourite)];
 }
 
