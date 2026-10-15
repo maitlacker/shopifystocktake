@@ -157,6 +157,16 @@
     <div class="wm-sidebar">
 
       <div class="wm-section">
+        <p class="wm-section-title">Map</p>
+        <select id="wm-map-select" onchange="switchMap(this.value)"
+          style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:8px;
+                 font-size:0.85rem;font-weight:600;color:#1e293b;background:#fff">
+          <option value="main">Current Warehouse</option>
+          <option value="township">63 Township Dr (new)</option>
+        </select>
+      </div>
+
+      <div class="wm-section">
         <p class="wm-section-title">Mode</p>
         <button id="wm-mode-select"    class="wm-mode-btn active" onclick="setMode('select')">↖ Select &amp; Move</button>
         <button id="wm-mode-place"     class="wm-mode-btn"        onclick="setMode('place')">＋ Place Shelf</button>

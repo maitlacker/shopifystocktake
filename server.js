@@ -2312,20 +2312,28 @@ app.delete('/api/locations/variant', requireAuth, async (req, res) => {
 });
 
 // ── Warehouse Layout ──────────────────────────────────────────────────────
+// Multiple maps share the warehouse_layout table: id 1 = current warehouse,
+// id 2 = 63 Township Dr (new), id 3 = Township mezzanine (future)
+const WAREHOUSE_MAP_IDS = { main: 1, township: 2, 'township-mezz': 3 };
+
 app.get('/api/warehouse/layout', requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT layout_json FROM warehouse_layout WHERE id = 1');
+    const mapId = WAREHOUSE_MAP_IDS[req.query.map || 'main'];
+    if (!mapId) return res.status(400).json({ error: 'Unknown map' });
+    const { rows } = await pool.query('SELECT layout_json FROM warehouse_layout WHERE id = $1', [mapId]);
     res.json(rows.length ? rows[0].layout_json : {});
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/warehouse/layout', requireAuth, async (req, res) => {
   try {
+    const mapId = WAREHOUSE_MAP_IDS[req.query.map || 'main'];
+    if (!mapId) return res.status(400).json({ error: 'Unknown map' });
     await pool.query(`
       INSERT INTO warehouse_layout (id, layout_json, updated_at)
-      VALUES (1, $1, NOW())
-      ON CONFLICT (id) DO UPDATE SET layout_json = $1, updated_at = NOW()
-    `, [JSON.stringify(req.body)]);
+      VALUES ($1, $2, NOW())
+      ON CONFLICT (id) DO UPDATE SET layout_json = $2, updated_at = NOW()
+    `, [mapId, JSON.stringify(req.body)]);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

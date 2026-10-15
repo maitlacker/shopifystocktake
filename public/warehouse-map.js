@@ -95,6 +95,8 @@ window.addEventListener('load', async () => {
   ctx    = canvas.getContext('2d');
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
+  const mapSel = document.getElementById('wm-map-select');
+  if (mapSel) mapSel.value = currentMap;
   await loadLayout();
   autoFit();
   setupEvents();
@@ -112,10 +114,13 @@ function resizeCanvas() {
 }
 
 function autoFit() {
-  const pad = 50, bw = 14.6, bh = 20.2;
+  const pad = 50;
+  const xs = layout.walls.map(v => v.x), ys = layout.walls.map(v => v.y);
+  const bw = Math.max(...xs) - Math.min(...xs) || 14.6;
+  const bh = Math.max(...ys) - Math.min(...ys) || 20.2;
   zoom = Math.min((canvas.width-pad*2)/bw, (canvas.height-pad*2)/bh, 55);
-  panX = Math.round((canvas.width - 14.13*zoom) / 2);
-  panY = pad;
+  panX = Math.round((canvas.width - bw*zoom) / 2 - Math.min(...xs)*zoom);
+  panY = Math.round(pad - Math.min(...ys)*zoom);
   draw();
 }
 
@@ -134,20 +139,35 @@ function evtWorld(e) {
 }
 
 // ── Persistence ───────────────────────────────────────────────────────────
+// Which map: 'main' (current warehouse) or 'township' (63 Township Dr)
+const currentMap = new URLSearchParams(window.location.search).get('map') || 'main';
+
+function switchMap(name) {
+  window.location.search = name === 'main' ? '' : `?map=${name}`;
+}
+
 async function loadLayout() {
   try {
-    const r = await fetch('/api/warehouse/layout');
+    const r = await fetch(`/api/warehouse/layout?map=${currentMap}`);
     if (!r.ok) return;
     const d = await r.json();
-    if (d?.walls?.length > 3) layout = d;
+    if (d?.walls?.length > 3) { layout = d; return; }
   } catch(_) {}
+  // Township map not saved yet → start from the measured seed layout
+  // (LIDAR footprint + 11 posts + stairs + suggested 120-bay shelving)
+  if (currentMap === 'township') {
+    try {
+      const r = await fetch('/township-layout-seed.json');
+      if (r.ok) layout = await r.json();
+    } catch(_) {}
+  }
 }
 
 async function saveLayout() {
   const btn = document.getElementById('wm-save-btn');
   btn.disabled = true; btn.textContent = 'Saving…';
   try {
-    const r = await fetch('/api/warehouse/layout', {
+    const r = await fetch(`/api/warehouse/layout?map=${currentMap}`, {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(layout),
     });
@@ -169,6 +189,8 @@ function draw() {
   drawGrid();
   drawRoom();
   drawInteriorWalls();
+  drawObstacles();
+  drawPosts();
   drawShelves();
 
   if (mode === 'editWalls')          drawWallHandles();
@@ -227,6 +249,47 @@ function drawZoneLabels() {
     ctx.globalAlpha = 0.4;
     ctx.fillText(z.label, cx, cy);
     ctx.globalAlpha = 1;
+  }
+}
+
+// ── Fixed structure: load-bearing posts + obstacles (stairs etc.) ──────────
+// Drawn from layout.posts [{x,y,s,label}] and layout.obstacles [{x,y,w,h,label}]
+// (centre coords for posts, top-left for obstacles, metres). Not editable.
+function drawPosts() {
+  for (const p of (layout.posts || [])) {
+    const size = (p.s || 0.2) * zoom;
+    const {x:cx, y:cy} = w2c(p.x, p.y);
+    ctx.fillStyle = '#78350f';
+    ctx.strokeStyle = '#451a03';
+    ctx.lineWidth = 1.5;
+    ctx.fillRect(cx - size/2, cy - size/2, size, size);
+    ctx.strokeRect(cx - size/2, cy - size/2, size, size);
+    if (p.label && zoom >= 26) {
+      ctx.fillStyle = '#78350f';
+      ctx.font = `700 ${Math.max(8, zoom*0.2)}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillText(p.label, cx, cy - size/2 - 2);
+    }
+  }
+}
+
+function drawObstacles() {
+  for (const o of (layout.obstacles || [])) {
+    const {x:cx, y:cy} = w2c(o.x, o.y);
+    const w = o.w * zoom, h = o.h * zoom;
+    ctx.fillStyle = 'rgba(251, 191, 36, 0.4)';
+    ctx.strokeStyle = '#b45309';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 3]);
+    ctx.fillRect(cx, cy, w, h);
+    ctx.strokeRect(cx, cy, w, h);
+    ctx.setLineDash([]);
+    if (o.label && zoom >= 18) {
+      ctx.fillStyle = '#92400e';
+      ctx.font = `700 ${Math.max(8, zoom*0.22)}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(o.label, cx + w/2, cy + h/2);
+    }
   }
 }
 
