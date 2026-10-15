@@ -97,6 +97,8 @@ window.addEventListener('load', async () => {
   window.addEventListener('resize', resizeCanvas);
   const mapSel = document.getElementById('wm-map-select');
   if (mapSel) mapSel.value = currentMap;
+  const resetBtn = document.getElementById('wm-reset-seed');
+  if (resetBtn && currentMap === 'township') resetBtn.style.display = '';
   await loadLayout();
   autoFit();
   setupEvents();
@@ -161,6 +163,20 @@ async function loadLayout() {
       if (r.ok) layout = await r.json();
     } catch(_) {}
   }
+}
+
+// Replace the working layout with the suggested seed (undo-able, not saved
+// until you hit Save)
+async function loadSuggestedLayout() {
+  if (!confirm('Replace the current layout with the latest suggested layout? (Undo works, and nothing is saved until you hit Save Layout.)')) return;
+  try {
+    const r = await fetch('/township-layout-seed.json', { cache: 'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    pushHistory();
+    layout = await r.json();
+    selIds = new Set(); selWallIdx = null;
+    autoFit(); updateSidebar(); updateUI(); draw();
+  } catch (err) { alert('Could not load suggested layout: ' + err.message); }
 }
 
 async function saveLayout() {
