@@ -316,6 +316,14 @@ function renderList(data) {
     ? `Order #${data.orders[0]}`
     : `Orders #${data.orders[0]}–#${data.orders[data.orders.length - 1]} · ${data.orderCount} order${data.orderCount !== 1 ? 's' : ''}`;
 
+  const heldBannerHtml = data.heldOrders?.length
+    ? `<div class="pick-removed-banner" style="background:#eff6ff;border-color:#bfdbfe">
+        &#9203; ${data.heldOrders.length} order${data.heldOrders.length > 1 ? 's' : ''} held back — payment not captured yet
+        (order-edit window still open): ${data.heldOrders.map(h => '#' + h.orderNumber).join(', ')}.
+        Re-import this range once the 30-minute window closes to pick ${data.heldOrders.length > 1 ? 'them' : 'it'}.
+      </div>`
+    : '';
+
   const removedBannerHtml = data.removedItems?.length
     ? `<div class="pick-removed-banner">
         &#9888;&#65039; ${data.removedItems.length} item${data.removedItems.length > 1 ? 's' : ''} removed/refunded from
@@ -375,6 +383,7 @@ function renderList(data) {
   }).join('');
 
   resultEl.innerHTML = `
+    ${heldBannerHtml}
     ${removedBannerHtml}
     <p style="font-size:0.85rem;color:#64748b;margin-bottom:12px">${escHtml(orderLabel)} · ${data.items.length} line item${data.items.length !== 1 ? 's' : ''}</p>
     <div class="pick-list">${itemsHtml}</div>

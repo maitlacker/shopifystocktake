@@ -923,9 +923,10 @@ app.get('/api/picking/orders', async (req, res) => {
     // Fetch orders from Shopify (newest first), stop once order_number < start
     const items = [];
     const removedItems = [];
+    const heldOrders = [];   // not yet PAID (authorised = order-edit window still open)
     const orderNumbersSeen = new Set();
     let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/orders.json` +
-      `?status=any&limit=250&fields=id,name,order_number,line_items,note`;
+      `?status=any&limit=250&fields=id,name,order_number,line_items,note,financial_status,cancelled_at`;
     let done = false;
 
     while (url && !done) {
@@ -939,6 +940,19 @@ app.get('/api/picking/orders', async (req, res) => {
       for (const order of data.orders) {
         if (order.order_number < start) { done = true; break; }
         if (order.order_number > end) continue;
+        if (order.cancelled_at) continue;
+
+        // Only PAID orders are pickable. Orders sit as "authorized" while the
+        // 30-minute order-edit window is open — hold them back until captured.
+        // (partially_refunded/partially_paid still pick; fulfillable_quantity
+        // already strips refunded items.)
+        const fin = order.financial_status || '';
+        if (['authorized', 'pending', 'voided', 'refunded'].includes(fin)) {
+          if (fin === 'authorized' || fin === 'pending') {
+            heldOrders.push({ orderNumber: order.order_number, status: fin });
+          }
+          continue;
+        }
 
         orderNumbersSeen.add(order.order_number);
 
@@ -996,8 +1010,9 @@ app.get('/api/picking/orders', async (req, res) => {
       String(a.variantTitle || '').localeCompare(String(b.variantTitle || ''))
     );
     const orders = [...orderNumbersSeen].sort((a, b) => a - b);
+    heldOrders.sort((a, b) => a.orderNumber - b.orderNumber);
 
-    res.json({ orders, orderCount: orders.length, items, removedItems });
+    res.json({ orders, orderCount: orders.length, items, removedItems, heldOrders });
   } catch (err) {
     console.error('[picking] Error:', err.message);
     res.status(500).json({ error: err.message });
