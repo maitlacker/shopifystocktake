@@ -880,7 +880,7 @@ app.get('/api/picking/report', async (req, res) => {
 // counts as upstairs). Resolved to product ids and cached for 10 minutes.
 const UPSTAIRS_COLLECTION_TITLES = [
   'accessories', 'footwear', 'boots', 'heels', 'hair accessories',
-  'hair clips', 'jewellery', 'earrings', 'hats',
+  'hair clips', 'jewellery', 'earrings', 'hats', 'belts',
 ];
 let upstairsCache = { ids: new Set(), fetchedAt: 0 };
 
