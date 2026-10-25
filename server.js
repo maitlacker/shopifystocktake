@@ -875,6 +875,78 @@ app.get('/api/picking/report', async (req, res) => {
 
 // ── Order Picking ─────────────────────────────────────────────────
 
+// Upstairs zone: shoes + accessories live on the mezzanine. Membership is by
+// Shopify collection title (user-confirmed list — edit here to change what
+// counts as upstairs). Resolved to product ids and cached for 10 minutes.
+const UPSTAIRS_COLLECTION_TITLES = [
+  'accessories', 'footwear', 'boots', 'heels', 'hair accessories',
+  'hair clips', 'jewellery', 'earrings', 'hats',
+];
+let upstairsCache = { ids: new Set(), fetchedAt: 0 };
+
+async function getUpstairsProductIds() {
+  if (Date.now() - upstairsCache.fetchedAt < 10 * 60 * 1000) return upstairsCache.ids;
+  const nextLink = (r) => {
+    const link = r.headers.get('link');
+    const m = link && link.match(/<([^>]+)>;\s*rel="next"/);
+    return m ? m[1] : null;
+  };
+  const colIds = [];
+  for (const type of ['custom_collections', 'smart_collections']) {
+    let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/${type}.json?limit=250&fields=id,title`;
+    while (url) {
+      const r = await fetch(url, { headers: shopifyHeaders() });
+      if (!r.ok) throw new Error(`Shopify ${type} error ${r.status}`);
+      const data = await r.json();
+      for (const c of (data[type] || [])) {
+        if (UPSTAIRS_COLLECTION_TITLES.includes(String(c.title).toLowerCase().trim())) colIds.push(c.id);
+      }
+      url = nextLink(r);
+    }
+  }
+  const ids = new Set();
+  for (const colId of colIds) {
+    let url = `https://${SHOPIFY_SHOP}/admin/api/${API_VERSION}/collections/${colId}/products.json?limit=250&fields=id`;
+    while (url) {
+      const r = await fetch(url, { headers: shopifyHeaders() });
+      if (!r.ok) throw new Error(`Shopify collection products error ${r.status}`);
+      const data = await r.json();
+      for (const p of (data.products || [])) ids.add(p.id);
+      url = nextLink(r);
+    }
+  }
+  upstairsCache = { ids, fetchedAt: Date.now() };
+  console.log(`[picking] Upstairs zone: ${ids.size} products across ${colIds.length} collections`);
+  return ids;
+}
+
+// How many orders actually contain upstairs items — measured from the orders
+// warehouse. Open /api/picking/upstairs-stats?days=60 in the browser.
+app.get('/api/picking/upstairs-stats', requireAuth, async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days) || 60, 365);
+    const ids = [...await getUpstairsProductIds()];
+    const { rows } = await pool.query(`
+      SELECT COUNT(*)::int AS total_orders,
+             COUNT(*) FILTER (WHERE has_up)::int AS orders_with_upstairs,
+             COUNT(*) FILTER (WHERE has_up AND NOT has_ground)::int AS upstairs_only_orders
+      FROM (
+        SELECT order_id,
+               BOOL_OR(product_id = ANY($1::bigint[])) AS has_up,
+               BOOL_OR(product_id IS NULL OR NOT (product_id = ANY($1::bigint[]))) AS has_ground
+        FROM shopify_order_lines
+        WHERE created_at > NOW() - ($2::int * INTERVAL '1 day') AND NOT cancelled
+        GROUP BY order_id
+      ) t`, [ids, days]);
+    const s = rows[0];
+    res.json({
+      days, upstairs_products: ids.length, ...s,
+      pct_orders_with_upstairs: s.total_orders > 0
+        ? Math.round(s.orders_with_upstairs / s.total_orders * 1000) / 10 : 0,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Final Sale items live in a separate warehouse area. The store marks them
 // with product tags (variants seen live: "final sale", "Final_Sale",
 // "__label:Final Sale"), so flag by tag from the products cache.
@@ -907,6 +979,11 @@ app.get('/api/picking/orders', async (req, res) => {
 
     // Final Sale items live in a separate area — flag them by product tag
     const finalSaleIds = buildFinalSaleIds(productsCache);
+
+    // Upstairs (mezzanine) zone — shoes & accessories, flagged by collection
+    let upstairsIds = new Set();
+    try { upstairsIds = await getUpstairsProductIds(); }
+    catch (e) { console.error('[picking] Upstairs lookup failed:', e.message); }
 
     // Build variant→image and variant→stock maps from products cache
     const variantImageMap = {};
@@ -988,6 +1065,7 @@ app.get('/api/picking/orders', async (req, res) => {
             stock:        variantStockMap[String(item.variant_id)] ?? null,
             note:         order.note || null,
             finalSale:    finalSaleIds.has(item.product_id),
+            upstairs:     upstairsIds.has(item.product_id),
           });
         }
       }
@@ -1002,13 +1080,21 @@ app.get('/api/picking/orders', async (req, res) => {
       }
     }
 
-    // Within each order, sort items alphabetically by product name — the
-    // warehouse is shelved alphabetically, so this matches the picker's walk
-    items.sort((a, b) =>
-      (a.orderNumber - b.orderNumber) ||
-      String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' }) ||
-      String(a.variantTitle || '').localeCompare(String(b.variantTitle || ''))
-    );
+    // Upstairs (mezzanine) items first as one consolidated batch — picker does
+    // a single stair trip, sweeping shoes/accessories alphabetically across
+    // ALL orders in the run. Then the ground floor: per order, alphabetical
+    // by product name to match the shelving walk.
+    items.sort((a, b) => {
+      if (!!a.upstairs !== !!b.upstairs) return a.upstairs ? -1 : 1;
+      if (a.upstairs) {
+        return String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' }) ||
+          (a.orderNumber - b.orderNumber) ||
+          String(a.variantTitle || '').localeCompare(String(b.variantTitle || ''));
+      }
+      return (a.orderNumber - b.orderNumber) ||
+        String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' }) ||
+        String(a.variantTitle || '').localeCompare(String(b.variantTitle || ''));
+    });
     const orders = [...orderNumbersSeen].sort((a, b) => a - b);
     heldOrders.sort((a, b) => a.orderNumber - b.orderNumber);
 

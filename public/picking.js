@@ -334,7 +334,7 @@ function renderList(data) {
       </div>`
     : '';
 
-  const itemsHtml = data.items.map((item, idx) => {
+  const cards = data.items.map((item, idx) => {
     const id      = `item-${idx}`;
     const isMulti = item.qty > 1;
     const thumb   = shopifyThumb(item.image, 160);
@@ -355,6 +355,10 @@ function renderList(data) {
       ? `<span class="pick-finalsale-badge" title="This item is in the Final Sale area">🏷 FINAL SALE AREA</span>`
       : '';
 
+    const upstairsHtml = item.upstairs
+      ? `<span class="pick-upstairs-badge" title="Shoes & accessories are on the mezzanine">⬆ UPSTAIRS</span>`
+      : '';
+
     const noteHtml = item.note
       ? `<button class="pick-note-btn" data-note="${escHtml(item.note)}" title="Order note">&#128203;</button>`
       : '';
@@ -367,6 +371,7 @@ function renderList(data) {
           <div class="pick-sku">${escHtml(item.sku || '—')}</div>
           <div class="pick-title">${escHtml(item.title)}</div>
           ${variantHtml}
+          ${upstairsHtml}
           ${finalSaleHtml}
           ${modifiedHtml}
         </div>
@@ -380,7 +385,20 @@ function renderList(data) {
         </div>
       </div>
     `;
-  }).join('');
+  });
+
+  // Zone sections: upstairs batch first (one stair trip), then the ground walk
+  const upCount = data.items.filter(i => i.upstairs).length;
+  let itemsHtml = '';
+  cards.forEach((html, idx) => {
+    if (upCount && idx === 0) {
+      itemsHtml += `<div class="pick-zone-head up">⬆ UPSTAIRS — shoes &amp; accessories, batch pick first (${upCount} item${upCount !== 1 ? 's' : ''})</div>`;
+    }
+    if (upCount && idx === upCount) {
+      itemsHtml += `<div class="pick-zone-head">🏠 GROUND FLOOR (${data.items.length - upCount} item${data.items.length - upCount !== 1 ? 's' : ''})</div>`;
+    }
+    itemsHtml += html;
+  });
 
   resultEl.innerHTML = `
     ${heldBannerHtml}
