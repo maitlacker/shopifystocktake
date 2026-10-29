@@ -39,8 +39,36 @@ const app = express();
 // Trust Railway's reverse proxy so secure cookies work over HTTPS
 app.set('trust proxy', 1);
 
+// ── Security headers ───────────────────────────────────────────────
+const helmet = require('helmet');
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc:     ["'self'"],
+      scriptSrc:      ["'self'", "'unsafe-inline'", 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net'],
+      scriptSrcAttr:  ["'unsafe-inline'"],
+      styleSrc:       ["'self'", "'unsafe-inline'"],
+      imgSrc:         ["'self'", 'data:', 'blob:', 'https://cdn.shopify.com', 'https://theselfstyler.com.au'],
+      connectSrc:     ["'self'"],
+      fontSrc:        ["'self'", 'data:'],
+      workerSrc:      ["'self'", 'blob:'],
+      objectSrc:      ["'none'"],
+      baseUri:        ["'self'"],
+      formAction:     ["'self'"],
+      frameAncestors: ["'self'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}));
+
 // ── Sessions ───────────────────────────────────────────────────────
 const isProduction = process.env.NODE_ENV === 'production';
+
+// Refuse to boot in production without a real session secret — the old
+// fallback meant anyone could forge session cookies if the env var was lost.
+if (isProduction && !process.env.SESSION_SECRET) {
+  throw new Error('SESSION_SECRET environment variable must be set in production');
+}
 
 app.use(session({
   store: new PgSession({ pool, tableName: 'user_sessions', createTableIfMissing: true }),
@@ -2724,7 +2752,7 @@ app.post('/api/production-orders/:id/specs/:code/seed', requireAuth, async (req,
 // the order form PDF can embed it (PDFKit needs the bytes, not a URL).
 async function attachShopifyImageToSpec(orderId, code, src, kind, user) {
   if (!/^https:\/\/cdn\.shopify\.com\//.test(String(src))) throw new Error('Not a Shopify CDN image URL');
-  const r = await fetch(src);
+  const r = await fetch(src, { redirect: 'error' });
   if (!r.ok) throw new Error(`Image fetch failed: ${r.status}`);
   const ct = (r.headers.get('content-type') || '').split(';')[0].trim();
   if (!['image/jpeg', 'image/png'].includes(ct)) throw new Error(`Unsupported image type ${ct} (JPEG/PNG only)`);
@@ -4660,7 +4688,7 @@ app.post('/api/xero/sync', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/xero/financials', requireAuth, async (req, res) => {
+app.get('/api/xero/financials', requireBi, async (req, res) => {
   const months = Math.min(parseInt(req.query.months) || 6, 24);
   try {
     const { rows } = await pool.query(`
@@ -5381,8 +5409,14 @@ app.get('/api/margin/feed.tsv', async (req, res) => {
     const s = {};
     for (const r of settings) s[r.key] = r.value;
 
-    // Require a valid token so the feed isn't wide-open
-    if (s.margin_feed_token && req.query.token !== s.margin_feed_token) {
+    // Fail closed: no token configured means no public feed at all.
+    if (!s.margin_feed_token) {
+      return res.status(503).send('Feed not configured — open Margin Tagger settings once to generate the feed token');
+    }
+    const crypto = require('crypto');
+    const supplied = Buffer.from(String(req.query.token || ''));
+    const expected = Buffer.from(String(s.margin_feed_token));
+    if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
       return res.status(401).send('Unauthorised — include ?token=<your-feed-token> in the URL');
     }
 
@@ -5420,7 +5454,7 @@ app.post('/api/xero/sync-balance-sheet', async (req, res) => {
 });
 
 // GET /api/xero/balance-sheet — latest snapshot for the BI dashboard
-app.get('/api/xero/balance-sheet', async (req, res) => {
+app.get('/api/xero/balance-sheet', requireBi, async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT report_date, section, subsection, account_name, value
@@ -5435,7 +5469,7 @@ app.get('/api/xero/balance-sheet', async (req, res) => {
 });
 
 // GET /api/xero/pl-lines?month=YYYY-MM — line items for a given month
-app.get('/api/xero/pl-lines', async (req, res) => {
+app.get('/api/xero/pl-lines', requireBi, async (req, res) => {
   const { month } = req.query;
   if (!month || !/^\d{4}-\d{2}$/.test(month)) {
     return res.status(400).json({ error: 'month must be YYYY-MM' });
@@ -5454,7 +5488,7 @@ app.get('/api/xero/pl-lines', async (req, res) => {
 });
 
 // GET /api/xero/pl-debug — returns raw section structure from stored Xero P&L JSON
-app.get('/api/xero/pl-debug', requireAuth, async (req, res) => {
+app.get('/api/xero/pl-debug', requireBi, async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT period_start, period_end, revenue, cogs, gross_profit, expenses, net_profit, raw_json
@@ -5659,6 +5693,15 @@ app.post('/api/ops/order-picked', async (req, res) => {
 // Returns aggregated Shopify, Google Ads, Meta Ads, and Xero data for the period.
 // Restricted to specific management emails.
 const BI_ALLOWED_EMAILS = ['accounts@theselfstyler.com', 'bianca@theselfstyler.com'];
+
+// Middleware form of the BI allow-list, for routes exposing financial data.
+// (Function declaration so routes registered earlier in the file can use it.)
+function requireBi(req, res, next) {
+  if (!BI_ALLOWED_EMAILS.includes(req.user?.email)) {
+    return res.status(403).json({ error: 'Access restricted' });
+  }
+  next();
+}
 
 app.get('/api/bi/summary', async (req, res) => {
   if (!BI_ALLOWED_EMAILS.includes(req.user?.email)) {
@@ -8188,17 +8231,20 @@ app.get('/api/stock-receipts/rise-length-debug', requireAuth, async (req, res) =
       WHERE s.measurements ? 'Rise'
       ORDER BY r.id, s.sort_order`);
 
-    if (req.query.apply !== '1') {
-      return res.json({
-        mode: 'dry_run',
-        rows_still_holding_rise: rows.length,
-        rows,
-        hint: rows.length
-          ? 'Data is intact under the old Rise key. Re-run with ?apply=1 to move it to Length (Jeans receipts excluded, existing Length values never overwritten).'
-          : 'No Rise values remain anywhere — nothing to recover.',
-      });
-    }
+    return res.json({
+      mode: 'dry_run',
+      rows_still_holding_rise: rows.length,
+      rows,
+      hint: rows.length
+        ? 'Data is intact under the old Rise key. POST to /api/stock-receipts/rise-length-debug/apply to move it to Length (Jeans receipts excluded, existing Length values never overwritten).'
+        : 'No Rise values remain anywhere — nothing to recover.',
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
+// The write half lives on POST so it can't be triggered by a crafted link.
+app.post('/api/stock-receipts/rise-length-debug/apply', requireAuth, async (req, res) => {
+  try {
     const { rowCount } = await pool.query(`
       UPDATE stock_receipt_sizes s
       SET measurements = (s.measurements - 'Rise') || jsonb_build_object('Length', s.measurements->'Rise')
@@ -8214,12 +8260,9 @@ app.get('/api/stock-receipts/rise-length-debug', requireAuth, async (req, res) =
 });
 
 // One-off backfill: mark POs received where a completed receipt already references them.
-// Visit without params for a dry run; add ?apply=1 to write the changes.
+// GET is a dry run; POST to the same path writes the changes (never via a GET link).
 // NOTE: must register before /api/stock-receipts/:id or ":id" swallows the path.
-app.get('/api/stock-receipts/backfill-po-received', requireAuth, async (req, res) => {
-  const apply = req.query.apply === '1';
-  try {
-    const matchSql = `
+const BACKFILL_PO_MATCH_SQL = `
       SELECT po.id, po.po_number, po.supplier_name, po.status,
         (SELECT json_agg(json_build_object('receipt_id', sr.id, 'style', sr.style_name, 'completed_at', sr.completed_at))
          FROM stock_receipts sr
@@ -8236,17 +8279,22 @@ app.get('/api/stock-receipts/backfill-po-received', requireAuth, async (req, res
                  AND UPPER(TRIM(sr.po_number)) = UPPER(TRIM(po.po_number))))
         )
       ORDER BY po.po_number`;
-    const { rows: matches } = await pool.query(matchSql);
 
-    if (!apply) {
-      return res.json({
-        mode: 'dry_run',
-        would_mark_received: matches.length,
-        pos: matches,
-        hint: matches.length ? 'Re-run with ?apply=1 to mark these POs as received' : 'Nothing to change',
-      });
-    }
+app.get('/api/stock-receipts/backfill-po-received', requireAuth, async (req, res) => {
+  try {
+    const { rows: matches } = await pool.query(BACKFILL_PO_MATCH_SQL);
+    res.json({
+      mode: 'dry_run',
+      would_mark_received: matches.length,
+      pos: matches,
+      hint: matches.length ? 'POST to this same path to mark these POs as received' : 'Nothing to change',
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
+app.post('/api/stock-receipts/backfill-po-received', requireAuth, async (req, res) => {
+  try {
+    const { rows: matches } = await pool.query(BACKFILL_PO_MATCH_SQL);
     const ids = matches.map(m => m.id);
     if (ids.length) {
       await pool.query(

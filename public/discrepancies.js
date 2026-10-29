@@ -8,6 +8,11 @@ fetch('/api/me').then(r => r.json()).then(u => {
   currentUser = u.displayName || u.email || '';
 }).catch(() => {});
 
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 function formatDate(d) {
   if (!d) return '—';
   return new Date(d).toLocaleString();
@@ -61,7 +66,7 @@ async function loadDiscrepancies() {
     renderTable(allRows);
   } catch (err) {
     document.getElementById('disc-tbody').innerHTML =
-      `<tr><td colspan="10" style="color:#b91c1c;padding:16px">Error loading data: ${err.message}</td></tr>`;
+      `<tr><td colspan="10" style="color:#b91c1c;padding:16px">Error loading data: ${escHtml(err.message)}</td></tr>`;
   }
 }
 
@@ -90,23 +95,23 @@ function renderTable(rows) {
       ? r.variantTitle : '—';
 
     const statusCell = r.reviewed
-      ? `<span class="disc-badge disc-badge--reviewed" title="Reviewed ${formatDate(r.reviewedAt)} by ${r.reviewedBy}">&#10003; Reviewed</span>`
+      ? `<span class="disc-badge disc-badge--reviewed" title="Reviewed ${escHtml(formatDate(r.reviewedAt))} by ${escHtml(r.reviewedBy)}">&#10003; Reviewed</span>`
       : `<span class="disc-badge disc-badge--pending">Needs Review</span>`;
 
     const actionCell = r.reviewed
-      ? `<span class="disc-reviewed-meta">by ${r.reviewedBy || '—'}<br><small>${formatRelative(r.reviewedAt)}</small></span>`
-      : `<button class="btn btn-sm btn-secondary btn-review" data-id="${r.id}">Mark Reviewed</button>`;
+      ? `<span class="disc-reviewed-meta">by ${escHtml(r.reviewedBy || '—')}<br><small>${formatRelative(r.reviewedAt)}</small></span>`
+      : `<button class="btn btn-sm btn-secondary btn-review" data-id="${Number(r.id)}">Mark Reviewed</button>`;
 
     return `
-      <tr class="${r.reviewed ? 'disc-row--reviewed' : ''}" data-id="${r.id}">
-        <td class="disc-product-title">${r.productTitle}</td>
-        <td>${variantLabel}</td>
-        <td><code>${r.sku || '—'}</code></td>
-        <td style="text-align:center">${r.systemQty}</td>
-        <td style="text-align:center">${r.countedQty}</td>
+      <tr class="${r.reviewed ? 'disc-row--reviewed' : ''}" data-id="${Number(r.id)}">
+        <td class="disc-product-title">${escHtml(r.productTitle)}</td>
+        <td>${escHtml(variantLabel)}</td>
+        <td><code>${escHtml(r.sku || '—')}</code></td>
+        <td style="text-align:center">${Number(r.systemQty)}</td>
+        <td style="text-align:center">${Number(r.countedQty)}</td>
         <td style="text-align:center">${diffBadge(r.difference)}</td>
-        <td>${r.initials}</td>
-        <td title="${formatDate(r.createdAt)}">${formatRelative(r.createdAt)}</td>
+        <td>${escHtml(r.initials)}</td>
+        <td title="${escHtml(formatDate(r.createdAt))}">${formatRelative(r.createdAt)}</td>
         <td>${statusCell}</td>
         <td>${actionCell}</td>
       </tr>`;
