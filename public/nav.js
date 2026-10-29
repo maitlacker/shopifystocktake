@@ -75,6 +75,12 @@
       ],
     },
     {
+      label: 'Ecommerce',
+      children: [
+        { label: 'Product Data Studio', href: '/ecommerce-studio.html' },
+      ],
+    },
+    {
       label: 'Marketing',
       children: [
         { label: 'Influencer Campaigns', href: '/influencers.html' },

@@ -29,6 +29,7 @@ const arcadsSync       = require('./arcads-sync');
 const leaveSync        = require('./leave-sync');
 const mailer           = require('./email');
 const sellthroughAlerts = require('./sellthrough-alerts');
+const metafieldsSync    = require('./metafields-sync');
 
 const anthropicClient = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -10937,6 +10938,175 @@ app.get('/api/influencer-campaigns/:id/sales', requireAuth, async (req, res) => 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Ecommerce Studio: Product Metafields ───────────────────────────
+// Mirror of Shopify product metafields + reporting on missing data and
+// product-reference fields that point at sold-out / low-stock / inactive
+// products. Import is read-only — nothing is written back to Shopify.
+
+// The curated fields shown in the Shopify admin's metafield panel
+const MANAGED_METAFIELDS = [
+  { ns: 'custom', key: 'similar_styles',      label: 'You may also like',  ref: true },
+  { ns: 'custom', key: 'what_to_wear_it_with', label: 'Complete the look', ref: true },
+  { ns: 'custom', key: 'colour_variants',     label: 'Colour Variants',    ref: true },
+  { ns: 'custom', key: 'measure_guide',       label: 'Measure Guide',      ref: false },
+  { ns: 'custom', key: 'colour',              label: 'Colour',             ref: false },
+  { ns: 'custom', key: 'fit_scale',           label: 'Fit Scale',          ref: false },
+  { ns: 'custom', key: 'product_badge',       label: 'Product Badge',      ref: false },
+];
+
+function metafieldValueEmpty(v) {
+  if (v == null) return true;
+  const s = String(v).trim();
+  return s === '' || s === '[]' || s === 'null';
+}
+
+// POST /api/ecom/metafields/sync — kick off a full import (fire-and-forget)
+app.post('/api/ecom/metafields/sync', requireAuth, (req, res) => {
+  const status = metafieldsSync.getStatus();
+  if (status.running) return res.json({ started: false, reason: 'Sync already running', status });
+  metafieldsSync.syncMetafields().catch(() => {});
+  res.json({ started: true });
+});
+
+// GET /api/ecom/metafields/sync-status
+app.get('/api/ecom/metafields/sync-status', requireAuth, (req, res) => {
+  res.json(metafieldsSync.getStatus());
+});
+
+// GET /api/ecom/metafields/overview — every definition with coverage
+app.get('/api/ecom/metafields/overview', requireAuth, async (req, res) => {
+  try {
+    const [defs, counts, last] = await Promise.all([
+      pool.query(`
+        SELECT namespace, key, MAX(definition_name) AS name, MAX(type) AS type,
+               COUNT(DISTINCT product_id)::int AS products_with
+        FROM product_metafields
+        GROUP BY namespace, key
+        ORDER BY namespace, key`),
+      pool.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE is_owner)::int AS active_products,
+          (SELECT COUNT(*) FROM product_metafields)::int AS metafield_rows
+        FROM metafield_products`),
+      pool.query(`SELECT value, updated_at FROM app_settings WHERE key='metafields_last_sync'`),
+    ]);
+    let lastSync = null;
+    try { lastSync = last.rows.length ? JSON.parse(last.rows[0].value) : null; } catch {}
+    res.json({
+      lastSync,
+      activeProducts: counts.rows[0].active_products,
+      metafieldRows: counts.rows[0].metafield_rows,
+      definitions: defs.rows,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/ecom/metafields/missing — managed-field gaps per active product
+app.get('/api/ecom/metafields/missing', requireAuth, async (req, res) => {
+  try {
+    const keys = MANAGED_METAFIELDS.map(f => f.key);
+    const [prods, mfs] = await Promise.all([
+      pool.query(`
+        SELECT product_id, title, handle, image_url, product_type, total_inventory
+        FROM metafield_products WHERE is_owner ORDER BY title`),
+      pool.query(`
+        SELECT product_id, key, value FROM product_metafields
+        WHERE namespace='custom' AND key = ANY($1)`, [keys]),
+    ]);
+
+    const byProduct = new Map();
+    for (const r of mfs.rows) {
+      if (!byProduct.has(String(r.product_id))) byProduct.set(String(r.product_id), {});
+      byProduct.get(String(r.product_id))[r.key] = r.value;
+    }
+
+    const fieldCounts = Object.fromEntries(keys.map(k => [k, 0]));
+    const products = prods.rows.map(p => {
+      const have = byProduct.get(String(p.product_id)) || {};
+      const missing = keys.filter(k => metafieldValueEmpty(have[k]));
+      for (const k of missing) fieldCounts[k]++;
+      return {
+        productId: String(p.product_id),
+        title: p.title,
+        handle: p.handle,
+        image: p.image_url,
+        productType: p.product_type,
+        missing,
+      };
+    });
+
+    res.json({
+      fields: MANAGED_METAFIELDS.map(f => ({ ...f, missing: fieldCounts[f.key] })),
+      totalProducts: products.length,
+      products: products.filter(p => p.missing.length),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/ecom/metafields/health?threshold=10 — reference-field problems
+app.get('/api/ecom/metafields/health', requireAuth, async (req, res) => {
+  try {
+    const threshold = Math.max(0, Math.min(parseInt(req.query.threshold) || 10, 500));
+    const refFields = MANAGED_METAFIELDS.filter(f => f.ref);
+    const refKeys = refFields.map(f => f.key);
+    const labelOf = Object.fromEntries(refFields.map(f => [f.key, f.label]));
+
+    const [mfs, prods] = await Promise.all([
+      pool.query(`
+        SELECT m.product_id, m.key, m.type, m.value
+        FROM product_metafields m
+        JOIN metafield_products o ON o.product_id = m.product_id AND o.is_owner
+        WHERE m.namespace='custom' AND m.key = ANY($1)`, [refKeys]),
+      pool.query(`SELECT * FROM metafield_products`),
+    ]);
+
+    const prodMap = new Map(prods.rows.map(p => [String(p.product_id), p]));
+    const issuesByOwner = new Map();
+    const summary = { deleted: 0, inactive: 0, sold_out: 0, low_stock: 0, refsChecked: 0 };
+
+    for (const row of mfs.rows) {
+      const refIds = metafieldsSync.refIdsFromValue(row.type, row.value);
+      for (const refId of refIds) {
+        summary.refsChecked++;
+        const ref = prodMap.get(String(refId));
+        let reason = null;
+        if (!ref) reason = 'deleted';
+        else if (ref.status !== 'ACTIVE') reason = 'inactive';
+        else if (ref.tracks_inventory && ref.total_inventory != null && ref.total_inventory <= 0) reason = 'sold_out';
+        else if (ref.tracks_inventory && ref.total_inventory != null && ref.total_inventory <= threshold) reason = 'low_stock';
+        if (!reason) continue;
+
+        summary[reason]++;
+        const ownerKey = `${row.product_id}|${row.key}`;
+        if (!issuesByOwner.has(ownerKey)) {
+          const owner = prodMap.get(String(row.product_id)) || {};
+          issuesByOwner.set(ownerKey, {
+            productId: String(row.product_id),
+            title: owner.title || `Product ${row.product_id}`,
+            handle: owner.handle,
+            image: owner.image_url,
+            field: row.key,
+            fieldLabel: labelOf[row.key],
+            refs: [],
+          });
+        }
+        issuesByOwner.get(ownerKey).refs.push({
+          productId: String(refId),
+          title: ref ? ref.title : `Deleted product ${refId}`,
+          image: ref ? ref.image_url : null,
+          status: ref ? ref.status : null,
+          qty: ref ? ref.total_inventory : null,
+          reason,
+        });
+      }
+    }
+
+    const issues = [...issuesByOwner.values()]
+      .sort((a, b) => a.title.localeCompare(b.title) || a.field.localeCompare(b.field));
+    res.json({ threshold, summary, issues });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
@@ -10958,6 +11128,7 @@ initDb()
     arcadsSync.startCron(pool);
     leaveSync.startCron(pool);
     sellthroughAlerts.startCron(pool);
+    metafieldsSync.startCron(pool);
 
     // Auto-sync QLD public holidays for current + next year
     const _holidayYear = new Date().getFullYear();

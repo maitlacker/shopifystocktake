@@ -1341,6 +1341,36 @@ async function initDb() {
       model_used  TEXT,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    -- ── Ecommerce Studio: product metafields mirror ──────────────────
+    CREATE TABLE IF NOT EXISTS product_metafields (
+      id              SERIAL PRIMARY KEY,
+      product_id      BIGINT NOT NULL,
+      namespace       TEXT NOT NULL,
+      key             TEXT NOT NULL,
+      type            TEXT,
+      value           TEXT,
+      definition_name TEXT,
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(product_id, namespace, key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_product_metafields_key
+      ON product_metafields (namespace, key);
+
+    -- Snapshot of every product that owns metafields or is referenced by
+    -- a product_reference metafield (status + stock for health reporting)
+    CREATE TABLE IF NOT EXISTS metafield_products (
+      product_id       BIGINT PRIMARY KEY,
+      title            TEXT,
+      handle           TEXT,
+      status           TEXT,
+      product_type     TEXT,
+      tracks_inventory BOOLEAN DEFAULT TRUE,
+      total_inventory  INT,
+      image_url        TEXT,
+      is_owner         BOOLEAN DEFAULT FALSE,
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 }
 

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Product Data Studio — The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .es-wrap { max-width: 1200px; margin: 0 auto; padding: 20px 16px 60px; }
+    .es-head { display: flex; align-items: center; justify-content: space-between;
+               gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+    .es-head h1 { margin: 0; font-size: 1.35rem; }
+    .es-head .es-sub { color: #64748b; font-size: 0.85rem; margin-top: 3px; }
+    .es-sync { display: flex; align-items: center; gap: 10px; }
+    .es-sync-meta { font-size: 0.78rem; color: #64748b; text-align: right; line-height: 1.4; }
+
+    .es-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: 10px; margin-bottom: 18px; }
+    .es-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+               padding: 12px 14px; }
+    .es-card .v { font-size: 1.45rem; font-weight: 800; color: #1e293b; }
+    .es-card .l { font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+                  letter-spacing: 0.05em; color: #94a3b8; margin-top: 2px; }
+    .es-card.warn .v { color: #b45309; }
+    .es-card.bad  .v { color: #b91c1c; }
+
+    .es-tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+    .es-tab { padding: 8px 14px; border-radius: 8px; border: 1.5px solid #e2e8f0;
+              background: #fff; font-size: 0.85rem; font-weight: 600; color: #475569;
+              cursor: pointer; }
+    .es-tab.active { background: #6366f1; border-color: #6366f1; color: #fff; }
+
+    .es-panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+                padding: 16px; }
+    .es-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+                  margin-bottom: 14px; }
+    .es-toolbar input[type="search"], .es-toolbar input[type="number"], .es-toolbar select {
+      padding: 7px 10px; border: 1.5px solid #e2e8f0; border-radius: 8px;
+      font-size: 0.85rem; }
+    .es-toolbar input[type="search"] { min-width: 230px; }
+    .es-toolbar label { font-size: 0.8rem; font-weight: 600; color: #475569; }
+
+    .es-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px;
+               border-radius: 999px; font-size: 0.72rem; font-weight: 700; }
+    .chip-sold_out  { background: #fee2e2; color: #b91c1c; }
+    .chip-low_stock { background: #fef3c7; color: #b45309; }
+    .chip-inactive  { background: #e2e8f0; color: #475569; }
+    .chip-deleted   { background: #1e293b; color: #fff; }
+    .chip-count { background: #eef2ff; color: #4338ca; cursor: pointer; border: 1.5px solid transparent; }
+    .chip-count.sel { border-color: #6366f1; }
+
+    .es-issue { border: 1px solid #f1f5f9; border-radius: 10px; padding: 10px 12px;
+                margin-bottom: 10px; }
+    .es-issue-head { display: flex; align-items: center; gap: 10px; }
+    .es-issue-head img { width: 34px; height: 44px; object-fit: cover; border-radius: 6px;
+                         background: #f1f5f9; }
+    .es-issue-title { font-weight: 700; font-size: 0.9rem; color: #1e293b; }
+    .es-issue-field { font-size: 0.72rem; font-weight: 700; color: #6366f1;
+                      background: #eef2ff; padding: 2px 8px; border-radius: 999px; }
+    .es-refs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+    .es-ref { display: flex; align-items: center; gap: 7px; border: 1px solid #e2e8f0;
+              border-radius: 8px; padding: 5px 9px 5px 5px; font-size: 0.78rem; }
+    .es-ref img { width: 26px; height: 34px; object-fit: cover; border-radius: 4px;
+                  background: #f1f5f9; }
+    .es-ref .q { color: #64748b; font-size: 0.72rem; }
+
+    table.es-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+    .es-table th { text-align: left; font-size: 0.7rem; text-transform: uppercase;
+                   letter-spacing: 0.05em; color: #94a3b8; padding: 8px 10px;
+                   border-bottom: 1.5px solid #e2e8f0; }
+    .es-table td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    .es-table img.thumb { width: 30px; height: 40px; object-fit: cover; border-radius: 5px;
+                          background: #f1f5f9; }
+    .es-miss-badge { display: inline-block; background: #fee2e2; color: #b91c1c;
+                     font-size: 0.7rem; font-weight: 700; border-radius: 999px;
+                     padding: 2px 8px; margin: 1px 3px 1px 0; }
+    .es-empty { color: #64748b; text-align: center; padding: 30px 10px; font-size: 0.9rem; }
+    .es-note { font-size: 0.78rem; color: #94a3b8; margin-top: 10px; }
+    .pct-bar { background: #f1f5f9; border-radius: 999px; height: 8px; width: 110px;
+               display: inline-block; vertical-align: middle; overflow: hidden; }
+    .pct-bar > span { display: block; height: 100%; background: #6366f1; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <div class="es-wrap">
+
+    <div class="es-head">
+      <div>
+        <h1>🛍️ Product Data Studio</h1>
+        <div class="es-sub">Shopify product metafields — imported read-only, refreshed daily</div>
+      </div>
+      <div class="es-sync">
+        <div class="es-sync-meta" id="es-sync-meta">Loading…</div>
+        <button class="btn" id="es-sync-btn" onclick="startSync()">⟳ Sync Now</button>
+      </div>
+    </div>
+
+    <div class="es-cards" id="es-cards"></div>
+
+    <div class="es-tabs">
+      <button class="es-tab active" data-tab="health" onclick="setTab('health')">Reference Health</button>
+      <button class="es-tab" data-tab="missing" onclick="setTab('missing')">Missing Data</button>
+      <button class="es-tab" data-tab="all" onclick="setTab('all')">All Metafields</button>
+    </div>
+
+    <!-- Reference health -->
+    <div class="es-panel" id="panel-health">
+      <div class="es-toolbar">
+        <label>Low-stock threshold ≤
+          <input type="number" id="es-threshold" value="10" min="0" max="500" style="width:70px" />
+        </label>
+        <button class="btn btn-secondary" onclick="loadHealth()">Apply</button>
+        <select id="es-field-filter" onchange="renderHealth()">
+          <option value="">All fields</option>
+          <option value="similar_styles">You may also like</option>
+          <option value="what_to_wear_it_with">Complete the look</option>
+          <option value="colour_variants">Colour Variants</option>
+        </select>
+        <span id="es-health-chips"></span>
+      </div>
+      <div id="es-health-list"><div class="es-empty">Loading…</div></div>
+      <div class="es-note">A referenced product is flagged when it is sold out, at/below the low-stock
+        threshold (total units across all sizes), archived/draft, or deleted from Shopify.
+        Untracked products (e.g. gift cards) are never flagged for stock.</div>
+    </div>
+
+    <!-- Missing data -->
+    <div class="es-panel" id="panel-missing" style="display:none">
+      <div class="es-toolbar">
+        <input type="search" id="es-miss-search" placeholder="Search products…" oninput="renderMissing()" />
+        <span id="es-field-chips"></span>
+      </div>
+      <div id="es-missing-table"><div class="es-empty">Loading…</div></div>
+    </div>
+
+    <!-- All metafields -->
+    <div class="es-panel" id="panel-all" style="display:none">
+      <div id="es-all-table"><div class="es-empty">Loading…</div></div>
+      <div class="es-note">Coverage = share of active products that carry a value for the metafield.</div>
+    </div>
+
+  </div>
+  <script src="ecommerce-studio.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>
