@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Availability — The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .av-wrap { max-width: 640px; margin: 0 auto; padding: 20px 16px 60px; }
+    .av-wrap h1 { font-size: 1.3rem; margin: 0 0 4px; }
+    .av-sub { color: #64748b; font-size: 0.88rem; margin-bottom: 18px; }
+    .av-week { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+               margin-bottom: 14px; overflow: hidden; }
+    .av-week-head { background: #f8fafc; padding: 9px 14px; font-weight: 800;
+                    font-size: 0.85rem; color: #334155; display: flex;
+                    justify-content: space-between; align-items: center; }
+    .av-week-head .hint { font-weight: 600; font-size: 0.72rem; color: #b45309; }
+    .av-day { display: flex; align-items: center; justify-content: space-between;
+              padding: 9px 14px; border-top: 1px solid #f1f5f9; gap: 10px; }
+    .av-day.holiday { background: #fffbeb; }
+    .av-date { font-size: 0.88rem; font-weight: 600; color: #1e293b; }
+    .av-date small { color: #94a3b8; font-weight: 500; }
+    .av-note { font-size: 0.72rem; color: #92400e; }
+    .av-btns { display: flex; gap: 6px; }
+    .av-btn { padding: 7px 14px; border-radius: 999px; border: 1.5px solid #e2e8f0;
+              background: #fff; font-weight: 700; font-size: 0.8rem; color: #64748b;
+              cursor: pointer; min-width: 64px; }
+    .av-btn.saving { opacity: 0.5; pointer-events: none; }
+    .av-btn.in.sel  { background: #dcfce7; border-color: #16a34a; color: #15803d; }
+    .av-btn.out.sel { background: #fee2e2; border-color: #ef4444; color: #b91c1c; }
+    .av-msg { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+              padding: 26px 20px; text-align: center; color: #475569; font-size: 0.92rem; }
+    .av-banner { background: #eef2ff; border: 1px solid #c7d2fe; color: #4338ca;
+                 border-radius: 10px; padding: 10px 14px; font-size: 0.82rem;
+                 font-weight: 600; margin-bottom: 14px; }
+  </style>
+</head>
+<body>
+  <header></header>
+  <div class="av-wrap">
+    <h1>🙋 My Warehouse Availability</h1>
+    <div class="av-sub">Tap the days you can work — it saves instantly. Please fill in
+      at least the coming week so the roster is accurate.</div>
+    <div id="av-content"><div class="av-msg">Loading…</div></div>
+  </div>
+  <script src="my-availability.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

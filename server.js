@@ -10938,6 +10938,237 @@ app.get('/api/influencer-campaigns/:id/sales', requireAuth, async (req, res) => 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Warehouse Roster ────────────────────────────────────────────────
+// Who is in the warehouse each day: full-time warehouse staff (Mon–Fri,
+// minus approved leave and public holidays) + casual warehouse staff who
+// have logged themselves as available. Casuals are prompted in-app and by
+// email to submit availability for the following week.
+
+function brisbaneToday() {
+  // Brisbane is UTC+10 year-round (no DST)
+  const d = new Date(Date.now() + 10 * 3600 * 1000);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+function isoDate(d) { return d.toISOString().slice(0, 10); }
+function addDays(d, n) { const x = new Date(d); x.setUTCDate(x.getUTCDate() + n); return x; }
+// Monday of the week AFTER the week containing `d`
+function nextWeekMonday(d) {
+  const dow = d.getUTCDay(); // 0 Sun … 6 Sat
+  const daysToNextMon = ((8 - dow) % 7) || 7;
+  return addDays(d, daysToNextMon);
+}
+
+// PATCH /api/leave/employees/:id/warehouse — toggle warehouse flag (admin only)
+app.patch('/api/leave/employees/:id/warehouse', requireAuth, requireLeaveAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `UPDATE leave_employees SET is_warehouse=$1 WHERE id=$2 RETURNING *`,
+      [Boolean(req.body.is_warehouse), req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json({ employee: rows[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/roster/me — my roster profile + availability for the next 5 weeks
+app.get('/api/roster/me', requireAuth, async (req, res) => {
+  try {
+    const email = req.user.email;
+    const { rows: emps } = await pool.query(
+      `SELECT id, first_name, last_name, is_casual, is_warehouse, is_active
+       FROM leave_employees WHERE LOWER(wms_email)=LOWER($1) LIMIT 1`, [email]);
+    const emp = emps[0] || null;
+    const today = brisbaneToday();
+    const until = addDays(today, 35);
+    const { rows: avail } = await pool.query(
+      `SELECT date, available, note FROM warehouse_availability
+       WHERE LOWER(wms_email)=LOWER($1) AND date >= $2 AND date <= $3 ORDER BY date`,
+      [email, isoDate(today), isoDate(until)]);
+    res.json({
+      employee: emp,
+      isCasualWarehouse: Boolean(emp && emp.is_casual && emp.is_warehouse && emp.is_active),
+      today: isoDate(today),
+      availability: avail.map(r => ({ date: isoDate(new Date(r.date)), available: r.available, note: r.note })),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/roster/availability — casual warehouse staff set their own days
+// Body: { entries: [{ date: 'YYYY-MM-DD', available: true|false, note? }] }
+app.post('/api/roster/availability', requireAuth, async (req, res) => {
+  try {
+    const email = req.user.email;
+    const { rows: emps } = await pool.query(
+      `SELECT id, is_casual, is_warehouse, is_active FROM leave_employees
+       WHERE LOWER(wms_email)=LOWER($1) LIMIT 1`, [email]);
+    const emp = emps[0];
+    if (!emp || !emp.is_active) return res.status(403).json({ error: 'Your login is not linked to a staff record — ask admin to link it on the Leave Admin page' });
+    if (!emp.is_casual || !emp.is_warehouse) return res.status(403).json({ error: 'Availability is only logged by casual warehouse staff' });
+
+    const entries = Array.isArray(req.body.entries) ? req.body.entries.slice(0, 80) : [];
+    const today = brisbaneToday();
+    const maxDate = addDays(today, 70);
+    let saved = 0;
+    for (const e of entries) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(e.date))) continue;
+      const d = new Date(e.date + 'T00:00:00Z');
+      if (isNaN(d) || d < today || d > maxDate) continue;
+      await pool.query(
+        `INSERT INTO warehouse_availability (employee_id, wms_email, date, available, note, updated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())
+         ON CONFLICT (wms_email, date) DO UPDATE SET
+           available=EXCLUDED.available, note=EXCLUDED.note, updated_at=NOW()`,
+        [emp.id, email.toLowerCase(), e.date, Boolean(e.available), (e.note || '').slice(0, 200) || null]);
+      saved++;
+    }
+    res.json({ saved });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/roster/pending — days still missing for next week (for the nav prompt)
+app.get('/api/roster/pending', requireAuth, async (req, res) => {
+  try {
+    const email = req.user.email;
+    const { rows: emps } = await pool.query(
+      `SELECT id, is_casual, is_warehouse, is_active FROM leave_employees
+       WHERE LOWER(wms_email)=LOWER($1) LIMIT 1`, [email]);
+    const emp = emps[0];
+    if (!emp || !emp.is_active || !emp.is_casual || !emp.is_warehouse) {
+      return res.json({ pendingDays: 0 });
+    }
+    const weekStart = nextWeekMonday(brisbaneToday());
+    const weekEnd = addDays(weekStart, 6);
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM warehouse_availability
+       WHERE LOWER(wms_email)=LOWER($1) AND date >= $2 AND date <= $3`,
+      [email, isoDate(weekStart), isoDate(weekEnd)]);
+    res.json({ pendingDays: Math.max(0, 7 - rows[0].n), weekStart: isoDate(weekStart) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/roster/calendar?start=YYYY-MM-DD&end=YYYY-MM-DD — the roster grid
+app.get('/api/roster/calendar', requireAuth, async (req, res) => {
+  const { start, end } = req.query;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start || '') || !/^\d{4}-\d{2}-\d{2}$/.test(end || '')) {
+    return res.status(400).json({ error: 'start and end (YYYY-MM-DD) are required' });
+  }
+  const startD = new Date(start + 'T00:00:00Z');
+  const endD = new Date(end + 'T00:00:00Z');
+  if (isNaN(startD) || isNaN(endD) || endD < startD || (endD - startD) / 86400000 > 62) {
+    return res.status(400).json({ error: 'Range must be 1–62 days' });
+  }
+  try {
+    const [staffQ, leaveQ, holQ, availQ] = await Promise.all([
+      pool.query(`
+        SELECT id, first_name, last_name, wms_email, is_casual
+        FROM leave_employees
+        WHERE is_warehouse AND is_active
+        ORDER BY is_casual, first_name, last_name`),
+      pool.query(`
+        SELECT wms_email, start_date, end_date FROM leave_requests
+        WHERE status='approved' AND start_date <= $2 AND end_date >= $1`, [start, end]),
+      pool.query(`SELECT date, name FROM leave_public_holidays WHERE date >= $1 AND date <= $2`, [start, end]),
+      pool.query(`
+        SELECT wms_email, date, available, note FROM warehouse_availability
+        WHERE date >= $1 AND date <= $2`, [start, end]),
+    ]);
+
+    const staff = staffQ.rows.map(s => ({
+      id: s.id,
+      name: `${s.first_name || ''} ${s.last_name || ''}`.trim(),
+      email: (s.wms_email || '').toLowerCase(),
+      casual: s.is_casual,
+    }));
+    const holidays = new Map(holQ.rows.map(h => [isoDate(new Date(h.date)), h.name]));
+    const leaveByEmail = leaveQ.rows.map(l => ({
+      email: (l.wms_email || '').toLowerCase(),
+      start: isoDate(new Date(l.start_date)),
+      end: isoDate(new Date(l.end_date)),
+    }));
+    const availMap = new Map(availQ.rows.map(a =>
+      [`${(a.wms_email || '').toLowerCase()}|${isoDate(new Date(a.date))}`, a]));
+
+    const days = [];
+    for (let d = new Date(startD); d <= endD; d = addDays(d, 1)) {
+      const ds = isoDate(d);
+      const dow = d.getUTCDay();
+      const weekday = dow >= 1 && dow <= 5;
+      const holiday = holidays.get(ds) || null;
+      const onLeave = (email) => leaveByEmail.some(l => l.email === email && ds >= l.start && ds <= l.end);
+
+      const fullTime = [];
+      const leave = [];
+      const casualsIn = [];
+      const casualsOut = [];
+      const casualsUnknown = [];
+      for (const s of staff) {
+        if (!s.casual) {
+          if (!weekday || holiday) continue;
+          if (onLeave(s.email)) leave.push(s.name);
+          else fullTime.push(s.name);
+        } else {
+          if (s.email && onLeave(s.email)) { leave.push(s.name); continue; }
+          const row = s.email ? availMap.get(`${s.email}|${ds}`) : null;
+          if (row && row.available) casualsIn.push({ name: s.name, note: row.note || null });
+          else if (row) casualsOut.push(s.name);
+          else casualsUnknown.push(s.name);
+        }
+      }
+      days.push({
+        date: ds, dow, holiday,
+        fullTime, casualsIn, casualsOut, casualsUnknown, leave,
+        headcount: fullTime.length + casualsIn.length,
+      });
+    }
+    res.json({
+      staff: { fullTime: staff.filter(s => !s.casual).length, casual: staff.filter(s => s.casual).length },
+      days,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Email reminders: Wed + Fri 9am Brisbane (23:00 UTC Tue/Thu) — casuals who
+// haven't filled in all of next week's availability yet.
+async function sendRosterReminders(kind) {
+  const { rows: casuals } = await pool.query(`
+    SELECT id, first_name, wms_email FROM leave_employees
+    WHERE is_warehouse AND is_casual AND is_active AND wms_email IS NOT NULL`);
+  if (!casuals.length) return;
+  const weekStart = nextWeekMonday(brisbaneToday());
+  const weekEnd = addDays(weekStart, 6);
+  const appUrl = process.env.APP_URL || 'https://tss-wms.up.railway.app';
+
+  for (const c of casuals) {
+    try {
+      const { rows } = await pool.query(
+        `SELECT COUNT(*)::int AS n FROM warehouse_availability
+         WHERE LOWER(wms_email)=LOWER($1) AND date >= $2 AND date <= $3`,
+        [c.wms_email, isoDate(weekStart), isoDate(weekEnd)]);
+      if (rows[0].n >= 7) continue;
+
+      const { rowCount } = await pool.query(
+        `INSERT INTO roster_reminder_log (wms_email, week_start, kind)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [c.wms_email.toLowerCase(), isoDate(weekStart), kind]);
+      if (!rowCount) continue; // already reminded this week for this kind
+
+      const pretty = weekStart.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+      await mailer.sendMail({
+        to: c.wms_email,
+        subject: `Warehouse availability needed — week starting ${pretty}`,
+        text: `Hi ${c.first_name || ''},\n\nPlease log which days you're available to work in the warehouse next week (starting ${pretty}).\n\nIt takes 30 seconds: ${appUrl}/my-availability.html\n\nThanks!\nThe Self Styler WMS`,
+        html: `<p>Hi ${c.first_name || ''},</p>
+               <p>Please log which days you're available to work in the warehouse next week (starting <b>${pretty}</b>).</p>
+               <p><a href="${appUrl}/my-availability.html" style="background:#6366f1;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">Set my availability</a></p>
+               <p style="color:#64748b;font-size:0.85em">It takes 30 seconds — tap each day you can work.</p>`,
+      });
+      console.log(`[roster] Reminder (${kind}) sent to ${c.wms_email}`);
+    } catch (err) {
+      console.error(`[roster] Reminder to ${c.wms_email} failed:`, err.message);
+    }
+  }
+}
+
 // ── Ecommerce Studio: Product Metafields ───────────────────────────
 // Mirror of Shopify product metafields + reporting on missing data and
 // product-reference fields that point at sold-out / low-stock / inactive
@@ -11143,6 +11374,12 @@ initDb()
       try { await leaveSync.syncPublicHolidays(pool, yr + 1); }
       catch (err) { console.error('[leave] New-year holiday sync failed:', err.message); }
     });
+
+    // Roster availability reminders — Wed & Fri 9am Brisbane
+    cron.schedule('0 23 * * 2', () => sendRosterReminders('wed').catch(err =>
+      console.error('[roster] Wed reminder run failed:', err.message)));
+    cron.schedule('0 23 * * 4', () => sendRosterReminders('fri').catch(err =>
+      console.error('[roster] Fri reminder run failed:', err.message)));
 
     // Recalculate margin tiers nightly at 02:00
     cron.schedule('0 2 * * *', async () => {

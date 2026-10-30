@@ -250,6 +250,25 @@
           }
         });
       });
+      tbody.querySelectorAll('[data-wh-id]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id     = btn.dataset.whId;
+          const newVal = btn.dataset.whVal === 'true';
+          try {
+            const res  = await fetch(`/api/leave/employees/${id}/warehouse`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ is_warehouse: newVal }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error);
+            showStatus(newVal ? 'Marked as warehouse staff' : 'Removed from warehouse staff', 'success');
+            loadEmployees();
+          } catch (err) {
+            showStatus(`Failed: ${err.message}`, 'error');
+          }
+        });
+      });
       tbody.querySelectorAll('form[data-hours-id]').forEach(form => {
         form.addEventListener('submit', async e => {
           e.preventDefault();
@@ -306,6 +325,9 @@
     const casualBtn = e.is_casual
       ? `<button class="la-action-btn" data-casual-id="${e.id}" data-casual-val="false" style="background:#ede9fe;color:#6d28d9;border-color:#c4b5fd;">● Casual</button>`
       : `<button class="la-action-btn link" data-casual-id="${e.id}" data-casual-val="true">Set Casual</button>`;
+    const whBtn = e.is_warehouse
+      ? `<button class="la-action-btn" data-wh-id="${e.id}" data-wh-val="false" style="background:#dbeafe;color:#1d4ed8;border-color:#93c5fd;">🏭 Warehouse</button>`
+      : `<button class="la-action-btn link" data-wh-id="${e.id}" data-wh-val="true">Set Warehouse</button>`;
     return `
       <tr>
         <td style="font-weight:600;">${name}</td>
@@ -319,7 +341,7 @@
         </td>
         <td>
           ${active}
-          <div style="margin-top:4px;">${casualBtn}</div>
+          <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">${casualBtn}${whBtn}</div>
           ${e.is_casual ? '' : `
           <form class="la-link-form" data-hours-id="${e.id}" style="margin-top:6px;display:flex;align-items:center;gap:4px;" title="Used to convert Xero leave hours into days on the booking page">
             <span style="font-size:0.7rem;color:#94a3b8;white-space:nowrap;">hrs/day</span>

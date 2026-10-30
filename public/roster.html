@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Warehouse Roster — The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .ro-wrap { max-width: 1250px; margin: 0 auto; padding: 20px 16px 60px; }
+    .ro-head { display: flex; align-items: center; justify-content: space-between;
+               gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+    .ro-head h1 { margin: 0; font-size: 1.35rem; }
+    .ro-nav { display: flex; align-items: center; gap: 8px; }
+    .ro-month { font-size: 1.05rem; font-weight: 800; color: #1e293b; min-width: 170px;
+                text-align: center; }
+    .ro-nav button { padding: 7px 12px; border: 1.5px solid #e2e8f0; background: #fff;
+                     border-radius: 8px; font-weight: 700; cursor: pointer; color: #475569; }
+    .ro-nav button:hover { border-color: #6366f1; color: #6366f1; }
+
+    .ro-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.76rem;
+                 color: #475569; margin-bottom: 12px; align-items: center; }
+    .ro-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+              margin-right: 5px; vertical-align: middle; }
+
+    .ro-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+    .ro-dow { font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+              letter-spacing: 0.05em; color: #94a3b8; text-align: center; padding: 4px 0; }
+    .ro-cell { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+               min-height: 118px; padding: 7px 8px; font-size: 0.76rem; }
+    .ro-cell.other { opacity: 0.35; }
+    .ro-cell.weekend { background: #f8fafc; }
+    .ro-cell.today { border-color: #6366f1; box-shadow: 0 0 0 1.5px #6366f1 inset; }
+    .ro-cell-top { display: flex; justify-content: space-between; align-items: center;
+                   margin-bottom: 5px; }
+    .ro-daynum { font-weight: 800; color: #334155; font-size: 0.82rem; }
+    .ro-count { font-size: 0.68rem; font-weight: 800; background: #eef2ff; color: #4338ca;
+                border-radius: 999px; padding: 1px 7px; }
+    .ro-count.zero { background: #fee2e2; color: #b91c1c; }
+    .ro-holiday { background: #fef3c7; color: #92400e; font-weight: 700;
+                  border-radius: 6px; padding: 2px 6px; margin-bottom: 4px;
+                  font-size: 0.7rem; }
+    .ro-person { display: flex; align-items: center; gap: 5px; line-height: 1.5;
+                 color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ro-person .ro-dot { flex-shrink: 0; }
+    .ro-sec { margin-top: 4px; }
+    .ro-muted { color: #94a3b8; }
+    .ro-leave { color: #94a3b8; text-decoration: line-through; }
+    .ro-unknown { color: #b45309; }
+    .ro-empty { color: #cbd5e1; font-style: italic; }
+    @media (max-width: 760px) {
+      .ro-grid { grid-template-columns: 1fr; }
+      .ro-dow { display: none; }
+      .ro-cell.other { display: none; }
+      .ro-cell { min-height: unset; }
+    }
+  </style>
+</head>
+<body>
+  <header></header>
+  <div class="ro-wrap">
+    <div class="ro-head">
+      <div>
+        <h1>📅 Warehouse Roster</h1>
+        <div style="color:#64748b;font-size:0.85rem;margin-top:3px" id="ro-staffline">Loading…</div>
+      </div>
+      <div class="ro-nav">
+        <button onclick="moveMonth(-1)">‹ Prev</button>
+        <div class="ro-month" id="ro-month"></div>
+        <button onclick="moveMonth(1)">Next ›</button>
+        <button onclick="goToday()">Today</button>
+      </div>
+    </div>
+
+    <div class="ro-legend">
+      <span><span class="ro-dot" style="background:#16a34a"></span>Full-time</span>
+      <span><span class="ro-dot" style="background:#3b82f6"></span>Casual — available</span>
+      <span><span class="ro-dot" style="background:#f59e0b"></span>Casual — not yet answered</span>
+      <span><span class="ro-dot" style="background:#94a3b8"></span>On leave / unavailable</span>
+      <span style="color:#92400e;background:#fef3c7;border-radius:6px;padding:1px 7px;font-weight:700">Public holiday</span>
+    </div>
+
+    <div class="ro-grid" id="ro-grid"></div>
+  </div>
+  <script src="roster.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

@@ -63,6 +63,8 @@
     {
       label: 'People',
       children: [
+        { label: 'Warehouse Roster', href: '/roster.html' },
+        { label: 'My Availability',  href: '/my-availability.html' },
         { label: 'Leave Calendar', href: '/leave-calendar.html' },
         { label: 'Leave Request',  href: '/leave-request.html' },
         { label: 'My Documents',   href: '/my-documents.html' },
@@ -187,6 +189,24 @@
                           font-size:0.9rem;font-weight:600;text-align:center;padding:9px 16px;">
                 📄 You have ${pending} document${pending !== 1 ? 's' : ''} awaiting your sign-off —
                 <a href="/my-documents.html" style="color:#92400e;text-decoration:underline;">review now</a>
+              </div>`);
+          })
+          .catch(() => {});
+      }
+
+      // Banner prompting casual warehouse staff to log next week's availability
+      if (!window.location.pathname.endsWith('/my-availability.html')) {
+        fetch('/api/roster/pending')
+          .then((r) => (r.ok ? r.json() : { pendingDays: 0 }))
+          .then(({ pendingDays }) => {
+            if (!pendingDays) return;
+            const header = document.querySelector('header');
+            if (!header) return;
+            header.insertAdjacentHTML('afterend', `
+              <div style="background:#eef2ff;border-bottom:1.5px solid #c7d2fe;color:#4338ca;
+                          font-size:0.9rem;font-weight:600;text-align:center;padding:9px 16px;">
+                🙋 Please log your warehouse availability for next week (${pendingDays} day${pendingDays !== 1 ? 's' : ''} unanswered) —
+                <a href="/my-availability.html" style="color:#4338ca;text-decoration:underline;">set it now</a>
               </div>`);
           })
           .catch(() => {});

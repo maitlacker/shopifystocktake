@@ -690,6 +690,7 @@ async function initDb() {
       synced_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     ALTER TABLE leave_employees ADD COLUMN IF NOT EXISTS is_casual BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE leave_employees ADD COLUMN IF NOT EXISTS is_warehouse BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE leave_employees ADD COLUMN IF NOT EXISTS leave_balances JSONB;
     ALTER TABLE leave_employees ADD COLUMN IF NOT EXISTS balances_synced_at TIMESTAMPTZ;
     ALTER TABLE leave_employees ADD COLUMN IF NOT EXISTS hours_per_day NUMERIC(4,2);
@@ -1340,6 +1341,29 @@ async function initDb() {
       content     TEXT NOT NULL,
       model_used  TEXT,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    -- ── Warehouse roster: casual availability + reminder log ─────────
+    CREATE TABLE IF NOT EXISTS warehouse_availability (
+      id          SERIAL PRIMARY KEY,
+      employee_id INTEGER REFERENCES leave_employees(id),
+      wms_email   TEXT NOT NULL,
+      date        DATE NOT NULL,
+      available   BOOLEAN NOT NULL,
+      note        TEXT,
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(wms_email, date)
+    );
+    CREATE INDEX IF NOT EXISTS idx_warehouse_availability_date
+      ON warehouse_availability(date);
+
+    CREATE TABLE IF NOT EXISTS roster_reminder_log (
+      id         SERIAL PRIMARY KEY,
+      wms_email  TEXT NOT NULL,
+      week_start DATE NOT NULL,
+      kind       TEXT NOT NULL,
+      sent_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(wms_email, week_start, kind)
     );
 
     -- ── Ecommerce Studio: product metafields mirror ──────────────────
