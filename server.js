@@ -11357,6 +11357,7 @@ async function buildSimilarSuggestions(productIds, user) {
       FROM shopify_order_lines l
       JOIN shopify_orders o ON o.id = l.order_id AND o.cancelled_at IS NULL
       WHERE l.product_id = ANY($1::bigint[]) AND NOT l.cancelled
+        AND COALESCE(l.price, 0) > 0
     )
     SELECT t.target_id,
            l2.product_id AS co_id,
@@ -11365,6 +11366,7 @@ async function buildSimilarSuggestions(productIds, user) {
     FROM target_orders t
     JOIN shopify_order_lines l2 ON l2.order_id = t.order_id
     WHERE l2.product_id IS NOT NULL AND l2.product_id <> t.target_id AND NOT l2.cancelled
+      AND COALESCE(l2.price, 0) > 0
     GROUP BY t.target_id, l2.product_id`, [productIds]);
 
   const { rows: orderCounts } = await pool.query(`
@@ -11372,6 +11374,7 @@ async function buildSimilarSuggestions(productIds, user) {
     FROM shopify_order_lines l
     JOIN shopify_orders o ON o.id = l.order_id AND o.cancelled_at IS NULL
     WHERE l.product_id = ANY($1::bigint[]) AND NOT l.cancelled
+      AND COALESCE(l.price, 0) > 0
     GROUP BY l.product_id`, [productIds]);
   const ordersAnalysed = new Map(orderCounts.map(r => [String(r.product_id), r.n]));
 
@@ -11397,6 +11400,7 @@ async function buildSimilarSuggestions(productIds, user) {
         r.prod.status === 'ACTIVE' &&
         !/gift/i.test(r.prod.product_type || '') &&
         !/x-redo/i.test(r.prod.title || '') &&
+        !/measuring tape/i.test(r.prod.title || '') &&
         (!r.prod.tracks_inventory || (r.prod.total_inventory ?? 0) > 0))
       .sort((a, b) => b.co_orders - a.co_orders || b.co_qty - a.co_qty);
 
@@ -11438,10 +11442,12 @@ app.post('/api/ecom/similar/generate', requireAuth, async (req, res) => {
         WHERE p.is_owner AND s.product_id IS NULL
           AND COALESCE(p.product_type,'') NOT ILIKE '%gift%'
           AND p.title NOT ILIKE '%x-redo%'
+          AND p.title NOT ILIKE '%measuring tape%'
         ORDER BY (
           SELECT COALESCE(SUM(l.quantity), 0) FROM shopify_order_lines l
           WHERE l.product_id = p.product_id
             AND l.created_at >= NOW() - INTERVAL '90 days' AND NOT l.cancelled
+            AND COALESCE(l.price, 0) > 0
         ) DESC
         LIMIT $1`, [SIMILAR_BATCH_SIZE]);
       ids = rows.map(r => Number(r.product_id));
@@ -11466,7 +11472,8 @@ app.get('/api/ecom/similar/suggestions', requireAuth, async (req, res) => {
       pool.query(`
         SELECT COUNT(*)::int AS candidates FROM metafield_products p
         WHERE p.is_owner AND COALESCE(p.product_type,'') NOT ILIKE '%gift%'
-          AND p.title NOT ILIKE '%x-redo%'`),
+          AND p.title NOT ILIKE '%x-redo%'
+          AND p.title NOT ILIKE '%measuring tape%'`),
       pool.query(`
         SELECT product_id, type, value FROM product_metafields
         WHERE namespace='custom' AND key='similar_styles'`),

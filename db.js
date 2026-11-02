@@ -1374,6 +1374,12 @@ async function initDb() {
       generated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       generated_by    TEXT
     );
+    -- One-time wipe: rules v2 (ignore $0 free-gift lines + measuring tapes)
+    DELETE FROM similar_styles_suggestions
+      WHERE NOT EXISTS (SELECT 1 FROM app_settings WHERE key='similar_rules_v2');
+    INSERT INTO app_settings (key, value, updated_at)
+      SELECT 'similar_rules_v2', '1', NOW()
+      WHERE NOT EXISTS (SELECT 1 FROM app_settings WHERE key='similar_rules_v2');
 
     -- ── Ecommerce Studio: product metafields mirror ──────────────────
     CREATE TABLE IF NOT EXISTS product_metafields (
