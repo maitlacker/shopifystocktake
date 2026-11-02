@@ -80,6 +80,7 @@
       label: 'Ecommerce',
       children: [
         { label: 'Product Data Studio', href: '/ecommerce-studio.html' },
+        { label: 'You May Also Like',   href: '/similar-styles.html' },
       ],
     },
     {

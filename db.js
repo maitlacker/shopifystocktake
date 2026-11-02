@@ -1366,6 +1366,15 @@ async function initDb() {
       UNIQUE(wms_email, week_start, kind)
     );
 
+    -- ── Ecommerce Studio: "You may also like" co-purchase suggestions ─
+    CREATE TABLE IF NOT EXISTS similar_styles_suggestions (
+      product_id      BIGINT PRIMARY KEY,
+      suggestions     JSONB NOT NULL,
+      orders_analysed INT,
+      generated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      generated_by    TEXT
+    );
+
     -- ── Ecommerce Studio: product metafields mirror ──────────────────
     CREATE TABLE IF NOT EXISTS product_metafields (
       id              SERIAL PRIMARY KEY,

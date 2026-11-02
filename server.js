@@ -11338,6 +11338,176 @@ app.get('/api/ecom/metafields/health', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Ecommerce Studio: "You may also like" suggestions ──────────────
+// Co-purchase analysis over the local orders warehouse: for a product,
+// find every order containing it, count what else those orders bought,
+// and suggest the top 4 active, in-stock co-purchased products.
+// Preview only — NOTHING is written back to Shopify.
+
+const SIMILAR_BATCH_SIZE = 5;
+const SIMILAR_TOP_N = 4;
+
+async function buildSimilarSuggestions(productIds, user) {
+  if (!productIds.length) return [];
+
+  // Everything co-purchased with each target product
+  const { rows: co } = await pool.query(`
+    WITH target_orders AS (
+      SELECT DISTINCT l.order_id, l.product_id AS target_id
+      FROM shopify_order_lines l
+      JOIN shopify_orders o ON o.id = l.order_id AND o.cancelled_at IS NULL
+      WHERE l.product_id = ANY($1::bigint[]) AND NOT l.cancelled
+    )
+    SELECT t.target_id,
+           l2.product_id AS co_id,
+           COUNT(DISTINCT l2.order_id)::int AS co_orders,
+           SUM(l2.quantity)::int AS co_qty
+    FROM target_orders t
+    JOIN shopify_order_lines l2 ON l2.order_id = t.order_id
+    WHERE l2.product_id IS NOT NULL AND l2.product_id <> t.target_id AND NOT l2.cancelled
+    GROUP BY t.target_id, l2.product_id`, [productIds]);
+
+  const { rows: orderCounts } = await pool.query(`
+    SELECT l.product_id, COUNT(DISTINCT l.order_id)::int AS n
+    FROM shopify_order_lines l
+    JOIN shopify_orders o ON o.id = l.order_id AND o.cancelled_at IS NULL
+    WHERE l.product_id = ANY($1::bigint[]) AND NOT l.cancelled
+    GROUP BY l.product_id`, [productIds]);
+  const ordersAnalysed = new Map(orderCounts.map(r => [String(r.product_id), r.n]));
+
+  // Eligibility snapshot (every active product is in metafield_products)
+  const { rows: prods } = await pool.query(`
+    SELECT product_id, title, handle, status, product_type, tracks_inventory, total_inventory, image_url
+    FROM metafield_products`);
+  const prodMap = new Map(prods.map(p => [String(p.product_id), p]));
+
+  const byTarget = new Map();
+  for (const r of co) {
+    const k = String(r.target_id);
+    if (!byTarget.has(k)) byTarget.set(k, []);
+    byTarget.get(k).push(r);
+  }
+
+  const results = [];
+  for (const pid of productIds) {
+    const candidates = (byTarget.get(String(pid)) || [])
+      .map(r => ({ ...r, prod: prodMap.get(String(r.co_id)) }))
+      .filter(r =>
+        r.prod &&
+        r.prod.status === 'ACTIVE' &&
+        !/gift/i.test(r.prod.product_type || '') &&
+        !/x-redo/i.test(r.prod.title || '') &&
+        (!r.prod.tracks_inventory || (r.prod.total_inventory ?? 0) > 0))
+      .sort((a, b) => b.co_orders - a.co_orders || b.co_qty - a.co_qty);
+
+    const suggestions = candidates.slice(0, SIMILAR_TOP_N).map(r => ({
+      productId: String(r.co_id),
+      title: r.prod.title,
+      image: r.prod.image_url,
+      handle: r.prod.handle,
+      coOrders: r.co_orders,
+      coQty: r.co_qty,
+      totalInventory: r.prod.total_inventory,
+    }));
+
+    await pool.query(`
+      INSERT INTO similar_styles_suggestions (product_id, suggestions, orders_analysed, generated_at, generated_by)
+      VALUES ($1, $2, $3, NOW(), $4)
+      ON CONFLICT (product_id) DO UPDATE SET
+        suggestions=EXCLUDED.suggestions, orders_analysed=EXCLUDED.orders_analysed,
+        generated_at=NOW(), generated_by=EXCLUDED.generated_by`,
+      [pid, JSON.stringify(suggestions), ordersAnalysed.get(String(pid)) || 0, user]);
+
+    results.push({ productId: String(pid), suggestions, ordersAnalysed: ordersAnalysed.get(String(pid)) || 0 });
+  }
+  return results;
+}
+
+// POST /api/ecom/similar/generate — next batch of 5 (or specific productIds)
+app.post('/api/ecom/similar/generate', requireAuth, async (req, res) => {
+  try {
+    let ids = (Array.isArray(req.body?.productIds) ? req.body.productIds : [])
+      .map(Number).filter(Number.isFinite).slice(0, SIMILAR_BATCH_SIZE);
+
+    if (!ids.length) {
+      // Next 5 active products with no suggestions yet, best sellers first
+      const { rows } = await pool.query(`
+        SELECT p.product_id
+        FROM metafield_products p
+        LEFT JOIN similar_styles_suggestions s ON s.product_id = p.product_id
+        WHERE p.is_owner AND s.product_id IS NULL
+          AND COALESCE(p.product_type,'') NOT ILIKE '%gift%'
+          AND p.title NOT ILIKE '%x-redo%'
+        ORDER BY (
+          SELECT COALESCE(SUM(l.quantity), 0) FROM shopify_order_lines l
+          WHERE l.product_id = p.product_id
+            AND l.created_at >= NOW() - INTERVAL '90 days' AND NOT l.cancelled
+        ) DESC
+        LIMIT $1`, [SIMILAR_BATCH_SIZE]);
+      ids = rows.map(r => Number(r.product_id));
+    }
+    if (!ids.length) return res.json({ generated: [], done: true });
+
+    const generated = await buildSimilarSuggestions(ids, req.user?.email || null);
+    res.json({ generated: generated.length, done: false });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/ecom/similar/suggestions — everything generated so far + current metafield
+app.get('/api/ecom/similar/suggestions', requireAuth, async (req, res) => {
+  try {
+    const [sugg, totals, current, prods] = await Promise.all([
+      pool.query(`
+        SELECT s.product_id, s.suggestions, s.orders_analysed, s.generated_at,
+               p.title, p.handle, p.image_url, p.total_inventory
+        FROM similar_styles_suggestions s
+        JOIN metafield_products p ON p.product_id = s.product_id
+        ORDER BY s.generated_at DESC, p.title`),
+      pool.query(`
+        SELECT COUNT(*)::int AS candidates FROM metafield_products p
+        WHERE p.is_owner AND COALESCE(p.product_type,'') NOT ILIKE '%gift%'
+          AND p.title NOT ILIKE '%x-redo%'`),
+      pool.query(`
+        SELECT product_id, type, value FROM product_metafields
+        WHERE namespace='custom' AND key='similar_styles'`),
+      pool.query(`SELECT product_id, title, status, tracks_inventory, total_inventory, image_url FROM metafield_products`),
+    ]);
+    const prodMap = new Map(prods.rows.map(p => [String(p.product_id), p]));
+    const currentMap = new Map(current.rows.map(r => [String(r.product_id), r]));
+
+    const items = sugg.rows.map(s => {
+      const cur = currentMap.get(String(s.product_id));
+      const currentRefs = cur
+        ? metafieldsSync.refIdsFromValue(cur.type, cur.value).map(id => {
+            const p = prodMap.get(String(id));
+            return {
+              productId: String(id),
+              title: p ? p.title : `Deleted product ${id}`,
+              image: p ? p.image_url : null,
+              ok: Boolean(p && p.status === 'ACTIVE' &&
+                          (!p.tracks_inventory || (p.total_inventory ?? 0) > 0)),
+            };
+          })
+        : [];
+      return {
+        productId: String(s.product_id),
+        title: s.title,
+        handle: s.handle,
+        image: s.image_url,
+        ordersAnalysed: s.orders_analysed,
+        generatedAt: s.generated_at,
+        suggestions: s.suggestions,
+        current: currentRefs,
+      };
+    });
+    res.json({
+      candidates: totals.rows[0].candidates,
+      generated: items.length,
+      items,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
