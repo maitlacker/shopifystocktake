@@ -2665,9 +2665,12 @@ app.put('/api/production-orders/:id/specs/:code', requireAuth, async (req, res) 
        fit_notes||null, questions||null, JSON.stringify(bom||[]), JSON.stringify(pretreatment||{}),
        JSON.stringify(spec_chart||[]), tag_code||null, tag_colour||null, tag_name||null, req.user.email]
     );
-    await pool.query(
-      `INSERT INTO order_form_log (order_id, product_code, action, by_email) VALUES ($1,$2,'saved',$3)`,
-      [req.params.id, req.params.code, req.user.email]).catch(() => {});
+    // Background auto-saves don't clutter the order-form activity log
+    if (req.query.autosave !== '1') {
+      await pool.query(
+        `INSERT INTO order_form_log (order_id, product_code, action, by_email) VALUES ($1,$2,'saved',$3)`,
+        [req.params.id, req.params.code, req.user.email]).catch(() => {});
+    }
     res.json({ ok: true, spec_id: rows[0].id });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

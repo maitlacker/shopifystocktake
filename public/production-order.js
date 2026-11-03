@@ -34,6 +34,7 @@ const PANTS_SIZES   = ['6','7','8','9','10','11','12','14','16','18'];
       }
     } catch (_) {}
   }
+  maybeOfferPoDraft();
 })();
 
 async function loadSuppliers() {
@@ -178,6 +179,7 @@ function addLine() {
     unitPrice: 0, freightOverride: '',
   });
   renderLines();
+  schedulePoDraft();
   // Scroll to new line
   const el = document.getElementById(`line-${lid}`);
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -187,6 +189,7 @@ function removeLine(lid) {
   lines = lines.filter(l => l._lid !== lid);
   renderLines();
   recalcTotals();
+  schedulePoDraft();
 }
 
 function renderLines() {
@@ -569,6 +572,7 @@ async function savePO(statusOverride) {
       document.getElementById('btn-confirm-po').style.display = '';
     }
     currentPO = saved;
+    clearPoDraft();
     loadSpecs();
     document.getElementById('po-page-title').textContent = `PO — ${saved.po_number}`;
     document.getElementById('po-status-badge').style.display = '';
@@ -635,6 +639,162 @@ let specsData = {};       // product_code → saved spec (incl. images meta)
 const specOpen = {};      // product_code → editor expanded?
 const specSeedNote = {};  // product_code → "Prefilled from PO X" note
 
+// ── Auto-save & draft protection ────────────────────────────────────
+// Spec editors silently auto-save to the server 2.5s after the last
+// keystroke. The PO form (and every spec, as a belt-and-braces copy)
+// also drafts to localStorage so a crash, dead battery or accidental
+// navigation never loses work.
+const specDirty = {};
+const specSaveTimers = {};
+let poDraftTimer = null;
+let poDirty = false;
+let restoringDraft = false;
+
+function specDraftKey(code) { return `tss-spec-draft-${poId}-${code}`; }
+function poDraftKey() { return `tss-po-draft-${poId || 'new'}`; }
+function lsGet(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (_) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} }
+function lsDel(k) { try { localStorage.removeItem(k); } catch (_) {} }
+
+function setSpecStatus(code, msg, color) {
+  const el = document.getElementById(`sp-status-${cssId(code)}`);
+  if (el) { el.textContent = msg; el.style.color = color || '#15803d'; }
+}
+
+function scheduleSpecAutosave(code) {
+  if (!poId) return;
+  specDirty[code] = true;
+  try { lsSet(specDraftKey(code), { at: new Date().toISOString(), payload: collectSpecPayload(code) }); } catch (_) {}
+  setSpecStatus(code, 'Unsaved changes…', '#b45309');
+  clearTimeout(specSaveTimers[code]);
+  specSaveTimers[code] = setTimeout(() => autoSaveSpec(code), 2500);
+}
+
+async function autoSaveSpec(code) {
+  if (!poId || !specDirty[code]) return;
+  if (!document.getElementById(`spec-ed-${cssId(code)}`)) return; // editor closed — draft keeps the data
+  const payload = collectSpecPayload(code);
+  setSpecStatus(code, 'Auto-saving…', '#64748b');
+  try {
+    const r = await fetch(`/api/production-orders/${poId}/specs/${encodeURIComponent(code)}?autosave=1`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    specDirty[code] = false;
+    specsData[code] = Object.assign({}, specsData[code], payload, { updated_at: new Date().toISOString() });
+    lsDel(specDraftKey(code));
+    setSpecStatus(code, `✓ Auto-saved ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+  } catch (_) {
+    setSpecStatus(code, '⚠ Auto-save failed — changes kept on this device, retrying…', '#b91c1c');
+    clearTimeout(specSaveTimers[code]);
+    specSaveTimers[code] = setTimeout(() => autoSaveSpec(code), 10000);
+  }
+}
+
+// Merge what's typed in every open spec editor back into specsData so a
+// re-render (opening another spec, applying gallery picks, uploading an
+// image) can never discard unsaved edits.
+function captureOpenSpecEdits() {
+  document.querySelectorAll('[data-spec-code]').forEach(ed => {
+    const code = ed.dataset.specCode;
+    try { specsData[code] = Object.assign({}, specsData[code], collectSpecPayload(code)); } catch (_) {}
+  });
+}
+
+function schedulePoDraft() {
+  if (restoringDraft) return;
+  poDirty = true;
+  clearTimeout(poDraftTimer);
+  poDraftTimer = setTimeout(() => {
+    try { lsSet(poDraftKey(), { at: new Date().toISOString(), payload: buildPayload() }); } catch (_) {}
+  }, 1200);
+}
+
+function clearPoDraft() {
+  poDirty = false;
+  clearTimeout(poDraftTimer);
+  lsDel('tss-po-draft-new');
+  if (poId) lsDel(`tss-po-draft-${poId}`);
+}
+
+function applyPoDraft(p) {
+  restoringDraft = true;
+  const set = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
+  set('po-number', p.poNumber); set('po-order-date', p.orderDate);
+  set('po-delivery-date', p.deliveryDate || ''); set('po-freight', p.freightMode);
+  set('po-currency', p.currency); set('po-exchange-rate', p.exchangeRate);
+  set('tot-shipping', p.shippingCost); set('po-notes', p.notes || '');
+  set('po-freight-terms', p.freightTerms || ''); set('po-type', p.poType);
+  set('po-launch-type', p.launchType || '');
+  document.getElementById('tot-gst').checked = !!p.includeGst;
+  onLaunchTypeChange();
+  set('po-collection-name', p.collectionName || '');
+  if (p.supplierId) set('po-supplier', p.supplierId);
+  lines = (p.lines || []).map(l => ({
+    _lid: ++lineIdSeq, dbId: null,
+    lineType: l.lineType || 'restock', productId: l.productId || null,
+    productCode: l.productCode || '', productName: l.productName || '',
+    sizeSet: l.sizeSet || 'numeric', quantities: l.quantities || {},
+    totalQty: l.totalQty || 0, unitPrice: l.unitPrice || 0,
+    freightOverride: l.freightOverride || '',
+  }));
+  renderLines();
+  recalcTotals();
+  updateExRateInfo();
+  restoringDraft = false;
+  poDirty = true; // restored, but not yet saved to the server
+  if (poId) loadSpecs();
+}
+
+function maybeOfferPoDraft() {
+  const draft = lsGet(poDraftKey());
+  if (!draft || !draft.payload) return;
+  // Server copy saved after the draft was written → draft is stale
+  if (poId && currentPO && currentPO.updated_at &&
+      new Date(currentPO.updated_at) > new Date(draft.at)) { lsDel(poDraftKey()); return; }
+  const header = document.querySelector('header');
+  if (!header || document.getElementById('po-draft-banner')) return;
+  header.insertAdjacentHTML('afterend', `
+    <div id="po-draft-banner" style="background:#fffbeb;border-bottom:1.5px solid #fde68a;color:#92400e;
+                font-size:0.9rem;font-weight:600;text-align:center;padding:9px 16px;">
+      📝 Unsaved changes to this PO from ${escHtml(new Date(draft.at).toLocaleString())} were recovered —
+      <button onclick="restorePoDraftClick()" style="background:#f59e0b;color:#fff;border:none;border-radius:7px;
+        padding:4px 12px;font-weight:700;cursor:pointer;margin:0 4px">Restore</button>
+      <button onclick="discardPoDraftClick()" style="background:none;border:1px solid #d6b26b;color:#92400e;
+        border-radius:7px;padding:4px 12px;font-weight:600;cursor:pointer">Discard</button>
+    </div>`);
+}
+function restorePoDraftClick() {
+  const draft = lsGet(poDraftKey());
+  const banner = document.getElementById('po-draft-banner');
+  if (banner) banner.remove();
+  if (draft && draft.payload) { applyPoDraft(draft.payload); showToast('Draft restored — remember to Save'); }
+}
+function discardPoDraftClick() {
+  const banner = document.getElementById('po-draft-banner');
+  if (banner) banner.remove();
+  lsDel(poDraftKey());
+}
+
+// Every edit on the page: spec-editor fields auto-save to the server,
+// everything else drafts the PO form locally.
+function onAnyEdit(e) {
+  const t = e.target;
+  if (!t || !t.matches || !t.matches('input, textarea, select')) return;
+  const ed = t.closest('[data-spec-code]');
+  if (ed) scheduleSpecAutosave(ed.dataset.specCode);
+  else schedulePoDraft();
+}
+document.addEventListener('input', onAnyEdit, true);
+document.addEventListener('change', onAnyEdit, true);
+
+window.addEventListener('beforeunload', (e) => {
+  // Flush the draft synchronously so even "Leave anyway" loses nothing
+  if (poDirty) { try { lsSet(poDraftKey(), { at: new Date().toISOString(), payload: buildPayload() }); } catch (_) {} }
+  const dirtySpecs = Object.keys(specDirty).some(c => specDirty[c]);
+  if (poDirty || dirtySpecs) { e.preventDefault(); e.returnValue = ''; }
+});
+
 function specSizes(sizeSet) {
   return sizeSet === 'alpha' ? ALPHA_SIZES : sizeSet === 'pants' ? PANTS_SIZES : NUMERIC_SIZES;
 }
@@ -649,16 +809,27 @@ async function loadSpecs() {
   const sl = specLines();
   if (!poId || !sl.length) { section.style.display = 'none'; return; }
   section.style.display = '';
+  // Hold on to unsaved edits in open editors so the refresh can't wipe them
+  const pendingEdits = {};
+  for (const code of Object.keys(specOpen)) {
+    if (specOpen[code] && specDirty[code] && document.getElementById(`spec-ed-${cssId(code)}`)) {
+      try { pendingEdits[code] = collectSpecPayload(code); } catch (_) {}
+    }
+  }
   try {
     const r = await fetch(`/api/production-orders/${poId}/specs`);
     const data = await r.json();
     specsData = {};
     (data.specs || []).forEach(s => { specsData[s.product_code] = s; });
   } catch (_) { specsData = {}; }
+  for (const code of Object.keys(pendingEdits)) {
+    specsData[code] = Object.assign({}, specsData[code], pendingEdits[code]);
+  }
   renderSpecs(sl);
 }
 
 function renderSpecs(sl) {
+  captureOpenSpecEdits(); // re-render must never discard typed-but-unsaved edits
   const wrap = document.getElementById('po-specs-container');
   wrap.innerHTML = sl.map(l => {
     const code = l.productCode.trim();
@@ -791,6 +962,22 @@ async function toggleSpec(code) {
 }
 
 function specEditor(l, code, s) {
+  // Recover a locally cached draft that never reached the server
+  let draftNote = '';
+  const draft = lsGet(specDraftKey(code));
+  if (draft && draft.payload) {
+    if (s.updated_at && new Date(s.updated_at) >= new Date(draft.at)) {
+      lsDel(specDraftKey(code)); // server copy is newer — draft is stale
+    } else {
+      s = Object.assign({}, s, draft.payload);
+      specDirty[code] = true;
+      draftNote = `<div style="font-size:0.78rem;font-weight:600;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 10px;margin-bottom:12px">
+        📝 Recovered unsaved changes from ${escHtml(new Date(draft.at).toLocaleString())} — they will auto-save shortly</div>`;
+      setTimeout(() => {
+        if (document.getElementById(`spec-ed-${cssId(code)}`)) scheduleSpecAutosave(code);
+      }, 800);
+    }
+  }
   const sizes = specSizes(l.sizeSet);
   const pt = s.pretreatment || {};
   const bom = Array.isArray(s.bom) && s.bom.length ? s.bom
@@ -818,7 +1005,8 @@ function specEditor(l, code, s) {
     </div>`;
 
   return `
-  <div style="border-top:1.5px solid #e2e8f0;padding:16px" id="spec-ed-${cssId(code)}">
+  <div style="border-top:1.5px solid #e2e8f0;padding:16px" id="spec-ed-${cssId(code)}" data-spec-code="${escHtml(code)}">
+    ${draftNote}
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:14px">
       ${fld('Season', `sp-season-${cssId(code)}`, s.season, 'e.g. Spring/Summer')}
       ${fld('Fabric', `sp-fabric-${cssId(code)}`, s.fabric, 'e.g. Mid Blue Denim Wash (as per sample)')}
@@ -932,7 +1120,7 @@ function addBomRow(code) {
     .insertAdjacentHTML('beforeend', bomRow({}));
 }
 
-async function saveSpec(code) {
+function collectSpecPayload(code) {
   const id = cssId(code);
   const v = (fid) => (document.getElementById(fid)?.value || '').trim() || null;
   const chart = [...document.querySelectorAll(`#sp-chart-${id} .sp-chart-row`)].map(tr => {
@@ -948,7 +1136,7 @@ async function saveSpec(code) {
     colour:    tr.querySelector('.sp-bcol').value.trim(),
   })).filter(r => r.component || r.material);
 
-  const payload = {
+  return {
     season: v(`sp-season-${id}`), fabric: v(`sp-fabric-${id}`),
     colour: v(`sp-colour-${id}`), colour_code: v(`sp-colourcode-${id}`),
     fit_notes: (document.getElementById(`sp-fit-${id}`)?.value || '').trim() || null,
@@ -961,6 +1149,12 @@ async function saveSpec(code) {
     },
     tag_code: v(`sp-tagcode-${id}`), tag_colour: v(`sp-tagcolour-${id}`), tag_name: v(`sp-tagname-${id}`),
   };
+}
+
+async function saveSpec(code) {
+  const id = cssId(code);
+  clearTimeout(specSaveTimers[code]); // manual save supersedes a pending autosave
+  const payload = collectSpecPayload(code);
   try {
     const r = await fetch(`/api/production-orders/${poId}/specs/${encodeURIComponent(code)}`, {
       method: 'PUT',
@@ -969,9 +1163,12 @@ async function saveSpec(code) {
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error);
+    specDirty[code] = false;
+    lsDel(specDraftKey(code));
     const st = document.getElementById(`sp-status-${id}`);
+    st.style.color = '#15803d';
     st.textContent = '✓ Saved';
-    setTimeout(() => { st.textContent = ''; }, 2000);
+    setTimeout(() => { if (st.textContent === '✓ Saved') st.textContent = ''; }, 2000);
     const fresh = await fetch(`/api/production-orders/${poId}/specs`).then(x => x.json());
     specsData = {};
     (fresh.specs || []).forEach(sp => { specsData[sp.product_code] = sp; });
