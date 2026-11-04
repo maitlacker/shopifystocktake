@@ -5,6 +5,7 @@ function escHtml(s) {
 }
 
 let viewYear, viewMonth; // month is 0-based
+let isRosterAdmin = false;
 
 function todayBrisbane() {
   const d = new Date(Date.now() + 10 * 3600 * 1000);
@@ -77,17 +78,12 @@ async function load() {
     body += (day.fullTime || []).map(n => person(n, '#16a34a')).join('');
     body += (day.casualsIn || []).map(c =>
       person(c.name + (c.note ? ` — ${c.note}` : ''), '#3b82f6')).join('');
-    if ((day.casualsUnknown || []).length && !weekend && !day.holiday) {
-      body += `<div class="ro-sec">` +
-        day.casualsUnknown.map(n => person(n + ' ?', '#f59e0b', 'ro-unknown')).join('') + '</div>';
-    }
     if ((day.leave || []).length) {
       body += `<div class="ro-sec">` +
         day.leave.map(n => person(n + ' (leave)', '#94a3b8', 'ro-leave')).join('') + '</div>';
     }
-    if ((day.casualsOut || []).length) {
-      body += `<div class="ro-sec">` +
-        day.casualsOut.map(n => person(n + ' (out)', '#94a3b8', 'ro-muted')).join('') + '</div>';
+    if (day.pendingCount && isRosterAdmin) {
+      body += `<div class="ro-pending-hint">⏳ ${day.pendingCount} request${day.pendingCount !== 1 ? 's' : ''} awaiting approval</div>`;
     }
     if (!body) body = '<div class="ro-empty">—</div>';
 
@@ -103,4 +99,61 @@ async function load() {
   grid.innerHTML = html;
 }
 
-goToday();
+// ── Shift approvals (roster admins only; everyone else gets a 403) ──
+async function loadRequests() {
+  const box = document.getElementById('ro-approvals');
+  try {
+    const res = await fetch('/api/roster/requests');
+    if (!res.ok) { isRosterAdmin = false; box.innerHTML = ''; return; }
+    isRosterAdmin = true;
+    const { requests } = await res.json();
+    if (!requests.length) { box.innerHTML = ''; return; }
+
+    const byPerson = new Map();
+    for (const r of requests) {
+      if (!byPerson.has(r.email)) byPerson.set(r.email, { name: r.name, email: r.email, days: [] });
+      byPerson.get(r.email).days.push(r);
+    }
+
+    box.innerHTML = `<div class="ro-appr">
+      <h2>⏳ Shift requests awaiting approval (${requests.length})</h2>
+      ${[...byPerson.values()].map(p => `
+        <div class="ro-appr-person">
+          <div class="ro-appr-name">${escHtml(p.name || p.email)}
+            <button class="ro-appr-all"
+              onclick='decide(${JSON.stringify(p.email)}, ${JSON.stringify(p.days.map(d => d.date))}, "approve")'>
+              ✓ Approve all ${p.days.length}</button>
+          </div>
+          <div class="ro-appr-days">
+            ${p.days.map(d => `
+              <span class="ro-appr-day">
+                ${escHtml(new Date(d.date + 'T00:00:00Z').toLocaleDateString('en-AU',
+                  { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }))}
+                ${d.note ? `<span style="color:#94a3b8;font-weight:500">· ${escHtml(d.note)}</span>` : ''}
+                <button class="ro-appr-ok" title="Approve"
+                  onclick='decide(${JSON.stringify(p.email)}, ${JSON.stringify([d.date])}, "approve")'>✓</button>
+                <button class="ro-appr-no" title="Decline"
+                  onclick='decide(${JSON.stringify(p.email)}, ${JSON.stringify([d.date])}, "decline")'>✕</button>
+              </span>`).join('')}
+          </div>
+        </div>`).join('')}
+    </div>`;
+  } catch (_) { box.innerHTML = ''; }
+}
+
+async function decide(email, dates, action) {
+  try {
+    const res = await fetch('/api/roster/requests/decide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, dates, action }),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error);
+    await Promise.all([loadRequests(), load()]);
+  } catch (err) {
+    alert(`Failed: ${err.message}`);
+  }
+}
+
+loadRequests().then(goToday);

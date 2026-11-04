@@ -10961,6 +10961,16 @@ function nextWeekMonday(d) {
   return addDays(d, daysToNextMon);
 }
 
+// Shift approvals: casual availability is a REQUEST until one of these
+// approves it; only approved shifts appear on the roster calendar.
+const ROSTER_ADMINS = ['accounts@theselfstyler.com', 'camilla@theselfstyler.com'];
+function requireRosterAdmin(req, res, next) {
+  if (!ROSTER_ADMINS.includes(req.user?.email)) {
+    return res.status(403).json({ error: 'Roster admin access only' });
+  }
+  next();
+}
+
 // PATCH /api/leave/employees/:id/warehouse — toggle warehouse flag (admin only)
 app.patch('/api/leave/employees/:id/warehouse', requireAuth, requireLeaveAdmin, async (req, res) => {
   try {
@@ -10984,14 +10994,16 @@ app.get('/api/roster/me', requireAuth, async (req, res) => {
     const today = brisbaneToday();
     const until = addDays(today, 35);
     const { rows: avail } = await pool.query(
-      `SELECT date, available, note FROM warehouse_availability
+      `SELECT date, available, note, status FROM warehouse_availability
        WHERE LOWER(wms_email)=LOWER($1) AND date >= $2 AND date <= $3 ORDER BY date`,
       [email, isoDate(today), isoDate(until)]);
     res.json({
       employee: emp,
       isCasualWarehouse: Boolean(emp && emp.is_casual && emp.is_warehouse && emp.is_active),
       today: isoDate(today),
-      availability: avail.map(r => ({ date: isoDate(new Date(r.date)), available: r.available, note: r.note })),
+      availability: avail.map(r => ({
+        date: isoDate(new Date(r.date)), available: r.available, note: r.note, status: r.status,
+      })),
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -11016,11 +11028,16 @@ app.post('/api/roster/availability', requireAuth, async (req, res) => {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(e.date))) continue;
       const d = new Date(e.date + 'T00:00:00Z');
       if (isNaN(d) || d < today || d > maxDate) continue;
+      // Any change to a day resets it to pending so approved shifts can't
+      // be swapped without a roster admin seeing it
       await pool.query(
-        `INSERT INTO warehouse_availability (employee_id, wms_email, date, available, note, updated_at)
-         VALUES ($1, $2, $3, $4, $5, NOW())
+        `INSERT INTO warehouse_availability (employee_id, wms_email, date, available, note, status, updated_at)
+         VALUES ($1, $2, $3, $4, $5, 'pending', NOW())
          ON CONFLICT (wms_email, date) DO UPDATE SET
-           available=EXCLUDED.available, note=EXCLUDED.note, updated_at=NOW()`,
+           available=EXCLUDED.available, note=EXCLUDED.note,
+           status=CASE WHEN warehouse_availability.available IS DISTINCT FROM EXCLUDED.available
+                       THEN 'pending' ELSE warehouse_availability.status END,
+           updated_at=NOW()`,
         [emp.id, email.toLowerCase(), e.date, Boolean(e.available), (e.note || '').slice(0, 200) || null]);
       saved++;
     }
@@ -11072,7 +11089,7 @@ app.get('/api/roster/calendar', requireAuth, async (req, res) => {
         WHERE status='approved' AND start_date <= $2 AND end_date >= $1`, [start, end]),
       pool.query(`SELECT date, name FROM leave_public_holidays WHERE date >= $1 AND date <= $2`, [start, end]),
       pool.query(`
-        SELECT wms_email, date, available, note FROM warehouse_availability
+        SELECT wms_email, date, available, note, status FROM warehouse_availability
         WHERE date >= $1 AND date <= $2`, [start, end]),
     ]);
 
@@ -11101,9 +11118,8 @@ app.get('/api/roster/calendar', requireAuth, async (req, res) => {
 
       const fullTime = [];
       const leave = [];
-      const casualsIn = [];
-      const casualsOut = [];
-      const casualsUnknown = [];
+      const casualsIn = [];      // approved shifts only
+      let pendingCount = 0;
       for (const s of staff) {
         if (!s.casual) {
           if (!weekday || holiday) continue;
@@ -11112,14 +11128,16 @@ app.get('/api/roster/calendar', requireAuth, async (req, res) => {
         } else {
           if (s.email && onLeave(s.email)) { leave.push(s.name); continue; }
           const row = s.email ? availMap.get(`${s.email}|${ds}`) : null;
-          if (row && row.available) casualsIn.push({ name: s.name, note: row.note || null });
-          else if (row) casualsOut.push(s.name);
-          else casualsUnknown.push(s.name);
+          if (row && row.available && row.status === 'approved') {
+            casualsIn.push({ name: s.name, note: row.note || null });
+          } else if (row && row.available && row.status === 'pending') {
+            pendingCount++;
+          }
         }
       }
       days.push({
         date: ds, dow, holiday,
-        fullTime, casualsIn, casualsOut, casualsUnknown, leave,
+        fullTime, casualsIn, leave, pendingCount,
         headcount: fullTime.length + casualsIn.length,
       });
     }
@@ -11127,6 +11145,67 @@ app.get('/api/roster/calendar', requireAuth, async (req, res) => {
       staff: { fullTime: staff.filter(s => !s.casual).length, casual: staff.filter(s => s.casual).length },
       days,
     });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/roster/requests — pending shift requests awaiting approval
+app.get('/api/roster/requests', requireAuth, requireRosterAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT a.wms_email, a.date, a.note, e.first_name, e.last_name
+      FROM warehouse_availability a
+      JOIN leave_employees e ON LOWER(e.wms_email) = LOWER(a.wms_email)
+      WHERE a.available AND a.status = 'pending' AND a.date >= $1
+        AND e.is_warehouse AND e.is_casual AND e.is_active
+      ORDER BY LOWER(a.wms_email), a.date`, [isoDate(brisbaneToday())]);
+    res.json({
+      requests: rows.map(r => ({
+        email: r.wms_email.toLowerCase(),
+        name: `${r.first_name || ''} ${r.last_name || ''}`.trim(),
+        date: isoDate(new Date(r.date)),
+        note: r.note,
+      })),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/roster/requests/decide — approve or decline shifts for one person
+// Body: { email, dates: ['YYYY-MM-DD', ...], action: 'approve'|'decline' }
+// Approval sends the staff member one email confirming the approved shifts.
+app.post('/api/roster/requests/decide', requireAuth, requireRosterAdmin, async (req, res) => {
+  const { email, action } = req.body;
+  const dates = (Array.isArray(req.body.dates) ? req.body.dates : [])
+    .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(String(d))).slice(0, 62);
+  if (!email || !dates.length || !['approve', 'decline'].includes(action)) {
+    return res.status(400).json({ error: 'email, dates[] and action (approve|decline) required' });
+  }
+  try {
+    const { rows } = await pool.query(`
+      UPDATE warehouse_availability
+      SET status=$1, approved_by=$2, approved_at=NOW()
+      WHERE LOWER(wms_email)=LOWER($3) AND date = ANY($4::date[]) AND available
+      RETURNING date`,
+      [action === 'approve' ? 'approved' : 'declined', req.user.email, email, dates]);
+
+    if (action === 'approve' && rows.length) {
+      const { rows: emps } = await pool.query(
+        `SELECT first_name FROM leave_employees WHERE LOWER(wms_email)=LOWER($1) LIMIT 1`, [email]);
+      const firstName = emps[0]?.first_name || '';
+      const fmt = (d) => new Date(isoDate(new Date(d)) + 'T00:00:00Z')
+        .toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' });
+      const dayList = rows.map(r => fmt(r.date)).join('\n• ');
+      const dayListHtml = rows.map(r => `<li>${fmt(r.date)}</li>`).join('');
+      mailer.sendMail({
+        to: email,
+        subject: `Shifts confirmed — ${rows.length} day${rows.length !== 1 ? 's' : ''} approved`,
+        text: `Hi ${firstName},\n\nYour warehouse shifts have been approved:\n\n• ${dayList}\n\nSee you then!\nThe Self Styler`,
+        html: `<p>Hi ${firstName},</p>
+               <p>Your warehouse shifts have been <b>approved</b>:</p>
+               <ul>${dayListHtml}</ul>
+               <p>See you then!<br>The Self Styler</p>`,
+      }).catch(err => console.error('[roster] Approval email failed:', err.message));
+    }
+    res.json({ updated: rows.length });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

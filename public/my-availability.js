@@ -4,7 +4,20 @@ function escHtml(s) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-let state = {}; // date -> true/false
+let state = {}; // date -> { available: true/false, status: 'pending'|'approved'|'declined' }
+
+function statusBadge(ds) {
+  const v = state[ds];
+  if (!v || v.available !== true) return '';
+  const map = {
+    pending:  ['⏳ Awaiting approval', '#92400e', '#fffbeb', '#fde68a'],
+    approved: ['✓ Approved',          '#15803d', '#dcfce7', '#86efac'],
+    declined: ['✗ Declined',          '#b91c1c', '#fee2e2', '#fca5a5'],
+  };
+  const [label, color, bg, border] = map[v.status] || map.pending;
+  return `<span style="font-size:0.68rem;font-weight:700;border-radius:999px;padding:2px 8px;
+    color:${color};background:${bg};border:1px solid ${border};white-space:nowrap">${label}</span>`;
+}
 
 function addDaysIso(isoStr, n) {
   const d = new Date(isoStr + 'T00:00:00Z');
@@ -34,7 +47,7 @@ async function init() {
     return;
   }
 
-  for (const a of me.availability) state[a.date] = a.available;
+  for (const a of me.availability) state[a.date] = { available: a.available, status: a.status || 'pending' };
 
   // 4 weeks starting from the Monday of the current week (Brisbane)
   const today = me.today;
@@ -48,7 +61,7 @@ async function init() {
       `Week of ${new Date(weekStart + 'T00:00:00Z').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' })}`;
     const missing = [...Array(7)].some((_, i) => {
       const ds = addDaysIso(weekStart, i);
-      return ds >= today && state[ds] === undefined;
+      return ds >= today && !state[ds];
     });
     html += `<div class="av-week">
       <div class="av-week-head"><span>${escHtml(label)}</span>
@@ -63,9 +76,10 @@ async function init() {
       html += `
         <div class="av-day" data-date="${ds}">
           <div class="av-date">${escHtml(dayLabel)} <small>${escHtml(dateLabel)}</small></div>
+          <span id="av-st-${ds}">${statusBadge(ds)}</span>
           <div class="av-btns">
-            <button class="av-btn in${v === true ? ' sel' : ''}" onclick="setDay('${ds}', true, this)">✓ In</button>
-            <button class="av-btn out${v === false ? ' sel' : ''}" onclick="setDay('${ds}', false, this)">✗ Out</button>
+            <button class="av-btn in${v && v.available === true ? ' sel' : ''}" onclick="setDay('${ds}', true, this)">✓ In</button>
+            <button class="av-btn out${v && v.available === false ? ' sel' : ''}" onclick="setDay('${ds}', false, this)">✗ Out</button>
           </div>
         </div>`;
     }
@@ -85,9 +99,16 @@ async function setDay(date, available, btn) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
-    state[date] = available;
+    const prev = state[date];
+    state[date] = {
+      available,
+      // unchanged answers keep their status; any change goes back to pending
+      status: prev && prev.available === available ? prev.status : 'pending',
+    };
     row.querySelector('.av-btn.in').classList.toggle('sel', available === true);
     row.querySelector('.av-btn.out').classList.toggle('sel', available === false);
+    const st = document.getElementById(`av-st-${date}`);
+    if (st) st.innerHTML = statusBadge(date);
   } catch (err) {
     alert(`Could not save: ${err.message}`);
   } finally {

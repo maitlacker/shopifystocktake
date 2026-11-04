@@ -1356,6 +1356,9 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_warehouse_availability_date
       ON warehouse_availability(date);
+    ALTER TABLE warehouse_availability ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending';
+    ALTER TABLE warehouse_availability ADD COLUMN IF NOT EXISTS approved_by TEXT;
+    ALTER TABLE warehouse_availability ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
 
     CREATE TABLE IF NOT EXISTS roster_reminder_log (
       id         SERIAL PRIMARY KEY,

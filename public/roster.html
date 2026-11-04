@@ -47,6 +47,26 @@
     .ro-leave { color: #94a3b8; text-decoration: line-through; }
     .ro-unknown { color: #b45309; }
     .ro-empty { color: #cbd5e1; font-style: italic; }
+    .ro-pending-hint { font-size: 0.68rem; color: #b45309; margin-top: 4px; }
+
+    /* ── Approvals panel (roster admins only) ── */
+    .ro-appr { background: #fff; border: 1.5px solid #fde68a; border-radius: 12px;
+               padding: 14px 16px; margin-bottom: 16px; }
+    .ro-appr h2 { margin: 0 0 10px; font-size: 0.95rem; color: #92400e; }
+    .ro-appr-person { border-top: 1px solid #f1f5f9; padding: 10px 0; }
+    .ro-appr-person:first-of-type { border-top: none; }
+    .ro-appr-name { font-weight: 800; font-size: 0.88rem; color: #1e293b;
+                    display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .ro-appr-days { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
+    .ro-appr-day { display: flex; align-items: center; gap: 6px; border: 1px solid #e2e8f0;
+                   border-radius: 8px; padding: 5px 7px 5px 10px; font-size: 0.8rem;
+                   font-weight: 600; color: #334155; }
+    .ro-appr-day button { border: none; border-radius: 6px; cursor: pointer;
+                          font-weight: 800; padding: 3px 8px; font-size: 0.78rem; }
+    .ro-appr-ok   { background: #dcfce7; color: #15803d; }
+    .ro-appr-no   { background: #fee2e2; color: #b91c1c; }
+    .ro-appr-all  { background: #16a34a; color: #fff; border: none; border-radius: 7px;
+                    padding: 5px 12px; font-weight: 700; font-size: 0.78rem; cursor: pointer; }
     @media (max-width: 760px) {
       .ro-grid { grid-template-columns: 1fr; }
       .ro-dow { display: none; }
@@ -73,11 +93,12 @@
 
     <div class="ro-legend">
       <span><span class="ro-dot" style="background:#16a34a"></span>Full-time</span>
-      <span><span class="ro-dot" style="background:#3b82f6"></span>Casual — available</span>
-      <span><span class="ro-dot" style="background:#f59e0b"></span>Casual — not yet answered</span>
-      <span><span class="ro-dot" style="background:#94a3b8"></span>On leave / unavailable</span>
+      <span><span class="ro-dot" style="background:#3b82f6"></span>Casual — approved shift</span>
+      <span><span class="ro-dot" style="background:#94a3b8"></span>On leave</span>
       <span style="color:#92400e;background:#fef3c7;border-radius:6px;padding:1px 7px;font-weight:700">Public holiday</span>
     </div>
+
+    <div id="ro-approvals"></div>
 
     <div class="ro-grid" id="ro-grid"></div>
   </div>
