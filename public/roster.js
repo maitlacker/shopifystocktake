@@ -35,6 +35,14 @@ function person(name, color, cls) {
     <span class="ro-dot" style="background:${color}"></span>${escHtml(name)}</div>`;
 }
 
+function fmtT(t) {
+  if (!t) return '';
+  const [h, m] = String(t).split(':').map(Number);
+  const ap = h >= 12 ? 'pm' : 'am';
+  const hh = ((h + 11) % 12) + 1;
+  return m ? `${hh}:${String(m).padStart(2, '0')}${ap}` : `${hh}${ap}`;
+}
+
 async function load() {
   const first = new Date(Date.UTC(viewYear, viewMonth, 1));
   const last = new Date(Date.UTC(viewYear, viewMonth + 1, 0));
@@ -76,8 +84,10 @@ async function load() {
     let body = '';
     if (day.holiday) body += `<div class="ro-holiday">🎉 ${escHtml(day.holiday)}</div>`;
     body += (day.fullTime || []).map(n => person(n, '#16a34a')).join('');
-    body += (day.casualsIn || []).map(c =>
-      person(c.name + (c.note ? ` — ${c.note}` : ''), '#3b82f6')).join('');
+    body += (day.casualsIn || []).map(c => {
+      const times = c.start && c.end ? ` ${fmtT(c.start)}–${fmtT(c.end)}` : '';
+      return person(c.name + times + (c.note ? ` — ${c.note}` : ''), '#3b82f6');
+    }).join('');
     if ((day.leave || []).length) {
       body += `<div class="ro-sec">` +
         day.leave.map(n => person(n + ' (leave)', '#94a3b8', 'ro-leave')).join('') + '</div>';
@@ -126,11 +136,15 @@ async function loadRequests() {
           </div>
           <div class="ro-appr-days">
             ${p.days.map(d => `
-              <span class="ro-appr-day">
+              <span class="ro-appr-day" data-email="${escHtml(p.email)}" data-date="${escHtml(d.date)}">
                 ${escHtml(new Date(d.date + 'T00:00:00Z').toLocaleDateString('en-AU',
                   { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }))}
+                <input type="time" class="ap-s" value="${escHtml(d.start || '09:00')}"
+                  style="border:1px solid #e2e8f0;border-radius:6px;padding:2px 4px;font-size:0.75rem" />–
+                <input type="time" class="ap-e" value="${escHtml(d.end || '17:00')}"
+                  style="border:1px solid #e2e8f0;border-radius:6px;padding:2px 4px;font-size:0.75rem" />
                 ${d.note ? `<span style="color:#94a3b8;font-weight:500">· ${escHtml(d.note)}</span>` : ''}
-                <button class="ro-appr-ok" title="Approve"
+                <button class="ro-appr-ok" title="Approve with these times"
                   onclick='decide(${JSON.stringify(p.email)}, ${JSON.stringify([d.date])}, "approve")'>✓</button>
                 <button class="ro-appr-no" title="Decline"
                   onclick='decide(${JSON.stringify(p.email)}, ${JSON.stringify([d.date])}, "decline")'>✕</button>
@@ -142,11 +156,21 @@ async function loadRequests() {
 }
 
 async function decide(email, dates, action) {
+  // Pick up the (possibly adjusted) times from each day's chip
+  const entries = dates.map(date => {
+    const chip = [...document.querySelectorAll('.ro-appr-day')]
+      .find(el => el.dataset.email === email && el.dataset.date === date);
+    return {
+      date,
+      start_time: chip?.querySelector('.ap-s')?.value || null,
+      end_time: chip?.querySelector('.ap-e')?.value || null,
+    };
+  });
   try {
     const res = await fetch('/api/roster/requests/decide', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, dates, action }),
+      body: JSON.stringify({ email, entries, action }),
     });
     const out = await res.json();
     if (!res.ok) throw new Error(out.error);

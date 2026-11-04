@@ -47,7 +47,10 @@ async function init() {
     return;
   }
 
-  for (const a of me.availability) state[a.date] = { available: a.available, status: a.status || 'pending' };
+  for (const a of me.availability) {
+    state[a.date] = { available: a.available, status: a.status || 'pending',
+                      start: a.start || '09:00', end: a.end || '17:00' };
+  }
 
   // 4 weeks starting from the Monday of the current week (Brisbane)
   const today = me.today;
@@ -77,6 +80,11 @@ async function init() {
         <div class="av-day" data-date="${ds}">
           <div class="av-date">${escHtml(dayLabel)} <small>${escHtml(dateLabel)}</small></div>
           <span id="av-st-${ds}">${statusBadge(ds)}</span>
+          <span class="av-timewrap" id="av-tm-${ds}" style="${v && v.available === true ? '' : 'display:none'}">
+            <input type="time" class="av-time" id="av-s-${ds}" value="${escHtml((v && v.start) || '09:00')}"
+              onchange="timesChanged('${ds}')" />–<input type="time" class="av-time" id="av-e-${ds}"
+              value="${escHtml((v && v.end) || '17:00')}" onchange="timesChanged('${ds}')" />
+          </span>
           <div class="av-btns">
             <button class="av-btn in${v && v.available === true ? ' sel' : ''}" onclick="setDay('${ds}', true, this)">✓ In</button>
             <button class="av-btn out${v && v.available === false ? ' sel' : ''}" onclick="setDay('${ds}', false, this)">✗ Out</button>
@@ -88,25 +96,29 @@ async function init() {
   box.innerHTML = html;
 }
 
-async function setDay(date, available, btn) {
-  const row = btn.closest('.av-day');
+async function saveEntry(date, available, row) {
   row.querySelectorAll('.av-btn').forEach(b => b.classList.add('saving'));
+  const start = document.getElementById(`av-s-${date}`)?.value || '09:00';
+  const end   = document.getElementById(`av-e-${date}`)?.value || '17:00';
   try {
     const res = await fetch('/api/roster/availability', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ entries: [{ date, available }] }),
+      body: JSON.stringify({ entries: [{ date, available, start_time: start, end_time: end }] }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
     const prev = state[date];
     state[date] = {
-      available,
-      // unchanged answers keep their status; any change goes back to pending
-      status: prev && prev.available === available ? prev.status : 'pending',
+      available, start, end,
+      // identical re-submits keep their status; any change goes back to pending
+      status: prev && prev.available === available && prev.start === start && prev.end === end
+        ? prev.status : 'pending',
     };
     row.querySelector('.av-btn.in').classList.toggle('sel', available === true);
     row.querySelector('.av-btn.out').classList.toggle('sel', available === false);
+    const tm = document.getElementById(`av-tm-${date}`);
+    if (tm) tm.style.display = available === true ? '' : 'none';
     const st = document.getElementById(`av-st-${date}`);
     if (st) st.innerHTML = statusBadge(date);
   } catch (err) {
@@ -114,6 +126,21 @@ async function setDay(date, available, btn) {
   } finally {
     row.querySelectorAll('.av-btn').forEach(b => b.classList.remove('saving'));
   }
+}
+
+function setDay(date, available, btn) {
+  return saveEntry(date, available, btn.closest('.av-day'));
+}
+
+function timesChanged(date) {
+  const row = document.querySelector(`.av-day[data-date="${date}"]`);
+  const s = document.getElementById(`av-s-${date}`);
+  const e = document.getElementById(`av-e-${date}`);
+  if (s && e && s.value && e.value && s.value >= e.value) {
+    alert('End time must be after start time');
+    return;
+  }
+  if (row && state[date] && state[date].available === true) saveEntry(date, true, row);
 }
 
 init();

@@ -1359,6 +1359,8 @@ async function initDb() {
     ALTER TABLE warehouse_availability ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending';
     ALTER TABLE warehouse_availability ADD COLUMN IF NOT EXISTS approved_by TEXT;
     ALTER TABLE warehouse_availability ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+    ALTER TABLE warehouse_availability ADD COLUMN IF NOT EXISTS start_time TIME;
+    ALTER TABLE warehouse_availability ADD COLUMN IF NOT EXISTS end_time TIME;
 
     CREATE TABLE IF NOT EXISTS roster_reminder_log (
       id         SERIAL PRIMARY KEY,
