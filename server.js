@@ -11334,42 +11334,55 @@ app.post('/api/roster/slack-post', requireAuth, requireRosterAdmin, async (req, 
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Email reminders: Wed + Fri 9am Brisbane (23:00 UTC Tue/Thu) — casuals who
-// haven't filled in all of next week's availability yet.
-async function sendRosterReminders(kind) {
+// Daily email reminders (9am Brisbane) — casual warehouse staff who still
+// have unanswered days for NEXT week get nudged every day until every day
+// is answered (In or Out). One email per person per day, restart-safe via
+// roster_reminder_log (kind = the Brisbane date of the send).
+async function sendRosterReminders() {
   const { rows: casuals } = await pool.query(`
     SELECT id, first_name, wms_email FROM leave_employees
     WHERE is_warehouse AND is_casual AND is_active AND wms_email IS NOT NULL`);
   if (!casuals.length) return;
-  const weekStart = nextWeekMonday(brisbaneToday());
+  const today = brisbaneToday();
+  const weekStart = nextWeekMonday(today);
   const weekEnd = addDays(weekStart, 6);
   const appUrl = process.env.APP_URL || 'https://tss-wms.up.railway.app';
+  const sendDay = isoDate(today);
 
   for (const c of casuals) {
     try {
-      const { rows } = await pool.query(
-        `SELECT COUNT(*)::int AS n FROM warehouse_availability
+      const { rows: have } = await pool.query(
+        `SELECT date FROM warehouse_availability
          WHERE LOWER(wms_email)=LOWER($1) AND date >= $2 AND date <= $3`,
         [c.wms_email, isoDate(weekStart), isoDate(weekEnd)]);
-      if (rows[0].n >= 7) continue;
+      const answered = new Set(have.map(r => isoDate(new Date(r.date))));
+      const missing = [];
+      for (let i = 0; i < 7; i++) {
+        const d = addDays(weekStart, i);
+        if (!answered.has(isoDate(d))) {
+          missing.push(d.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' }));
+        }
+      }
+      if (!missing.length) continue; // next week fully answered — no nag
 
       const { rowCount } = await pool.query(
         `INSERT INTO roster_reminder_log (wms_email, week_start, kind)
          VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-        [c.wms_email.toLowerCase(), isoDate(weekStart), kind]);
-      if (!rowCount) continue; // already reminded this week for this kind
+        [c.wms_email.toLowerCase(), isoDate(weekStart), sendDay]);
+      if (!rowCount) continue; // already reminded today
 
       const pretty = weekStart.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' });
       await mailer.sendMail({
         to: c.wms_email,
-        subject: `Warehouse availability needed — week starting ${pretty}`,
-        text: `Hi ${c.first_name || ''},\n\nPlease log which days you're available to work in the warehouse next week (starting ${pretty}).\n\nIt takes 30 seconds: ${appUrl}/my-availability.html\n\nThanks!\nThe Self Styler WMS`,
+        subject: `Warehouse availability needed — ${missing.length} day${missing.length !== 1 ? 's' : ''} unanswered for next week`,
+        text: `Hi ${c.first_name || ''},\n\nYou still have ${missing.length} day${missing.length !== 1 ? 's' : ''} unanswered for next week (starting ${pretty}):\n\n• ${missing.join('\n• ')}\n\nPlease tap In or Out for each day — even if you can't work, marking it Out completes the roster and stops these reminders.\n\n${appUrl}/my-availability.html\n\nThanks!\nThe Self Styler WMS`,
         html: `<p>Hi ${c.first_name || ''},</p>
-               <p>Please log which days you're available to work in the warehouse next week (starting <b>${pretty}</b>).</p>
+               <p>You still have <b>${missing.length} day${missing.length !== 1 ? 's' : ''}</b> unanswered for next week (starting <b>${pretty}</b>):</p>
+               <ul>${missing.map(m => `<li>${m}</li>`).join('')}</ul>
                <p><a href="${appUrl}/my-availability.html" style="background:#6366f1;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">Set my availability</a></p>
-               <p style="color:#64748b;font-size:0.85em">It takes 30 seconds — tap each day you can work.</p>`,
+               <p style="color:#64748b;font-size:0.85em">Tap In or Out for each day — even if you can't work, marking it Out completes the roster and stops these reminders.</p>`,
       });
-      console.log(`[roster] Reminder (${kind}) sent to ${c.wms_email}`);
+      console.log(`[roster] Daily reminder sent to ${c.wms_email} (${missing.length} days missing)`);
     } catch (err) {
       console.error(`[roster] Reminder to ${c.wms_email} failed:`, err.message);
     }
@@ -11759,11 +11772,10 @@ initDb()
       catch (err) { console.error('[leave] New-year holiday sync failed:', err.message); }
     });
 
-    // Roster availability reminders — Wed & Fri 9am Brisbane
-    cron.schedule('0 23 * * 2', () => sendRosterReminders('wed').catch(err =>
-      console.error('[roster] Wed reminder run failed:', err.message)));
-    cron.schedule('0 23 * * 4', () => sendRosterReminders('fri').catch(err =>
-      console.error('[roster] Fri reminder run failed:', err.message)));
+    // Roster availability reminders — every day 9am Brisbane (23:00 UTC)
+    // until each casual has answered every day of the following week
+    cron.schedule('0 23 * * *', () => sendRosterReminders().catch(err =>
+      console.error('[roster] Daily reminder run failed:', err.message)));
 
     // Weekly casual roster to Slack — Monday 7:30am Brisbane (Sun 21:30 UTC)
     cron.schedule('30 21 * * 0', () => postCasualRosterToSlack().catch(err =>
