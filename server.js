@@ -11247,6 +11247,93 @@ app.post('/api/roster/requests/decide', requireAuth, requireRosterAdmin, async (
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Weekly Slack post: Monday 7:30am Brisbane — approved casual shifts
+// (days + start/end times) for the week ahead.
+// ROSTER_SLACK_WEBHOOK_URL routes it to a dedicated channel; falls back
+// to the shared SLACK_WEBHOOK_URL.
+function rosterFmtTime(t) {
+  if (!t) return '';
+  const [h, m] = String(t).slice(0, 5).split(':').map(Number);
+  const ap = h >= 12 ? 'pm' : 'am';
+  const hh = ((h + 11) % 12) + 1;
+  return m ? `${hh}:${String(m).padStart(2, '0')}${ap}` : `${hh}${ap}`;
+}
+
+async function postCasualRosterToSlack() {
+  const webhook = (process.env.ROSTER_SLACK_WEBHOOK_URL || process.env.SLACK_WEBHOOK_URL || '')
+    .trim().replace(/^["']|["']$/g, '');
+  if (!webhook || !webhook.startsWith('https://')) {
+    console.warn('[roster] No Slack webhook configured — skipping weekly roster post');
+    return { posted: false, reason: 'No Slack webhook configured' };
+  }
+
+  // Week of the upcoming Monday — when run on a Monday, that same day
+  const today = brisbaneToday();
+  const weekStart = today.getUTCDay() === 1 ? today : nextWeekMonday(today);
+  const weekEnd = addDays(weekStart, 6);
+
+  const [shiftsQ, pendingQ] = await Promise.all([
+    pool.query(`
+      SELECT a.date, a.start_time, a.end_time, e.first_name, e.last_name
+      FROM warehouse_availability a
+      JOIN leave_employees e ON LOWER(e.wms_email) = LOWER(a.wms_email)
+      WHERE a.available AND a.status = 'approved' AND a.date >= $1 AND a.date <= $2
+        AND e.is_warehouse AND e.is_casual AND e.is_active
+      ORDER BY a.date, e.first_name`, [isoDate(weekStart), isoDate(weekEnd)]),
+    pool.query(`
+      SELECT COUNT(*)::int AS n
+      FROM warehouse_availability a
+      JOIN leave_employees e ON LOWER(e.wms_email) = LOWER(a.wms_email)
+      WHERE a.available AND a.status = 'pending' AND a.date >= $1 AND a.date <= $2
+        AND e.is_warehouse AND e.is_casual AND e.is_active`,
+      [isoDate(weekStart), isoDate(weekEnd)]),
+  ]);
+
+  const byDate = new Map();
+  for (const r of shiftsQ.rows) {
+    const ds = isoDate(new Date(r.date));
+    if (!byDate.has(ds)) byDate.set(ds, []);
+    const times = r.start_time && r.end_time
+      ? ` ${rosterFmtTime(r.start_time)}–${rosterFmtTime(r.end_time)}` : '';
+    byDate.set(ds, byDate.get(ds).concat(`${(r.first_name || '').trim()} ${(r.last_name || '').trim()}`.trim() + times));
+  }
+
+  const dayLines = [];
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(weekStart, i);
+    const ds = isoDate(d);
+    const label = d.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' });
+    const names = byDate.get(ds);
+    if (names) dayLines.push(`*${label}* — ${names.join(', ')}`);
+    else if (i < 5) dayLines.push(`*${label}* — _no casual staff_`);
+    // weekend days with no shifts are left out
+  }
+
+  const weekLabel = weekStart.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', timeZone: 'UTC' });
+  const appUrl = process.env.APP_URL || 'https://tss-wms.up.railway.app';
+  let text = `:calendar: *Casual warehouse roster — week of ${weekLabel}*\n${dayLines.join('\n')}`;
+  if (pendingQ.rows[0].n > 0) {
+    text += `\n:warning: ${pendingQ.rows[0].n} shift request${pendingQ.rows[0].n !== 1 ? 's' : ''} for this week still awaiting approval — <${appUrl}/roster.html|approve now>`;
+  }
+  text += `\n<${appUrl}/roster.html|Full roster calendar>`;
+
+  const r = await fetch(webhook, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  if (!r.ok) throw new Error(`Slack webhook error ${r.status}: ${await r.text()}`);
+  console.log(`[roster] Weekly casual roster posted to Slack (${shiftsQ.rows.length} shifts)`);
+  return { posted: true, shifts: shiftsQ.rows.length };
+}
+
+// POST /api/roster/slack-post — post the weekly roster to Slack right now
+// (for testing / re-posting after late approvals)
+app.post('/api/roster/slack-post', requireAuth, requireRosterAdmin, async (req, res) => {
+  try { res.json(await postCasualRosterToSlack()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Email reminders: Wed + Fri 9am Brisbane (23:00 UTC Tue/Thu) — casuals who
 // haven't filled in all of next week's availability yet.
 async function sendRosterReminders(kind) {
@@ -11677,6 +11764,10 @@ initDb()
       console.error('[roster] Wed reminder run failed:', err.message)));
     cron.schedule('0 23 * * 4', () => sendRosterReminders('fri').catch(err =>
       console.error('[roster] Fri reminder run failed:', err.message)));
+
+    // Weekly casual roster to Slack — Monday 7:30am Brisbane (Sun 21:30 UTC)
+    cron.schedule('30 21 * * 0', () => postCasualRosterToSlack().catch(err =>
+      console.error('[roster] Weekly Slack post failed:', err.message)));
 
     // Recalculate margin tiers nightly at 02:00
     cron.schedule('0 2 * * *', async () => {

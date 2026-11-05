@@ -116,6 +116,8 @@ async function loadRequests() {
     const res = await fetch('/api/roster/requests');
     if (!res.ok) { isRosterAdmin = false; box.innerHTML = ''; return; }
     isRosterAdmin = true;
+    const slackBtn = document.getElementById('ro-slack-btn');
+    if (slackBtn) slackBtn.style.display = '';
     const { requests } = await res.json();
     if (!requests.length) { box.innerHTML = ''; return; }
 
@@ -177,6 +179,21 @@ async function decide(email, dates, action) {
     await Promise.all([loadRequests(), load()]);
   } catch (err) {
     alert(`Failed: ${err.message}`);
+  }
+}
+
+async function postToSlack(btn) {
+  if (!confirm('Post this week\'s casual roster to Slack now?')) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/roster/slack-post', { method: 'POST' });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error);
+    alert(out.posted ? `Posted ✓ (${out.shifts} shifts)` : `Not posted: ${out.reason}`);
+  } catch (err) {
+    alert(`Failed: ${err.message}`);
+  } finally {
+    btn.disabled = false;
   }
 }
 
