@@ -8,6 +8,10 @@ const AISLE_COLORS = [
   '#6366f1','#22c55e','#f97316','#ef4444',
   '#0ea5e9','#8b5cf6','#14b8a6','#f59e0b',
 ];
+const AISLE_COLOR_NAMES = [
+  'Blue','Green','Orange','Red',
+  'Sky','Purple','Teal','Yellow',
+];
 
 // ── Default room polygon (from RoomScan Pro, metres) ──────────────────────
 const DEFAULT_WALLS = [
@@ -947,15 +951,83 @@ function updateUI() {
 function populateLegend() {
   const el=document.getElementById('wm-aisle-legend');
   if (!el) return;
-  el.innerHTML=AISLE_COLORS.slice(0,5).map((c,i)=>
+  el.innerHTML=AISLE_COLORS.map((c,i)=>
     `<div class="wm-legend-item">
        <div class="wm-legend-swatch" style="background:${c}"></div>
-       <span>Aisle ${i+1}</span>
+       <span>Aisle ${i+1} — ${AISLE_COLOR_NAMES[i]}</span>
      </div>`).join('')+
     `<div class="wm-legend-item">
        <div class="wm-legend-swatch" style="background:#94a3b8"></div>
        <span>Unassigned</span>
      </div>`;
+}
+
+// ── Colour by walking aisle ────────────────────────────────────────────────
+// Groups shelves so the two rows FACING each walking corridor share a
+// colour: cluster vertical shelves into columns, merge back-to-back
+// columns into structures, then left row of a structure takes the
+// corridor on its left, right row the corridor on its right. Horizontal
+// (back-wall) shelves become their own group.
+function colourByAisle() {
+  const vert = layout.shelves.filter(s => s.rot === 90);
+  if (!vert.length) { alert('No vertical shelves to colour.'); return; }
+  pushHistory();
+
+  // 1. cluster x positions into columns (hand-edit jitter tolerated)
+  const xs = vert.map(s => s.x).sort((a, b) => a - b);
+  const colXs = [];
+  for (const x of xs) {
+    if (!colXs.length || x - colXs[colXs.length - 1].max > 0.3) {
+      colXs.push({ min: x, max: x });
+    } else {
+      colXs[colXs.length - 1].max = x;
+    }
+  }
+  const columns = colXs.map(c => (c.min + c.max) / 2);
+
+  // 2. merge columns into structures: back-to-back when the gap between
+  //    one column's back and the next column is smaller than a walkway
+  const structures = [];
+  for (let i = 0; i < columns.length; i++) {
+    const last = structures[structures.length - 1];
+    if (last && columns[i] - (last[last.length - 1] + SHELF_D) < 0.45) last.push(columns[i]);
+    else structures.push([columns[i]]);
+  }
+
+  // 3. corridor index per column: corridor i sits LEFT of structure i
+  const corridorOfColumn = new Map();
+  structures.forEach((cols, si) => {
+    cols.forEach((cx, ci) => {
+      let corridor;
+      if (cols.length === 1) {
+        // single row: faces away from the nearest wall
+        corridor = si === 0 ? si + 1 : si === structures.length - 1 ? si : si + 1;
+      } else {
+        corridor = ci === 0 ? si : si + 1; // left row ← corridor, right row → corridor
+      }
+      corridorOfColumn.set(cx, corridor);
+    });
+  });
+
+  // normalise corridors so colours start at 0
+  const used = [...new Set([...corridorOfColumn.values()])].sort((a, b) => a - b);
+  const aisleOf = new Map(used.map((c, i) => [c, i]));
+
+  for (const s of vert) {
+    let best = columns[0];
+    for (const cx of columns) if (Math.abs(s.x - cx) < Math.abs(s.x - best)) best = cx;
+    s.aisle = aisleOf.get(corridorOfColumn.get(best)) % AISLE_COLORS.length;
+  }
+  // horizontal shelves (back-wall run) get their own group
+  const hAisle = used.length % AISLE_COLORS.length;
+  for (const s of layout.shelves) if (s.rot !== 90) s.aisle = hAisle;
+
+  draw();
+  updateUI();
+  alert(`Coloured ${used.length} walking aisle${used.length !== 1 ? 's' : ''} ` +
+        `(${used.map((_, i) => AISLE_COLOR_NAMES[i % AISLE_COLOR_NAMES.length]).join(', ')})` +
+        `${layout.shelves.some(s => s.rot !== 90) ? ` + back wall = ${AISLE_COLOR_NAMES[hAisle]}` : ''}.\n\n` +
+        'Check the map, then Save Layout to keep it.');
 }
 
 function zoomIn()  { zoom=Math.min(zoom*1.2,300); draw(); }
