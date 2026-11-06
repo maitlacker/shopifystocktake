@@ -90,6 +90,8 @@
         <button onclick="goToday()">Today</button>
         <button id="ro-slack-btn" style="display:none" title="Post this week's casual roster to Slack now"
           onclick="postToSlack(this)">📣 Post to Slack</button>
+        <button id="ro-remlog-btn" style="display:none" title="History of availability reminder emails"
+          onclick="toggleReminderLog()">📧 Reminders</button>
       </div>
     </div>
 
@@ -100,6 +102,7 @@
       <span style="color:#92400e;background:#fef3c7;border-radius:6px;padding:1px 7px;font-weight:700">Public holiday</span>
     </div>
 
+    <div id="ro-remlog" style="display:none"></div>
     <div id="ro-approvals"></div>
 
     <div class="ro-grid" id="ro-grid"></div>

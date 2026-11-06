@@ -11247,6 +11247,29 @@ app.post('/api/roster/requests/decide', requireAuth, requireRosterAdmin, async (
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET /api/roster/reminder-log — recent reminder emails (roster admins)
+app.get('/api/roster/reminder-log', requireAuth, requireRosterAdmin, async (req, res) => {
+  const days = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 365);
+  try {
+    const { rows } = await pool.query(`
+      SELECT r.wms_email, r.week_start, r.sent_at,
+             e.first_name, e.last_name
+      FROM roster_reminder_log r
+      LEFT JOIN leave_employees e ON LOWER(e.wms_email) = LOWER(r.wms_email)
+      WHERE r.sent_at >= NOW() - ($1::int || ' days')::interval
+      ORDER BY r.sent_at DESC
+      LIMIT 300`, [days]);
+    res.json({
+      reminders: rows.map(r => ({
+        email: r.wms_email,
+        name: `${r.first_name || ''} ${r.last_name || ''}`.trim() || r.wms_email,
+        weekStart: isoDate(new Date(r.week_start)),
+        sentAt: r.sent_at,
+      })),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Weekly Slack post: Monday 7:30am Brisbane — approved casual shifts
 // (days + start/end times) for the week ahead.
 // ROSTER_SLACK_WEBHOOK_URL routes it to a dedicated channel; falls back

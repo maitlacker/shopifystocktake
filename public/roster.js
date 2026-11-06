@@ -118,6 +118,8 @@ async function loadRequests() {
     isRosterAdmin = true;
     const slackBtn = document.getElementById('ro-slack-btn');
     if (slackBtn) slackBtn.style.display = '';
+    const remBtn = document.getElementById('ro-remlog-btn');
+    if (remBtn) remBtn.style.display = '';
     const { requests } = await res.json();
     if (!requests.length) { box.innerHTML = ''; return; }
 
@@ -179,6 +181,45 @@ async function decide(email, dates, action) {
     await Promise.all([loadRequests(), load()]);
   } catch (err) {
     alert(`Failed: ${err.message}`);
+  }
+}
+
+// ── Reminder email history (roster admins) ──────────────────────────
+async function toggleReminderLog() {
+  const box = document.getElementById('ro-remlog');
+  if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+  box.style.display = '';
+  box.innerHTML = '<div class="ro-appr" style="border-color:#e2e8f0"><p style="color:#64748b;margin:0">Loading reminder history…</p></div>';
+  try {
+    const res = await fetch('/api/roster/reminder-log?days=60');
+    const { reminders } = await res.json();
+    if (!res.ok) throw new Error('Failed to load');
+    if (!reminders.length) {
+      box.innerHTML = '<div class="ro-appr" style="border-color:#e2e8f0"><p style="color:#64748b;margin:0">No reminder emails sent in the last 60 days.</p></div>';
+      return;
+    }
+    // Most recent first, grouped by send day
+    const byDay = new Map();
+    for (const r of reminders) {
+      const day = new Date(r.sentAt).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+      if (!byDay.has(day)) byDay.set(day, []);
+      byDay.get(day).push(r);
+    }
+    box.innerHTML = `<div class="ro-appr" style="border-color:#e2e8f0">
+      <h2 style="color:#334155">📧 Availability reminder emails — last 60 days (${reminders.length})</h2>
+      ${[...byDay.entries()].map(([day, rows]) => `
+        <div class="ro-appr-person">
+          <div class="ro-appr-name" style="color:#475569">${escHtml(day)}
+            <span style="font-weight:600;color:#94a3b8;font-size:0.76rem">${rows.length} email${rows.length !== 1 ? 's' : ''}</span></div>
+          <div style="margin-top:5px;font-size:0.8rem;color:#334155;line-height:1.7">
+            ${rows.map(r => `${escHtml(r.name)}
+              <span style="color:#94a3b8">(${escHtml(new Date(r.sentAt).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }))},
+              for week of ${escHtml(new Date(r.weekStart + 'T00:00:00Z').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' }))})</span>`).join(' · ')}
+          </div>
+        </div>`).join('')}
+    </div>`;
+  } catch (err) {
+    box.innerHTML = `<div class="ro-appr"><p style="color:#b91c1c;margin:0">Error: ${escHtml(err.message)}</p></div>`;
   }
 }
 
