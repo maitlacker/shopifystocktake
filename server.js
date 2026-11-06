@@ -11361,56 +11361,102 @@ app.post('/api/roster/slack-post', requireAuth, requireRosterAdmin, async (req, 
 // have unanswered days for NEXT week get nudged every day until every day
 // is answered (In or Out). One email per person per day, restart-safe via
 // roster_reminder_log (kind = the Brisbane date of the send).
+
+async function missingDaysNextWeek(email) {
+  const weekStart = nextWeekMonday(brisbaneToday());
+  const weekEnd = addDays(weekStart, 6);
+  const { rows: have } = await pool.query(
+    `SELECT date FROM warehouse_availability
+     WHERE LOWER(wms_email)=LOWER($1) AND date >= $2 AND date <= $3`,
+    [email, isoDate(weekStart), isoDate(weekEnd)]);
+  const answered = new Set(have.map(r => isoDate(new Date(r.date))));
+  const missing = [];
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(weekStart, i);
+    if (!answered.has(isoDate(d))) {
+      missing.push(d.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' }));
+    }
+  }
+  return { weekStart, missing };
+}
+
+// Send one availability-reminder email. `dedupeKind` set (e.g. the send
+// date) enforces one-per-kind-per-week; null = manual resend, always sends.
+async function sendAvailabilityReminder(casual, dedupeKind) {
+  const { weekStart, missing } = await missingDaysNextWeek(casual.wms_email);
+  if (!missing.length) return { sent: false, reason: 'Next week is fully answered' };
+
+  const kind = dedupeKind || `manual-${Date.now()}`;
+  const { rowCount } = await pool.query(
+    `INSERT INTO roster_reminder_log (wms_email, week_start, kind)
+     VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+    [casual.wms_email.toLowerCase(), isoDate(weekStart), kind]);
+  if (!rowCount) return { sent: false, reason: 'Already reminded today' };
+
+  const appUrl = process.env.APP_URL || 'https://tss-wms.up.railway.app';
+  const pretty = weekStart.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+  await mailer.sendMail({
+    to: casual.wms_email,
+    subject: `Warehouse availability needed — ${missing.length} day${missing.length !== 1 ? 's' : ''} unanswered for next week`,
+    text: `Hi ${casual.first_name || ''},\n\nYou still have ${missing.length} day${missing.length !== 1 ? 's' : ''} unanswered for next week (starting ${pretty}):\n\n• ${missing.join('\n• ')}\n\nPlease tap In or Out for each day — even if you can't work, marking it Out completes the roster and stops these reminders.\n\n${appUrl}/my-availability.html\n\nThanks!\nThe Self Styler WMS`,
+    html: `<p>Hi ${casual.first_name || ''},</p>
+           <p>You still have <b>${missing.length} day${missing.length !== 1 ? 's' : ''}</b> unanswered for next week (starting <b>${pretty}</b>):</p>
+           <ul>${missing.map(m => `<li>${m}</li>`).join('')}</ul>
+           <p><a href="${appUrl}/my-availability.html" style="background:#6366f1;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">Set my availability</a></p>
+           <p style="color:#64748b;font-size:0.85em">Tap In or Out for each day — even if you can't work, marking it Out completes the roster and stops these reminders.</p>`,
+  });
+  console.log(`[roster] Reminder sent to ${casual.wms_email} (${missing.length} days missing, kind=${kind})`);
+  return { sent: true, missingDays: missing.length };
+}
+
 async function sendRosterReminders() {
   const { rows: casuals } = await pool.query(`
     SELECT id, first_name, wms_email FROM leave_employees
     WHERE is_warehouse AND is_casual AND is_active AND wms_email IS NOT NULL`);
-  if (!casuals.length) return;
-  const today = brisbaneToday();
-  const weekStart = nextWeekMonday(today);
-  const weekEnd = addDays(weekStart, 6);
-  const appUrl = process.env.APP_URL || 'https://tss-wms.up.railway.app';
-  const sendDay = isoDate(today);
-
+  const sendDay = isoDate(brisbaneToday());
   for (const c of casuals) {
-    try {
-      const { rows: have } = await pool.query(
-        `SELECT date FROM warehouse_availability
-         WHERE LOWER(wms_email)=LOWER($1) AND date >= $2 AND date <= $3`,
-        [c.wms_email, isoDate(weekStart), isoDate(weekEnd)]);
-      const answered = new Set(have.map(r => isoDate(new Date(r.date))));
-      const missing = [];
-      for (let i = 0; i < 7; i++) {
-        const d = addDays(weekStart, i);
-        if (!answered.has(isoDate(d))) {
-          missing.push(d.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' }));
-        }
-      }
-      if (!missing.length) continue; // next week fully answered — no nag
-
-      const { rowCount } = await pool.query(
-        `INSERT INTO roster_reminder_log (wms_email, week_start, kind)
-         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-        [c.wms_email.toLowerCase(), isoDate(weekStart), sendDay]);
-      if (!rowCount) continue; // already reminded today
-
-      const pretty = weekStart.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' });
-      await mailer.sendMail({
-        to: c.wms_email,
-        subject: `Warehouse availability needed — ${missing.length} day${missing.length !== 1 ? 's' : ''} unanswered for next week`,
-        text: `Hi ${c.first_name || ''},\n\nYou still have ${missing.length} day${missing.length !== 1 ? 's' : ''} unanswered for next week (starting ${pretty}):\n\n• ${missing.join('\n• ')}\n\nPlease tap In or Out for each day — even if you can't work, marking it Out completes the roster and stops these reminders.\n\n${appUrl}/my-availability.html\n\nThanks!\nThe Self Styler WMS`,
-        html: `<p>Hi ${c.first_name || ''},</p>
-               <p>You still have <b>${missing.length} day${missing.length !== 1 ? 's' : ''}</b> unanswered for next week (starting <b>${pretty}</b>):</p>
-               <ul>${missing.map(m => `<li>${m}</li>`).join('')}</ul>
-               <p><a href="${appUrl}/my-availability.html" style="background:#6366f1;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">Set my availability</a></p>
-               <p style="color:#64748b;font-size:0.85em">Tap In or Out for each day — even if you can't work, marking it Out completes the roster and stops these reminders.</p>`,
-      });
-      console.log(`[roster] Daily reminder sent to ${c.wms_email} (${missing.length} days missing)`);
-    } catch (err) {
-      console.error(`[roster] Reminder to ${c.wms_email} failed:`, err.message);
-    }
+    try { await sendAvailabilityReminder(c, sendDay); }
+    catch (err) { console.error(`[roster] Reminder to ${c.wms_email} failed:`, err.message); }
   }
 }
+
+// GET /api/roster/reminders/status — per-casual: missing days + last reminder
+app.get('/api/roster/reminders/status', requireAuth, requireRosterAdmin, async (req, res) => {
+  try {
+    const { rows: casuals } = await pool.query(`
+      SELECT e.first_name, e.last_name, e.wms_email,
+             (SELECT MAX(r.sent_at) FROM roster_reminder_log r
+              WHERE LOWER(r.wms_email)=LOWER(e.wms_email)) AS last_reminded
+      FROM leave_employees e
+      WHERE e.is_warehouse AND e.is_casual AND e.is_active AND e.wms_email IS NOT NULL
+      ORDER BY e.first_name, e.last_name`);
+    const out = [];
+    for (const c of casuals) {
+      const { missing } = await missingDaysNextWeek(c.wms_email);
+      out.push({
+        email: c.wms_email.toLowerCase(),
+        name: `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.wms_email,
+        missingDays: missing.length,
+        lastReminded: c.last_reminded,
+      });
+    }
+    res.json({ casuals: out });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/roster/reminders/resend — send a reminder to one casual right now
+app.post('/api/roster/reminders/resend', requireAuth, requireRosterAdmin, async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'email required' });
+  try {
+    const { rows } = await pool.query(`
+      SELECT first_name, wms_email FROM leave_employees
+      WHERE LOWER(wms_email)=LOWER($1) AND is_warehouse AND is_casual AND is_active LIMIT 1`, [email]);
+    if (!rows.length) return res.status(404).json({ error: 'No active casual warehouse staff member with that email' });
+    const result = await sendAvailabilityReminder(rows[0], null);
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // ── Ecommerce Studio: Product Metafields ───────────────────────────
 // Mirror of Shopify product metafields + reporting on missing data and

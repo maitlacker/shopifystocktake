@@ -191,11 +191,32 @@ async function toggleReminderLog() {
   box.style.display = '';
   box.innerHTML = '<div class="ro-appr" style="border-color:#e2e8f0"><p style="color:#64748b;margin:0">Loading reminder history…</p></div>';
   try {
-    const res = await fetch('/api/roster/reminder-log?days=60');
-    const { reminders } = await res.json();
-    if (!res.ok) throw new Error('Failed to load');
+    const [logRes, stRes] = await Promise.all([
+      fetch('/api/roster/reminder-log?days=60'),
+      fetch('/api/roster/reminders/status'),
+    ]);
+    const { reminders } = await logRes.json();
+    const { casuals } = await stRes.json();
+    if (!logRes.ok || !stRes.ok) throw new Error('Failed to load');
+
+    const sendNow = `
+      <div class="ro-appr" style="border-color:#c7d2fe;margin-bottom:10px">
+        <h2 style="color:#4338ca">✉ Send a reminder now</h2>
+        ${(casuals || []).map(c => `
+          <div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid #f1f5f9;font-size:0.84rem">
+            <span style="font-weight:700;color:#1e293b;min-width:140px">${escHtml(c.name)}</span>
+            <span style="color:${c.missingDays ? '#b45309' : '#15803d'};font-weight:600">
+              ${c.missingDays ? `${c.missingDays} day${c.missingDays !== 1 ? 's' : ''} unanswered` : '✓ next week complete'}</span>
+            <span style="color:#94a3b8;font-size:0.76rem">
+              ${c.lastReminded ? `last reminded ${escHtml(new Date(c.lastReminded).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}` : 'never reminded'}</span>
+            <button class="ro-appr-all" style="margin-left:auto;background:${c.missingDays ? '#6366f1' : '#cbd5e1'}"
+              ${c.missingDays ? '' : 'disabled'}
+              onclick='resendReminder(${JSON.stringify(c.email)}, this)'>✉ Send now</button>
+          </div>`).join('') || '<p style="color:#64748b;margin:0">No active casual warehouse staff found.</p>'}
+      </div>`;
+
     if (!reminders.length) {
-      box.innerHTML = '<div class="ro-appr" style="border-color:#e2e8f0"><p style="color:#64748b;margin:0">No reminder emails sent in the last 60 days.</p></div>';
+      box.innerHTML = sendNow + '<div class="ro-appr" style="border-color:#e2e8f0"><p style="color:#64748b;margin:0">No reminder emails sent in the last 60 days.</p></div>';
       return;
     }
     // Most recent first, grouped by send day
@@ -205,7 +226,7 @@ async function toggleReminderLog() {
       if (!byDay.has(day)) byDay.set(day, []);
       byDay.get(day).push(r);
     }
-    box.innerHTML = `<div class="ro-appr" style="border-color:#e2e8f0">
+    box.innerHTML = sendNow + `<div class="ro-appr" style="border-color:#e2e8f0">
       <h2 style="color:#334155">📧 Availability reminder emails — last 60 days (${reminders.length})</h2>
       ${[...byDay.entries()].map(([day, rows]) => `
         <div class="ro-appr-person">
@@ -220,6 +241,31 @@ async function toggleReminderLog() {
     </div>`;
   } catch (err) {
     box.innerHTML = `<div class="ro-appr"><p style="color:#b91c1c;margin:0">Error: ${escHtml(err.message)}</p></div>`;
+  }
+}
+
+async function resendReminder(email, btn) {
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = 'Sending…';
+  try {
+    const res = await fetch('/api/roster/reminders/resend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error);
+    btn.textContent = out.sent ? '✓ Sent' : '—';
+    if (!out.sent) alert(out.reason);
+    // refresh panel so "last reminded" updates
+    const box = document.getElementById('ro-remlog');
+    box.style.display = 'none';
+    toggleReminderLog();
+  } catch (err) {
+    alert(`Failed: ${err.message}`);
+    btn.disabled = false;
+    btn.textContent = orig;
   }
 }
 
