@@ -76,18 +76,21 @@ async function init() {
       const dayLabel = d.toLocaleDateString('en-AU', { weekday: 'long', timeZone: 'UTC' });
       const dateLabel = d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' });
       const v = state[ds];
+      const locked = Boolean(v && v.available === true && v.status === 'approved');
       html += `
         <div class="av-day" data-date="${ds}">
           <div class="av-date">${escHtml(dayLabel)} <small>${escHtml(dateLabel)}</small></div>
           <span id="av-st-${ds}">${statusBadge(ds)}</span>
           <span class="av-timewrap" id="av-tm-${ds}" style="${v && v.available === true ? '' : 'display:none'}">
             <input type="time" class="av-time" id="av-s-${ds}" value="${escHtml((v && v.start) || '09:00')}"
-              onchange="timesChanged('${ds}')" />–<input type="time" class="av-time" id="av-e-${ds}"
-              value="${escHtml((v && v.end) || '17:00')}" onchange="timesChanged('${ds}')" />
+              onchange="timesChanged('${ds}')" ${locked ? 'disabled' : ''} />–<input type="time" class="av-time" id="av-e-${ds}"
+              value="${escHtml((v && v.end) || '17:00')}" onchange="timesChanged('${ds}')" ${locked ? 'disabled' : ''} />
           </span>
           <div class="av-btns">
-            <button class="av-btn in${v && v.available === true ? ' sel' : ''}" onclick="setDay('${ds}', true, this)">✓ In</button>
-            <button class="av-btn out${v && v.available === false ? ' sel' : ''}" onclick="setDay('${ds}', false, this)">✗ Out</button>
+            ${locked
+              ? `<span style="font-size:0.72rem;color:#64748b;font-weight:600;max-width:150px;text-align:right">🔒 Locked — contact the roster manager to change this shift</span>`
+              : `<button class="av-btn in${v && v.available === true ? ' sel' : ''}" onclick="setDay('${ds}', true, this)">✓ In</button>
+                 <button class="av-btn out${v && v.available === false ? ' sel' : ''}" onclick="setDay('${ds}', false, this)">✗ Out</button>`}
           </div>
         </div>`;
     }
@@ -108,6 +111,10 @@ async function saveEntry(date, available, row) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
+    if (data.locked && data.locked.length) {
+      alert('This shift is approved and locked — contact the roster manager to change it.');
+      return;
+    }
     const prev = state[date];
     state[date] = {
       available, start, end,
@@ -133,6 +140,8 @@ function setDay(date, available, btn) {
 }
 
 function timesChanged(date) {
+  const v = state[date];
+  if (v && v.available === true && v.status === 'approved') return; // locked
   const row = document.querySelector(`.av-day[data-date="${date}"]`);
   const s = document.getElementById(`av-s-${date}`);
   const e = document.getElementById(`av-e-${date}`);

@@ -11026,6 +11026,7 @@ app.post('/api/roster/availability', requireAuth, async (req, res) => {
     const today = brisbaneToday();
     const maxDate = addDays(today, 70);
     let saved = 0;
+    const locked = [];
     for (const e of entries) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(e.date))) continue;
       const d = new Date(e.date + 'T00:00:00Z');
@@ -11034,9 +11035,10 @@ app.post('/api/roster/availability', requireAuth, async (req, res) => {
       let start = timeOk(e.start_time) ? e.start_time : '09:00';
       let end   = timeOk(e.end_time)   ? e.end_time   : '17:00';
       if (start >= end) { start = '09:00'; end = '17:00'; }
-      // Any change to a day (answer OR times) resets it to pending so
-      // approved shifts can't be altered without a roster admin seeing it
-      await pool.query(
+      // Unanswered/pending/declined days can be changed freely (back to
+      // pending). APPROVED shifts are locked — only a roster admin can
+      // alter or cancel them (see /api/roster/shifts/override).
+      const { rowCount } = await pool.query(
         `INSERT INTO warehouse_availability (employee_id, wms_email, date, available, note, status, start_time, end_time, updated_at)
          VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, NOW())
          ON CONFLICT (wms_email, date) DO UPDATE SET
@@ -11046,12 +11048,14 @@ app.post('/api/roster/availability', requireAuth, async (req, res) => {
                         OR warehouse_availability.end_time IS DISTINCT FROM EXCLUDED.end_time
                        THEN 'pending' ELSE warehouse_availability.status END,
            start_time=EXCLUDED.start_time, end_time=EXCLUDED.end_time,
-           updated_at=NOW()`,
+           updated_at=NOW()
+         WHERE NOT (warehouse_availability.status = 'approved' AND warehouse_availability.available)`,
         [emp.id, email.toLowerCase(), e.date, Boolean(e.available),
          (e.note || '').slice(0, 200) || null, start, end]);
-      saved++;
+      if (rowCount) saved++;
+      else locked.push(e.date);
     }
-    res.json({ saved });
+    res.json({ saved, locked });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -11141,7 +11145,7 @@ app.get('/api/roster/calendar', requireAuth, async (req, res) => {
           const row = s.email ? availMap.get(`${s.email}|${ds}`) : null;
           if (row && row.available && row.status === 'approved') {
             casualsIn.push({
-              name: s.name, note: row.note || null,
+              name: s.name, email: s.email, note: row.note || null,
               start: row.start_time ? String(row.start_time).slice(0, 5) : null,
               end: row.end_time ? String(row.end_time).slice(0, 5) : null,
             });
@@ -11244,6 +11248,35 @@ app.post('/api/roster/requests/decide', requireAuth, requireRosterAdmin, async (
       }).catch(err => console.error('[roster] Approval email failed:', err.message));
     }
     res.json({ updated: decided.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/roster/shifts/override — admin cancel or re-time an approved shift
+// Body: { email, date, action: 'cancel'|'times', start_time?, end_time? }
+app.post('/api/roster/shifts/override', requireAuth, requireRosterAdmin, async (req, res) => {
+  const { email, date, action, start_time, end_time } = req.body;
+  const timeOk = (t) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(t || ''));
+  if (!email || !/^\d{4}-\d{2}-\d{2}$/.test(String(date)) || !['cancel', 'times'].includes(action)) {
+    return res.status(400).json({ error: 'email, date and action (cancel|times) required' });
+  }
+  if (action === 'times' && (!timeOk(start_time) || !timeOk(end_time) || start_time >= end_time)) {
+    return res.status(400).json({ error: 'Valid start_time and end_time (HH:MM, start before end) required' });
+  }
+  try {
+    const { rows } = action === 'cancel'
+      ? await pool.query(
+          `UPDATE warehouse_availability
+           SET available=FALSE, status='declined', approved_by=$1, approved_at=NOW(), updated_at=NOW()
+           WHERE LOWER(wms_email)=LOWER($2) AND date=$3
+           RETURNING date`, [req.user.email, email, date])
+      : await pool.query(
+          `UPDATE warehouse_availability
+           SET start_time=$1, end_time=$2, status='approved', approved_by=$3, approved_at=NOW(), updated_at=NOW()
+           WHERE LOWER(wms_email)=LOWER($4) AND date=$5 AND available
+           RETURNING date`, [start_time, end_time, req.user.email, email, date]);
+    if (!rows.length) return res.status(404).json({ error: 'No shift found for that person on that date' });
+    console.log(`[roster] Shift override (${action}) ${email} ${date} by ${req.user.email}`);
+    res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

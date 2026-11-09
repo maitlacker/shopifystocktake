@@ -86,7 +86,15 @@ async function load() {
     body += (day.fullTime || []).map(n => person(n, '#16a34a')).join('');
     body += (day.casualsIn || []).map(c => {
       const times = c.start && c.end ? ` ${fmtT(c.start)}–${fmtT(c.end)}` : '';
-      return person(c.name + times + (c.note ? ` — ${c.note}` : ''), '#3b82f6');
+      const label = c.name + times + (c.note ? ` — ${c.note}` : '');
+      if (!isRosterAdmin || !c.email) return person(label, '#3b82f6');
+      return `<div class="ro-person">
+        <span class="ro-dot" style="background:#3b82f6"></span>${escHtml(label)}
+        <button class="ro-shift-btn" title="Change times"
+          onclick='overrideTimes(${JSON.stringify(c.email)}, ${JSON.stringify(c.name)}, "${ds}", ${JSON.stringify(c.start || '09:00')}, ${JSON.stringify(c.end || '17:00')})'>✎</button>
+        <button class="ro-shift-btn ro-shift-del" title="Cancel this shift (e.g. called in sick)"
+          onclick='cancelShift(${JSON.stringify(c.email)}, ${JSON.stringify(c.name)}, "${ds}")'>✕</button>
+      </div>`;
     }).join('');
     if ((day.leave || []).length) {
       body += `<div class="ro-sec">` +
@@ -242,6 +250,39 @@ async function toggleReminderLog() {
   } catch (err) {
     box.innerHTML = `<div class="ro-appr"><p style="color:#b91c1c;margin:0">Error: ${escHtml(err.message)}</p></div>`;
   }
+}
+
+// ── Admin shift overrides (approved shifts are locked for casuals) ──
+async function shiftOverride(body) {
+  const res = await fetch('/api/roster/shifts/override', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const out = await res.json();
+  if (!res.ok) throw new Error(out.error);
+}
+
+async function cancelShift(email, name, date) {
+  const pretty = new Date(date + 'T00:00:00Z').toLocaleDateString('en-AU',
+    { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  if (!confirm(`Cancel ${name}'s shift on ${pretty}?\n\nThey'll show as Out for that day (use this when someone calls in sick).`)) return;
+  try {
+    await shiftOverride({ email, date, action: 'cancel' });
+    await load();
+  } catch (err) { alert(`Failed: ${err.message}`); }
+}
+
+async function overrideTimes(email, name, date, start, end) {
+  const input = prompt(`New times for ${name} (24h, e.g. 09:00-15:00):`, `${start}-${end}`);
+  if (!input) return;
+  const m = String(input).trim().match(/^(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})$/);
+  if (!m) { alert('Use the format HH:MM-HH:MM, e.g. 09:00-15:00'); return; }
+  const pad = (t) => t.length === 4 ? '0' + t : t;
+  try {
+    await shiftOverride({ email, date, action: 'times', start_time: pad(m[1]), end_time: pad(m[2]) });
+    await load();
+  } catch (err) { alert(`Failed: ${err.message}`); }
 }
 
 async function resendReminder(email, btn) {
