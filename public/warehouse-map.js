@@ -4,13 +4,14 @@
 const SHELF_W = 1.5;
 const SHELF_D = 0.545;
 const SNAP    = 0.15;
+// ROYGBIV left→right across the aisles, plus Pink for the back-wall run
 const AISLE_COLORS = [
-  '#6366f1','#22c55e','#f97316','#ef4444',
-  '#0ea5e9','#8b5cf6','#14b8a6','#f59e0b',
+  '#ef4444','#f97316','#eab308','#22c55e',
+  '#3b82f6','#4f46e5','#8b5cf6','#ec4899',
 ];
 const AISLE_COLOR_NAMES = [
-  'Blue','Green','Orange','Red',
-  'Sky','Purple','Teal','Yellow',
+  'Red','Orange','Yellow','Green',
+  'Blue','Indigo','Violet','Pink',
 ];
 
 // ── Default room polygon (from RoomScan Pro, metres) ──────────────────────
@@ -146,7 +147,7 @@ function evtWorld(e) {
 
 // ── Persistence ───────────────────────────────────────────────────────────
 // Which map: 'main' (current warehouse) or 'township' (63 Township Dr)
-const currentMap = new URLSearchParams(window.location.search).get('map') || 'main';
+const currentMap = new URLSearchParams(window.location.search).get('map') || 'township';
 
 function switchMap(name) {
   window.location.search = name === 'main' ? '' : `?map=${name}`;
