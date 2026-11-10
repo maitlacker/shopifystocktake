@@ -926,11 +926,11 @@ app.get('/api/picking/orders', async (req, res) => {
     const aisleByProduct = new Map();
     try {
       const { rows: aisleRows } = await pool.query(`
-        SELECT pa.product_id, wa.name, wa.colour, wa.colour_name
+        SELECT pa.product_id, wa.name, wa.colour, wa.colour_name, wa.position
         FROM product_aisle pa JOIN warehouse_aisles wa ON wa.id = pa.aisle_id`);
       for (const r of aisleRows) {
         aisleByProduct.set(String(r.product_id),
-          { name: r.name, colour: r.colour, colourName: r.colour_name });
+          { name: r.name, colour: r.colour, colourName: r.colour_name, position: r.position });
       }
     } catch (e) { console.error('[picking] Aisle lookup failed:', e.message); }
 
@@ -1028,9 +1028,12 @@ app.get('/api/picking/orders', async (req, res) => {
       }
     }
 
-    // Per order, alphabetical by product name to match the shelving walk
+    // Per order, walk the aisles in colour order (Red → … → Pink back wall),
+    // alphabetical within an aisle; unallocated styles fall to the end.
+    const aislePos = (it) => (it.aisle && it.aisle.position != null) ? it.aisle.position : 999;
     items.sort((a, b) =>
       (a.orderNumber - b.orderNumber) ||
+      (aislePos(a) - aislePos(b)) ||
       String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' }) ||
       String(a.variantTitle || '').localeCompare(String(b.variantTitle || '')));
     const orders = [...orderNumbersSeen].sort((a, b) => a - b);
