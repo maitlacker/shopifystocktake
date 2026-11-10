@@ -1,0 +1,569 @@
+let pickState    = {};
+let lastTap      = {};
+let currentItems = [];
+let currentStart = null;
+let currentEnd   = null;
+let currentJobId = null;
+
+// ── Session tracking ───────────────────────────────────────────────
+let session = null; // active session data
+
+function sessionStart(data) {
+  session = {
+    orderStart:    data.orders[0]   || 0,
+    orderEnd:      data.orders[data.orders.length - 1] || 0,
+    orderCount:    data.orderCount  || 0,
+    itemCount:     data.items.length,
+    pickTimestamps: [],   // ms timestamps of each pick action
+    saved:          false,
+  };
+}
+
+function sessionRecordPick() {
+  if (!session) return;
+  session.pickTimestamps.push(Date.now());
+}
+
+function sessionRecordUnpick() {
+  // Remove the last timestamp if staff undo a pick
+  if (!session || !session.pickTimestamps.length) return;
+  session.pickTimestamps.pop();
+}
+
+function computeSessionStats() {
+  if (!session || session.pickTimestamps.length < 2) return null;
+  const ts = [...session.pickTimestamps].sort((a, b) => a - b);
+
+  const MAX_GAP_MS = 2 * 60 * 1000; // 2 minutes
+  const gaps = [];
+  let excluded = 0;
+
+  for (let i = 1; i < ts.length; i++) {
+    const gap = ts[i] - ts[i - 1];
+    if (gap <= MAX_GAP_MS) {
+      gaps.push(gap);
+    } else {
+      excluded++;
+    }
+  }
+
+  const avgPickSeconds = gaps.length > 0
+    ? gaps.reduce((a, b) => a + b, 0) / gaps.length / 1000
+    : null;
+  const activeSeconds = gaps.length > 0
+    ? Math.round(gaps.reduce((a, b) => a + b, 0) / 1000)
+    : null;
+
+  return {
+    picksCompleted: ts.length,
+    avgPickSeconds: avgPickSeconds != null ? Math.round(avgPickSeconds * 10) / 10 : null,
+    activeSeconds,
+    excludedGaps:   excluded,
+    firstPickAt:    new Date(ts[0]).toISOString(),
+    lastPickAt:     new Date(ts[ts.length - 1]).toISOString(),
+  };
+}
+
+async function saveSession(force = false) {
+  if (!session || session.saved) return;
+  if (!force && session.pickTimestamps.length < 2) return;
+
+  const stats = computeSessionStats();
+  if (!stats) return;
+
+  session.saved = true;
+
+  const initials = (document.getElementById('pick-initials')?.value || '').toUpperCase().trim();
+
+  const payload = {
+    initials,
+    orderStart:    session.orderStart,
+    orderEnd:      session.orderEnd,
+    orderCount:    session.orderCount,
+    itemCount:     session.itemCount,
+    ...stats,
+  };
+
+  try {
+    // Use sendBeacon for page-unload saves (fire and forget)
+    if (force && navigator.sendBeacon) {
+      navigator.sendBeacon('/api/picking/session', new Blob([JSON.stringify(payload)], { type: 'application/json' }));
+    } else {
+      await fetch('/api/picking/session', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+    }
+  } catch (_) { /* best effort */ }
+}
+
+// ── Pick-state persistence (survive page refresh) ──────────────────
+function pickStateKey() {
+  return `pick_state_${currentStart}_${currentEnd}`;
+}
+
+function persistPickState() {
+  if (!currentStart || !currentEnd) return;
+  try {
+    localStorage.setItem(pickStateKey(), JSON.stringify(pickState));
+  } catch (_) { /* quota exceeded — non-critical */ }
+}
+
+function restorePickState() {
+  if (!currentStart || !currentEnd) return;
+  try {
+    const saved = localStorage.getItem(pickStateKey());
+    if (!saved) return;
+    const restored = JSON.parse(saved);
+    pickState = restored;
+    // Re-apply .picked class to matching DOM elements
+    Object.keys(pickState).forEach(id => {
+      if (pickState[id]) {
+        const el = document.getElementById('pick-' + id);
+        if (el) el.classList.add('picked');
+      }
+    });
+  } catch (_) { /* malformed data — ignore */ }
+}
+
+function clearPickState() {
+  if (!currentStart || !currentEnd) return;
+  try {
+    localStorage.removeItem(pickStateKey());
+  } catch (_) {}
+}
+
+// ── DB-backed job management (shared across devices) ───────────────
+async function fetchOrCreateJob(start, end, initials) {
+  try {
+    const r = await fetch('/api/picking/job', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderStart: parseInt(start, 10), orderEnd: parseInt(end, 10), initials }),
+    });
+    if (!r.ok) return null;
+    return await r.json(); // { jobId, states: [{order_number, variant_id, picked, picked_by}] }
+  } catch (_) { return null; }
+}
+
+function restoreFromJob(states) {
+  const stateMap = {};
+  for (const s of states) {
+    stateMap[`${s.order_number}:${s.variant_id}`] = s;
+  }
+  currentItems.forEach((item, idx) => {
+    const s = stateMap[`${item.orderNumber}:${item.variantId}`];
+    if (!s?.picked) return;
+    const id = 'item-' + idx;
+    pickState[id] = true;
+    const el = document.getElementById('pick-' + id);
+    if (!el) return;
+    el.classList.add('picked');
+    if (s.picked_by) {
+      const byEl = document.createElement('div');
+      byEl.className = 'pick-by-label';
+      byEl.textContent = s.picked_by;
+      el.querySelector('.pick-right')?.appendChild(byEl);
+    }
+  });
+}
+
+async function savePick(idx, picked) {
+  if (!currentJobId) return;
+  const item = currentItems[idx];
+  if (!item) return;
+  const initials = (document.getElementById('pick-initials')?.value || '').toUpperCase().trim();
+  try {
+    await fetch('/api/picking/item-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jobId: currentJobId,
+        orderNumber: item.orderNumber,
+        variantId: item.variantId,
+        picked,
+        pickedBy: initials || null,
+      }),
+    });
+  } catch (_) { /* non-critical — state preserved in localStorage */ }
+}
+
+// ── Note popup ─────────────────────────────────────────────────────
+function showNotePopup(text) {
+  const popup = document.getElementById('note-popup');
+  if (!popup) return;
+  popup.textContent = text;
+  popup.classList.add('visible');
+}
+
+function hideNotePopup() {
+  const popup = document.getElementById('note-popup');
+  if (popup) popup.classList.remove('visible');
+}
+
+// Global safety net: lift finger anywhere → hide popup
+document.addEventListener('pointerup',     hideNotePopup);
+document.addEventListener('pointercancel', hideNotePopup);
+
+// Save on page hide (tab close, navigation away, iPhone home button)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') saveSession(true);
+});
+window.addEventListener('pagehide', () => saveSession(true));
+
+// ── Per-order stock remaining computation ──────────────────────────
+function computeDisplayStocks(items) {
+  // Group all items by variantId so we can sum run quantities
+  const variantGroups = {};
+  items.forEach((item) => {
+    if (item.stock === null || item.variantId == null) return;
+    const vid = String(item.variantId);
+    if (!variantGroups[vid]) variantGroups[vid] = [];
+    variantGroups[vid].push({ orderNumber: item.orderNumber, qty: item.qty });
+  });
+
+  // For each item: displayStock = shopify_qty + sum of qty from LATER orders for same variant
+  // = "how many physically remain in warehouse right after picking THIS order"
+  items.forEach((item) => {
+    if (item.stock === null || item.variantId == null) {
+      item.displayStock = null;
+      return;
+    }
+    const peers = variantGroups[String(item.variantId)] || [];
+    const laterQty = peers
+      .filter(p => p.orderNumber > item.orderNumber)
+      .reduce((sum, p) => sum + p.qty, 0);
+    item.displayStock = item.stock + laterQty;
+  });
+}
+
+// ── Load orders ────────────────────────────────────────────────────
+async function loadOrders() {
+  const start = document.getElementById('start-order').value.trim();
+  const end   = document.getElementById('end-order').value.trim();
+
+  if (!start || !end) { alert('Please enter both a start and end order number.'); return; }
+  if (parseInt(end) < parseInt(start)) { alert('End order must be greater than or equal to start order.'); return; }
+
+  const btn = document.getElementById('btn-load');
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
+
+  const resultEl = document.getElementById('pick-result');
+  resultEl.innerHTML = '<div class="pick-state">Fetching orders from Shopify…</div>';
+  document.getElementById('pick-progress').classList.remove('visible');
+  document.getElementById('complete-msg').classList.remove('visible');
+
+  try {
+    const tubSize = parseInt(document.getElementById('tub-size')?.value || '5') || 0;
+    try { localStorage.setItem('beta-tub-size', String(tubSize)); } catch (_) {}
+    const res  = await fetch(`/api/picking/orders?start=${start}&end=${end}&tub=${tubSize}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to load orders');
+
+    currentItems = data.items;
+    computeDisplayStocks(currentItems);
+    pickState    = {};
+    lastTap      = {};
+    session      = null;
+    currentJobId = null;
+    currentStart = start;
+    currentEnd   = end;
+
+    if (!data.items.length) {
+      resultEl.innerHTML = `<div class="pick-state">No items found for orders #${start}–#${end}.<br>Check the order numbers and try again.</div>`;
+      return;
+    }
+
+    renderList(data);
+    sessionStart(data);
+
+    // Sync pick state with DB (shared across devices); fall back to localStorage if unavailable
+    const initials = (document.getElementById('pick-initials')?.value || '').toUpperCase().trim();
+    const job = await fetchOrCreateJob(start, end, initials);
+    if (job) {
+      currentJobId = job.jobId;
+      if (job.states.length) {
+        restoreFromJob(job.states);
+      } else {
+        restorePickState(); // no DB states yet — check localStorage
+      }
+    } else {
+      currentJobId = null;
+      restorePickState(); // DB unavailable — fall back to localStorage
+    }
+
+    updateProgress();
+
+  } catch (err) {
+    resultEl.innerHTML = `<div class="pick-state" style="color:#b91c1c">Error: ${err.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Load';
+  }
+}
+
+// ── Render pick list ───────────────────────────────────────────────
+function shopifyThumb(url, size = 120) {
+  if (!url) return null;
+  // Insert _SIZExSIZE_crop_center before the file extension
+  return url.replace(/(\.[a-z]+)(\?.*)?$/i, `_${size}x${size}_crop_center$1$2`);
+}
+
+function renderList(data) {
+  const resultEl = document.getElementById('pick-result');
+
+  const orderLabel = data.orders.length === 1
+    ? `Order #${data.orders[0]}`
+    : `Orders #${data.orders[0]}–#${data.orders[data.orders.length - 1]} · ${data.orderCount} order${data.orderCount !== 1 ? 's' : ''}`;
+
+  const heldBannerHtml = data.heldOrders?.length
+    ? `<div class="pick-removed-banner" style="background:#eff6ff;border-color:#bfdbfe">
+        &#9203; ${data.heldOrders.length} order${data.heldOrders.length > 1 ? 's' : ''} held back — payment not captured yet
+        (order-edit window still open): ${data.heldOrders.map(h => '#' + h.orderNumber).join(', ')}.
+        Re-import this range once the 30-minute window closes to pick ${data.heldOrders.length > 1 ? 'them' : 'it'}.
+      </div>`
+    : '';
+
+  const removedBannerHtml = data.removedItems?.length
+    ? `<div class="pick-removed-banner">
+        &#9888;&#65039; ${data.removedItems.length} item${data.removedItems.length > 1 ? 's' : ''} removed/refunded from
+        ${[...new Set(data.removedItems.map(r => '#' + r.orderNumber))].join(', ')} — not in pick list:
+        <ul>${data.removedItems.map(r =>
+          `<li>#${r.orderNumber} — ${escHtml(r.title)}${r.variantTitle ? ' / ' + escHtml(r.variantTitle) : ''}${r.sku ? ' (' + escHtml(r.sku) + ')' : ''}</li>`
+        ).join('')}</ul>
+      </div>`
+    : '';
+
+  const cards = data.items.map((item, idx) => {
+    const id      = `item-${idx}`;
+    const isMulti = item.qty > 1;
+    const thumb   = shopifyThumb(item.image, 160);
+
+    const imgHtml = thumb
+      ? `<img class="pick-thumb" src="${thumb}" alt="" loading="lazy" onerror="this.parentNode.innerHTML='<div class=\\'pick-thumb-placeholder\\'>&#128230;</div>'" />`
+      : `<div class="pick-thumb-placeholder">&#128230;</div>`;
+
+    const variantHtml = item.variantTitle
+      ? `<div class="pick-variant">${escHtml(item.variantTitle)}</div>`
+      : '';
+
+    const modifiedHtml = item.modified
+      ? `<span class="pick-modified-badge" title="Original order qty: ${item.originalQty}">Qty reduced ${item.originalQty}→${item.qty}</span>`
+      : '';
+
+    const noteHtml = item.note
+      ? `<button class="pick-note-btn" data-note="${escHtml(item.note)}" title="Order note">&#128203;</button>`
+      : '';
+
+    // Aisle colour: stripe down the card edge + a named pill
+    const aisleStripe = item.aisle
+      ? ` style="border-left:7px solid ${escHtml(item.aisle.colour)}"` : '';
+    const aisleHtml = item.aisle
+      ? `<span class="pick-aisle-pill" style="background:${escHtml(item.aisle.colour)}"
+           title="${escHtml(item.aisle.name)}">● ${escHtml(item.aisle.colourName)}</span>`
+      : '';
+
+    return `
+      <div class="pick-item" data-id="${id}" id="pick-${id}"${aisleStripe}>
+        <div class="pick-tick"><span class="pick-tick-icon">&#10003;</span></div>
+        ${imgHtml}
+        <div class="pick-details">
+          <div class="pick-sku">${escHtml(item.sku || '—')}${aisleHtml}</div>
+          <div class="pick-title">${escHtml(item.title)}</div>
+          ${variantHtml}
+          ${modifiedHtml}
+        </div>
+        <div class="pick-right">
+          <div class="pick-order-num">#${item.orderNumber}</div>
+          <div class="pick-qty-row">
+            <div class="pick-qty${isMulti ? ' multi' : ''}">${item.qty}</div>
+            ${item.displayStock !== null ? `<div class="pick-stock${item.displayStock <= 0 ? ' stock-zero' : item.displayStock <= 5 ? ' stock-low' : ''}">${item.displayStock} left</div>` : ''}
+          </div>
+          ${noteHtml}
+        </div>
+      </div>
+    `;
+  });
+
+  // Tub headers: one sweep per tub, so show where each tub starts and
+  // which orders it contains
+  let itemsHtml = '';
+  let lastTub = null;
+  cards.forEach((html, idx) => {
+    const it = data.items[idx];
+    if (it.tub != null && it.tub !== lastTub) {
+      lastTub = it.tub;
+      const tubItems = data.items.filter(x => x.tub === it.tub);
+      const ordersInTub = [...new Set(tubItems.map(x => x.orderNumber))].sort((a, b) => a - b);
+      itemsHtml += `<div class="pick-tub-head">🧺 TUB ${it.tub} — orders #${ordersInTub[0]}–#${ordersInTub[ordersInTub.length - 1]}
+        (${ordersInTub.length} order${ordersInTub.length !== 1 ? 's' : ''}, ${tubItems.length} item${tubItems.length !== 1 ? 's' : ''})</div>`;
+    }
+    itemsHtml += html;
+  });
+
+  resultEl.innerHTML = `
+    ${heldBannerHtml}
+    ${removedBannerHtml}
+    <p style="font-size:0.85rem;color:#64748b;margin-bottom:12px">${escHtml(orderLabel)} · ${data.items.length} line item${data.items.length !== 1 ? 's' : ''}</p>
+    <div class="pick-list">${itemsHtml}</div>
+  `;
+
+  document.getElementById('pick-progress').classList.add('visible');
+
+  // Attach double-tap listener to every item
+  const clickTimers = {};
+  document.querySelectorAll('.pick-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = el.dataset.id;
+      if (clickTimers[id]) {
+        // Second tap within window — confirm double-tap
+        clearTimeout(clickTimers[id]);
+        clickTimers[id] = null;
+        togglePicked(el, id);
+      } else {
+        // First tap — flash and wait for possible second
+        el.classList.add('tap-flash');
+        setTimeout(() => el.classList.remove('tap-flash'), 200);
+        clickTimers[id] = setTimeout(() => { clickTimers[id] = null; }, 400);
+      }
+    });
+  });
+
+  // Note icon: hold to show, release to hide
+  document.querySelectorAll('.pick-note-btn').forEach(btn => {
+    btn.addEventListener('pointerdown', e => {
+      e.stopPropagation(); // don't count as a pick tap
+      e.preventDefault();  // suppress context menu on long-press
+      showNotePopup(btn.dataset.note);
+    });
+    btn.addEventListener('pointerleave', hideNotePopup);
+  });
+}
+
+function togglePicked(el, id) {
+  pickState[id] = !pickState[id];
+  const idx = parseInt(id.replace('item-', ''), 10);
+  if (pickState[id]) {
+    el.classList.add('picked');
+    sessionRecordPick();
+    const item = currentItems[idx];
+    if (item) checkOrderCompletion(item.orderNumber);
+  } else {
+    el.classList.remove('picked');
+    sessionRecordUnpick();
+  }
+  persistPickState();
+  savePick(idx, pickState[id]);
+  updateProgress();
+}
+
+// ── Order-level completion tracking (for home dashboard) ───────────
+function checkOrderCompletion(orderNumber) {
+  // Collect all item IDs that belong to this order
+  const orderItemIds = currentItems
+    .map((item, idx) => (item.orderNumber === orderNumber ? 'item-' + idx : null))
+    .filter(Boolean);
+
+  if (!orderItemIds.length) return;
+
+  // If every item for this order is ticked, record it silently
+  if (orderItemIds.every((id) => pickState[id])) {
+    recordOrderPicked(orderNumber);
+  }
+}
+
+async function recordOrderPicked(orderNumber) {
+  try {
+    const initials = (document.getElementById('pick-initials')?.value || '').toUpperCase().trim();
+    await fetch('/api/ops/order-picked', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ orderName: '#' + orderNumber, initials }),
+    });
+  } catch (_) { /* silent — non-critical */ }
+}
+
+// ── Progress ───────────────────────────────────────────────────────
+function updateProgress() {
+  const total  = document.querySelectorAll('.pick-item').length;
+  const picked = document.querySelectorAll('.pick-item.picked').length;
+  const pct    = total > 0 ? Math.round((picked / total) * 100) : 0;
+
+  document.getElementById('progress-text').textContent = `${picked} of ${total} picked`;
+
+  const bar = document.getElementById('progress-bar');
+  bar.style.width = pct + '%';
+  bar.classList.toggle('complete', picked === total && total > 0);
+
+  const completeMsg = document.getElementById('complete-msg');
+  const justCompleted = picked === total && total > 0;
+  completeMsg.classList.toggle('visible', justCompleted);
+  if (justCompleted) {
+    saveSession();
+    clearPickState(); // pick list complete — no need to persist anymore
+  }
+}
+
+// ── Reset ──────────────────────────────────────────────────────────
+function resetAll() {
+  clearPickState();
+  pickState = {};
+  lastTap   = {};
+  document.querySelectorAll('.pick-item.picked').forEach(el => el.classList.remove('picked'));
+  document.getElementById('complete-msg').classList.remove('visible');
+  updateProgress();
+}
+
+// ── +50 / +100 shortcuts ──────────────────────────────────────────
+function addToEnd(n) {
+  const start = parseInt(document.getElementById('start-order').value);
+  if (!start || isNaN(start)) { alert('Enter a start order number first.'); return; }
+  document.getElementById('end-order').value = start + n;
+}
+
+// ── Cancel ────────────────────────────────────────────────────────
+function cancelPick() {
+  clearPickState();
+  document.getElementById('start-order').value = '';
+  document.getElementById('end-order').value   = '';
+  document.getElementById('pick-result').innerHTML = '';
+  document.getElementById('pick-progress').classList.remove('visible');
+  document.getElementById('complete-msg').classList.remove('visible');
+  pickState    = {};
+  lastTap      = {};
+  currentItems = [];
+  currentStart = null;
+  currentEnd   = null;
+  currentJobId = null;
+  document.getElementById('start-order').focus();
+}
+
+// ── Restore tub-size preference ────────────────────────────────────
+try {
+  const savedTub = localStorage.getItem('beta-tub-size');
+  if (savedTub !== null && document.getElementById('tub-size')) {
+    document.getElementById('tub-size').value = savedTub;
+  }
+} catch (_) {}
+
+// ── Persist initials in localStorage ──────────────────────────────
+(function () {
+  const el = document.getElementById('pick-initials');
+  const saved = localStorage.getItem('pick_initials');
+  if (saved) el.value = saved;
+  el.addEventListener('input', () => {
+    el.value = el.value.toUpperCase();
+    localStorage.setItem('pick_initials', el.value);
+  });
+})();
+
+// ── Submit on Enter ────────────────────────────────────────────────
+document.getElementById('start-order').addEventListener('keydown', e => { if (e.key === 'Enter') loadOrders(); });
+document.getElementById('end-order').addEventListener('keydown',   e => { if (e.key === 'Enter') loadOrders(); });
+
+// ── Helpers ────────────────────────────────────────────────────────
+function escHtml(str) {
+  return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}

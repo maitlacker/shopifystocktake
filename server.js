@@ -1038,13 +1038,28 @@ app.get('/api/picking/orders', async (req, res) => {
       String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' }) ||
       String(a.variantTitle || '').localeCompare(String(b.variantTitle || ''));
 
+    // BETA tub mode (?tub=N): group N orders into one tub and sort the whole
+    // tub's items as a single aisle sweep — each aisle visited once per tub.
+    // Items land out of order-number sequence inside the tub, so cards show
+    // the order number; tub boundaries are returned for the UI headers.
+    const tubSize = Math.min(Math.max(parseInt(req.query.tub) || 0, 0), 50);
+
     const byOrder = new Map();
     for (const it of items) {
       if (!byOrder.has(it.orderNumber)) byOrder.set(it.orderNumber, []);
       byOrder.get(it.orderNumber).push(it);
     }
-    const groups = [...byOrder.keys()].sort((a, b) => a - b).map(n => {
-      const its = byOrder.get(n);
+    const orderSeq = [...byOrder.keys()].sort((a, b) => a - b);
+    let groupDefs;
+    if (tubSize > 1) {
+      groupDefs = [];
+      for (let i = 0; i < orderSeq.length; i += tubSize) groupDefs.push(orderSeq.slice(i, i + tubSize));
+    } else {
+      groupDefs = orderSeq.map(n => [n]);
+    }
+    const groups = groupDefs.map((nums, gi) => {
+      const its = nums.flatMap(n => byOrder.get(n));
+      if (tubSize > 1) for (const it of its) it.tub = gi + 1;
       const pos = its.filter(i => i.aisle && i.aisle.position != null).map(i => i.aisle.position);
       return { its, min: pos.length ? Math.min(...pos) : null, max: pos.length ? Math.max(...pos) : null };
     });
@@ -1086,8 +1101,9 @@ app.get('/api/picking/orders', async (req, res) => {
       const alloc = g.its.filter(it => it.aisle && it.aisle.position != null);
       const unalloc = g.its.filter(it => !it.aisle || it.aisle.position == null);
       alloc.sort((a, b) =>
-        (dirs[i] === 'asc' ? a.aisle.position - b.aisle.position : b.aisle.position - a.aisle.position) || alpha(a, b));
-      unalloc.sort(alpha);
+        (dirs[i] === 'asc' ? a.aisle.position - b.aisle.position : b.aisle.position - a.aisle.position) ||
+        alpha(a, b) || (a.orderNumber - b.orderNumber));
+      unalloc.sort((a, b) => alpha(a, b) || (a.orderNumber - b.orderNumber));
       items.push(...alloc, ...unalloc);
     });
     const orders = [...orderNumbersSeen].sort((a, b) => a - b);
