@@ -1028,14 +1028,68 @@ app.get('/api/picking/orders', async (req, res) => {
       }
     }
 
-    // Per order, walk the aisles in colour order (Red → … → Pink back wall),
-    // alphabetical within an aisle; unallocated styles fall to the end.
-    const aislePos = (it) => (it.aisle && it.aisle.position != null) ? it.aisle.position : 999;
-    items.sort((a, b) =>
-      (a.orderNumber - b.orderNumber) ||
-      (aislePos(a) - aislePos(b)) ||
+    // Direction-optimised walk: orders stay in number sequence, but each
+    // order's items run UP or DOWN the aisle positions so the picker ends
+    // one order as close as possible to where the next order starts
+    // (e.g. Green→Red when the following order opens in Red). Chosen with
+    // a 2-state DP over the whole run = minimal total aisle travel.
+    const START_AISLE_POSITION = 0; // pickers set off from the Red end (pack bench side)
+    const alpha = (a, b) =>
       String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' }) ||
-      String(a.variantTitle || '').localeCompare(String(b.variantTitle || '')));
+      String(a.variantTitle || '').localeCompare(String(b.variantTitle || ''));
+
+    const byOrder = new Map();
+    for (const it of items) {
+      if (!byOrder.has(it.orderNumber)) byOrder.set(it.orderNumber, []);
+      byOrder.get(it.orderNumber).push(it);
+    }
+    const groups = [...byOrder.keys()].sort((a, b) => a - b).map(n => {
+      const its = byOrder.get(n);
+      const pos = its.filter(i => i.aisle && i.aisle.position != null).map(i => i.aisle.position);
+      return { its, min: pos.length ? Math.min(...pos) : null, max: pos.length ? Math.max(...pos) : null };
+    });
+
+    let dpCost = new Map([[START_AISLE_POSITION, 0]]); // exit position → minimal travel
+    const back = [];
+    for (const g of groups) {
+      if (g.min == null) { back.push(null); continue; } // nothing allocated — direction moot
+      const span = g.max - g.min;
+      const next = new Map();
+      const choice = new Map();
+      for (const [p, c] of dpCost) {
+        const asc = c + Math.abs(p - g.min) + span;   // enter low, exit at g.max
+        const desc = c + Math.abs(p - g.max) + span;  // enter high, exit at g.min
+        // desc wins ties: on equal distance, picking the far aisle first and
+        // finishing where the next order starts feels seamless to the picker
+        if (asc < (next.get(g.max) ?? Infinity)) { next.set(g.max, asc); choice.set(g.max, { from: p, dir: 'asc' }); }
+        if (desc <= (next.get(g.min) ?? Infinity)) { next.set(g.min, desc); choice.set(g.min, { from: p, dir: 'desc' }); }
+      }
+      dpCost = next;
+      back.push(choice);
+    }
+    // Include the walk back to the pack bench after the last order
+    let exit = null, bestCost = Infinity;
+    for (const [p, c] of dpCost) {
+      const total = c + Math.abs(p - START_AISLE_POSITION);
+      if (total < bestCost) { bestCost = total; exit = p; }
+    }
+    const dirs = new Array(groups.length).fill('asc');
+    for (let i = groups.length - 1; i >= 0; i--) {
+      if (!back[i]) continue;
+      const b = back[i].get(exit);
+      dirs[i] = b.dir;
+      exit = b.from;
+    }
+
+    items.length = 0;
+    groups.forEach((g, i) => {
+      const alloc = g.its.filter(it => it.aisle && it.aisle.position != null);
+      const unalloc = g.its.filter(it => !it.aisle || it.aisle.position == null);
+      alloc.sort((a, b) =>
+        (dirs[i] === 'asc' ? a.aisle.position - b.aisle.position : b.aisle.position - a.aisle.position) || alpha(a, b));
+      unalloc.sort(alpha);
+      items.push(...alloc, ...unalloc);
+    });
     const orders = [...orderNumbersSeen].sort((a, b) => a - b);
     heldOrders.sort((a, b) => a.orderNumber - b.orderNumber);
 
