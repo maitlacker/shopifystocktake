@@ -355,12 +355,20 @@ function renderList(data) {
       ? `<button class="pick-note-btn" data-note="${escHtml(item.note)}" title="Order note">&#128203;</button>`
       : '';
 
+    // Aisle colour: stripe down the card edge + a named pill
+    const aisleStripe = item.aisle
+      ? ` style="border-left:7px solid ${escHtml(item.aisle.colour)}"` : '';
+    const aisleHtml = item.aisle
+      ? `<span class="pick-aisle-pill" style="background:${escHtml(item.aisle.colour)}"
+           title="${escHtml(item.aisle.name)}">● ${escHtml(item.aisle.colourName)}</span>`
+      : '';
+
     return `
-      <div class="pick-item" data-id="${id}" id="pick-${id}">
+      <div class="pick-item" data-id="${id}" id="pick-${id}"${aisleStripe}>
         <div class="pick-tick"><span class="pick-tick-icon">&#10003;</span></div>
         ${imgHtml}
         <div class="pick-details">
-          <div class="pick-sku">${escHtml(item.sku || '—')}</div>
+          <div class="pick-sku">${escHtml(item.sku || '—')}${aisleHtml}</div>
           <div class="pick-title">${escHtml(item.title)}</div>
           ${variantHtml}
           ${modifiedHtml}

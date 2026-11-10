@@ -922,6 +922,18 @@ app.get('/api/picking/orders', async (req, res) => {
     productsCache = await fetchAllProducts();
     lastFetched   = new Date();
 
+    // Aisle colour per product (from the Aisle Allocation page)
+    const aisleByProduct = new Map();
+    try {
+      const { rows: aisleRows } = await pool.query(`
+        SELECT pa.product_id, wa.name, wa.colour, wa.colour_name
+        FROM product_aisle pa JOIN warehouse_aisles wa ON wa.id = pa.aisle_id`);
+      for (const r of aisleRows) {
+        aisleByProduct.set(String(r.product_id),
+          { name: r.name, colour: r.colour, colourName: r.colour_name });
+      }
+    } catch (e) { console.error('[picking] Aisle lookup failed:', e.message); }
+
     // Build variant→image and variant→stock maps from products cache
     const variantImageMap = {};
     const variantStockMap = {};
@@ -1001,6 +1013,7 @@ app.get('/api/picking/orders', async (req, res) => {
             image:        variantImageMap[String(item.variant_id)] || null,
             stock:        variantStockMap[String(item.variant_id)] ?? null,
             note:         order.note || null,
+            aisle:        aisleByProduct.get(String(item.product_id)) || null,
           });
         }
       }
