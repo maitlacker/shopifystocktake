@@ -1343,6 +1343,35 @@ async function initDb() {
       created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    -- ── Warehouse aisles: stable ids, colour is a changeable attribute ─
+    CREATE TABLE IF NOT EXISTS warehouse_aisles (
+      id          SERIAL PRIMARY KEY,
+      position    INT NOT NULL UNIQUE,
+      name        TEXT NOT NULL,
+      colour      TEXT NOT NULL,
+      colour_name TEXT NOT NULL
+    );
+    INSERT INTO warehouse_aisles (position, name, colour, colour_name)
+    SELECT v.position, v.name, v.colour, v.colour_name FROM (VALUES
+      (0, 'Aisle 1',   '#ef4444', 'Red'),
+      (1, 'Aisle 2',   '#f97316', 'Orange'),
+      (2, 'Aisle 3',   '#eab308', 'Yellow'),
+      (3, 'Aisle 4',   '#22c55e', 'Green'),
+      (4, 'Aisle 5',   '#3b82f6', 'Blue'),
+      (5, 'Aisle 6',   '#4f46e5', 'Indigo'),
+      (6, 'Aisle 7',   '#8b5cf6', 'Violet'),
+      (7, 'Back Wall', '#ec4899', 'Pink')
+    ) v(position, name, colour, colour_name)
+    WHERE NOT EXISTS (SELECT 1 FROM warehouse_aisles);
+
+    -- Style → aisle allocation (references the stable aisle id, never colour)
+    CREATE TABLE IF NOT EXISTS product_aisle (
+      product_id BIGINT PRIMARY KEY,
+      aisle_id   INT NOT NULL REFERENCES warehouse_aisles(id),
+      updated_by TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     -- ── Warehouse roster: casual availability + reminder log ─────────
     CREATE TABLE IF NOT EXISTS warehouse_availability (
       id          SERIAL PRIMARY KEY,

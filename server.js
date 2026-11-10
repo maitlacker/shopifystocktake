@@ -11387,6 +11387,98 @@ app.post('/api/roster/reminders/resend', requireAuth, requireRosterAdmin, async 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Aisle Allocation ────────────────────────────────────────────────
+// Styles are linked to a stable aisle id (warehouse_aisles) whose colour
+// can change later without touching any saved allocations. The allocator
+// page lists products alphabetically (= the shelving walk) with a rolling
+// best-guess aisle from the nearest allocated neighbour.
+
+// GET /api/aisles — the aisle palette (id, name, colour)
+app.get('/api/aisles', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, position, name, colour, colour_name FROM warehouse_aisles ORDER BY position`);
+    res.json({ aisles: rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/aisle-allocation/products?filter=unallocated|all&q=&page=1&pageSize=20
+app.get('/api/aisle-allocation/products', requireAuth, async (req, res) => {
+  try {
+    const filter = req.query.filter === 'all' ? 'all' : 'unallocated';
+    const q = String(req.query.q || '').trim().toLowerCase();
+    const pageSize = [20, 50, 100].includes(parseInt(req.query.pageSize)) ? parseInt(req.query.pageSize) : 20;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+
+    const [prods, allocs, aisles] = await Promise.all([
+      pool.query(`
+        SELECT product_id, title, image_url FROM metafield_products
+        WHERE is_owner AND COALESCE(product_type,'') NOT ILIKE '%gift%'
+          AND title NOT ILIKE '%x-redo%' AND title NOT ILIKE '%measuring tape%'
+        ORDER BY title`),
+      pool.query(`SELECT product_id, aisle_id FROM product_aisle`),
+      pool.query(`SELECT id, position, name, colour, colour_name FROM warehouse_aisles ORDER BY position`),
+    ]);
+    const allocMap = new Map(allocs.rows.map(r => [String(r.product_id), r.aisle_id]));
+
+    // Rolling best guess over the full alphabetical (shelf-order) list:
+    // nearest allocated product before it, else nearest after it.
+    const full = prods.rows.map(p => ({
+      productId: String(p.product_id),
+      title: p.title,
+      image: p.image_url,
+      aisleId: allocMap.get(String(p.product_id)) ?? null,
+      guessAisleId: null,
+    }));
+    let prev = null;
+    for (const p of full) { if (p.aisleId) prev = p.aisleId; else p.guessAisleId = prev; }
+    let next = null;
+    for (let i = full.length - 1; i >= 0; i--) {
+      const p = full[i];
+      if (p.aisleId) next = p.aisleId;
+      else if (!p.guessAisleId) p.guessAisleId = next;
+    }
+
+    let list = full;
+    if (q) list = list.filter(p => p.title.toLowerCase().includes(q));
+    if (filter === 'unallocated') list = list.filter(p => !p.aisleId);
+
+    const total = list.length;
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    const items = list.slice((Math.min(page, pages) - 1) * pageSize, Math.min(page, pages) * pageSize);
+
+    res.json({
+      aisles: aisles.rows,
+      totalProducts: full.length,
+      allocated: full.filter(p => p.aisleId).length,
+      total, page: Math.min(page, pages), pages, pageSize,
+      items,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/aisle-allocation/assign — { productId, aisleId } (aisleId null clears)
+app.post('/api/aisle-allocation/assign', requireAuth, async (req, res) => {
+  const productId = Number(req.body.productId);
+  const aisleId = req.body.aisleId == null ? null : Number(req.body.aisleId);
+  if (!Number.isFinite(productId)) return res.status(400).json({ error: 'productId required' });
+  try {
+    if (aisleId == null) {
+      await pool.query(`DELETE FROM product_aisle WHERE product_id=$1`, [productId]);
+      return res.json({ ok: true, cleared: true });
+    }
+    const { rows } = await pool.query(`SELECT id FROM warehouse_aisles WHERE id=$1`, [aisleId]);
+    if (!rows.length) return res.status(400).json({ error: 'Unknown aisle' });
+    await pool.query(
+      `INSERT INTO product_aisle (product_id, aisle_id, updated_by, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (product_id) DO UPDATE SET
+         aisle_id=EXCLUDED.aisle_id, updated_by=EXCLUDED.updated_by, updated_at=NOW()`,
+      [productId, aisleId, req.user?.email || null]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Ecommerce Studio: Product Metafields ───────────────────────────
 // Mirror of Shopify product metafields + reporting on missing data and
 // product-reference fields that point at sold-out / low-stock / inactive
