@@ -325,4 +325,12 @@ async function postToSlack(btn) {
   }
 }
 
+// Stamp the print-only footer with the moment of printing (Brisbane time)
+window.addEventListener('beforeprint', () => {
+  const el = document.getElementById('ro-print-date');
+  if (el) el.textContent = new Date().toLocaleString('en-AU',
+    { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+      timeZone: 'Australia/Brisbane' });
+});
+
 loadRequests().then(goToday);

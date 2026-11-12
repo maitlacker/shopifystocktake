@@ -78,6 +78,38 @@
       .ro-cell.other { display: none; }
       .ro-cell { min-height: unset; }
     }
+
+    /* ── Print / save-as-PDF: clean A4 landscape calendar ── */
+    @media print {
+      @page { size: A4 landscape; margin: 9mm; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { background: #fff; }
+      /* hide nav header and any injected banners (siblings of .ro-wrap) */
+      body > :not(.ro-wrap) { display: none !important; }
+      #ro-approvals, #ro-remlog, .ro-shift-btn, .ro-pending-hint { display: none !important; }
+      .ro-nav button { display: none !important; }
+      .ro-wrap { max-width: none; padding: 0; }
+      .ro-head { margin-bottom: 6px; }
+      .ro-head h1 { font-size: 1.1rem; }
+      .ro-month { font-size: 1.15rem; min-width: unset; }
+      .ro-legend { margin-bottom: 6px; font-size: 0.68rem; }
+      /* always the full 7-column week, even if printed from a phone */
+      .ro-grid { grid-template-columns: repeat(7, 1fr) !important; gap: 0; }
+      .ro-dow { display: block !important; border: 0.5pt solid #cbd5e1; border-bottom: none;
+                background: #f1f5f9; color: #334155; padding: 3px 0; }
+      .ro-cell { display: block !important; border: 0.5pt solid #cbd5e1; border-radius: 0;
+                 min-height: 88px; box-shadow: none; font-size: 0.66rem;
+                 break-inside: avoid; page-break-inside: avoid; }
+      .ro-cell.other { opacity: 1; background: #f8fafc; }
+      .ro-cell.today { border: 1.5pt solid #6366f1; box-shadow: none; }
+      .ro-daynum { font-size: 0.74rem; }
+      .ro-count { font-size: 0.6rem; border: 0.5pt solid #c7d2fe; }
+      .ro-count.zero { border-color: #fecaca; }
+      .ro-holiday { font-size: 0.62rem; border: 0.5pt solid #fde68a; }
+      .ro-person { white-space: normal; line-height: 1.35; margin-bottom: 1.5px; }
+      .ro-dot { width: 7px; height: 7px; }
+      #ro-print-foot { display: block !important; }
+    }
   </style>
 </head>
 <body>
@@ -93,6 +125,7 @@
         <div class="ro-month" id="ro-month"></div>
         <button onclick="moveMonth(1)">Next ›</button>
         <button onclick="goToday()">Today</button>
+        <button title="Print this month's roster or save it as a PDF" onclick="window.print()">🖨 Print</button>
         <button id="ro-slack-btn" style="display:none" title="Post this week's casual roster to Slack now"
           onclick="postToSlack(this)">📣 Post to Slack</button>
         <button id="ro-remlog-btn" style="display:none" title="History of availability reminder emails"
@@ -111,6 +144,9 @@
     <div id="ro-approvals"></div>
 
     <div class="ro-grid" id="ro-grid"></div>
+    <div id="ro-print-foot" style="display:none;margin-top:6px;font-size:0.62rem;color:#64748b">
+      The Self Styler WMS — Warehouse Roster · printed <span id="ro-print-date"></span>
+    </div>
   </div>
   <script src="roster.js"></script>
   <script src="nav.js"></script>
