@@ -1444,6 +1444,32 @@ async function initDb() {
       is_owner         BOOLEAN DEFAULT FALSE,
       updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    -- Cart Watch: mirror of Shopify open (abandoned) checkouts so we can
+    -- report on what customers currently have in their carts
+    CREATE TABLE IF NOT EXISTS cart_checkouts (
+      id            BIGINT PRIMARY KEY,
+      email         TEXT,
+      customer_name TEXT,
+      total_price   NUMERIC(10,2),
+      currency      TEXT,
+      created_at    TIMESTAMPTZ,
+      updated_at    TIMESTAMPTZ,
+      last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_cartco_updated ON cart_checkouts(updated_at);
+    CREATE TABLE IF NOT EXISTS cart_checkout_lines (
+      checkout_id   BIGINT NOT NULL REFERENCES cart_checkouts(id) ON DELETE CASCADE,
+      product_id    BIGINT,
+      variant_id    BIGINT,
+      title         TEXT,
+      variant_title TEXT,
+      sku           TEXT,
+      quantity      INT NOT NULL DEFAULT 0,
+      price         NUMERIC(10,2)
+    );
+    CREATE INDEX IF NOT EXISTS idx_cartcl_checkout ON cart_checkout_lines(checkout_id);
+    CREATE INDEX IF NOT EXISTS idx_cartcl_product  ON cart_checkout_lines(product_id);
   `);
 }
 

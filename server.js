@@ -30,6 +30,7 @@ const leaveSync        = require('./leave-sync');
 const mailer           = require('./email');
 const sellthroughAlerts = require('./sellthrough-alerts');
 const metafieldsSync    = require('./metafields-sync');
+const cartWatchSync     = require('./cart-watch-sync');
 
 const anthropicClient = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -11911,6 +11912,115 @@ app.get('/api/ecom/similar/suggestions', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Cart Watch — what's sitting in customers' carts right now ──────
+// Source: Shopify open (abandoned) checkouts mirrored by cart-watch-sync.js.
+// Lines at $0 (free gifts), measuring tapes, x-redo and gift cards are
+// excluded from the style rankings, consistent with other reports.
+const CART_LINE_FILTER = `
+  l.quantity > 0 AND COALESCE(l.price, 0) > 0
+  AND l.title NOT ILIKE '%measuring tape%'
+  AND l.title NOT ILIKE '%x-redo%'
+  AND l.title NOT ILIKE '%gift card%'`;
+
+// POST /api/cart-watch/sync — manual refresh from Shopify
+app.post('/api/cart-watch/sync', requireAuth, async (req, res) => {
+  try {
+    const out = await cartWatchSync.runSync(pool);
+    res.json(out);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/cart-watch/summary?days=7 — styles ranked by cart presence
+app.get('/api/cart-watch/summary', requireAuth, async (req, res) => {
+  const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
+  try {
+    const [totals, styles, variants, lastSync] = await Promise.all([
+      pool.query(`
+        SELECT COUNT(DISTINCT c.id)::int AS carts,
+               COALESCE(SUM(l.quantity), 0)::int AS units,
+               COALESCE(SUM(l.quantity * l.price), 0)::numeric(12,2) AS item_value
+        FROM cart_checkouts c
+        JOIN cart_checkout_lines l ON l.checkout_id = c.id
+        WHERE c.updated_at >= NOW() - ($1::int) * INTERVAL '1 day'
+          AND ${CART_LINE_FILTER}`, [days]),
+      pool.query(`
+        SELECT l.product_id, MIN(l.title) AS title,
+               COUNT(DISTINCT l.checkout_id)::int AS carts,
+               SUM(l.quantity)::int AS units,
+               SUM(l.quantity * l.price)::numeric(12,2) AS value,
+               MAX(p.image_url) AS image, MAX(p.handle) AS handle,
+               MAX(p.status) AS status, MAX(p.total_inventory) AS total_inventory
+        FROM cart_checkout_lines l
+        JOIN cart_checkouts c ON c.id = l.checkout_id
+        LEFT JOIN metafield_products p ON p.product_id = l.product_id
+        WHERE c.updated_at >= NOW() - ($1::int) * INTERVAL '1 day'
+          AND ${CART_LINE_FILTER}
+        GROUP BY l.product_id
+        ORDER BY carts DESC, units DESC, title`, [days]),
+      pool.query(`
+        SELECT l.product_id, l.variant_title,
+               COUNT(DISTINCT l.checkout_id)::int AS carts,
+               SUM(l.quantity)::int AS units
+        FROM cart_checkout_lines l
+        JOIN cart_checkouts c ON c.id = l.checkout_id
+        WHERE c.updated_at >= NOW() - ($1::int) * INTERVAL '1 day'
+          AND ${CART_LINE_FILTER}
+        GROUP BY l.product_id, l.variant_title
+        ORDER BY units DESC`, [days]),
+      pool.query(`SELECT value FROM app_settings WHERE key = 'cart_watch_last_sync'`),
+    ]);
+
+    const varsByProduct = new Map();
+    for (const v of variants.rows) {
+      const k = String(v.product_id);
+      if (!varsByProduct.has(k)) varsByProduct.set(k, []);
+      varsByProduct.get(k).push({ variant: v.variant_title, carts: v.carts, units: v.units });
+    }
+    res.json({
+      days,
+      totals: totals.rows[0],
+      lastSync: lastSync.rows[0] ? JSON.parse(lastSync.rows[0].value) : null,
+      syncing: cartWatchSync.getIsRunning(),
+      styles: styles.rows.map(s => ({
+        productId: String(s.product_id),
+        title: s.title,
+        image: s.image,
+        handle: s.handle,
+        status: s.status,
+        totalInventory: s.total_inventory,
+        carts: s.carts,
+        units: s.units,
+        value: s.value,
+        variants: varsByProduct.get(String(s.product_id)) || [],
+      })),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/cart-watch/carts?days=7[&product_id=123] — individual carts
+app.get('/api/cart-watch/carts', requireAuth, async (req, res) => {
+  const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
+  const productId = req.query.product_id ? String(req.query.product_id).replace(/\D/g, '') : null;
+  try {
+    const { rows } = await pool.query(`
+      SELECT c.id, c.email, c.customer_name, c.total_price, c.updated_at,
+             json_agg(json_build_object(
+               'title', l.title, 'variant', l.variant_title,
+               'qty', l.quantity, 'price', l.price)
+               ORDER BY l.price DESC) AS items
+      FROM cart_checkouts c
+      JOIN cart_checkout_lines l ON l.checkout_id = c.id
+      WHERE c.updated_at >= NOW() - ($1::int) * INTERVAL '1 day'
+        ${productId ? `AND c.id IN (
+          SELECT checkout_id FROM cart_checkout_lines WHERE product_id = $2::bigint)` : ''}
+      GROUP BY c.id
+      ORDER BY c.updated_at DESC
+      LIMIT 400
+    `, productId ? [days, productId] : [days]);
+    res.json({ days, carts: rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
@@ -11933,6 +12043,7 @@ initDb()
     leaveSync.startCron(pool);
     sellthroughAlerts.startCron(pool);
     metafieldsSync.startCron(pool);
+    cartWatchSync.startCron(pool);
 
     // Auto-sync QLD public holidays for current + next year
     const _holidayYear = new Date().getFullYear();

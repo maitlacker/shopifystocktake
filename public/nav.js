@@ -83,6 +83,7 @@
       children: [
         { label: 'Product Data Studio', href: '/ecommerce-studio.html' },
         { label: 'You May Also Like',   href: '/similar-styles.html' },
+        { label: 'Cart Watch',          href: '/cart-watch.html' },
       ],
     },
     {

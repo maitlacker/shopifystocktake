@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cart Watch — The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .cw-wrap { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; }
+    .cw-head { display: flex; align-items: flex-start; justify-content: space-between;
+               gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+    .cw-head h1 { margin: 0; font-size: 1.35rem; }
+    .cw-sub { color: #64748b; font-size: 0.85rem; margin: 4px 0 14px; max-width: 760px; }
+    .cw-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .cw-controls select { padding: 7px 10px; border: 1.5px solid #e2e8f0; border-radius: 8px;
+                          font-weight: 700; color: #334155; background: #fff; }
+    .cw-controls button { padding: 7px 12px; border: 1.5px solid #e2e8f0; background: #fff;
+                          border-radius: 8px; font-weight: 700; cursor: pointer; color: #475569; }
+    .cw-controls button:hover { border-color: #6366f1; color: #6366f1; }
+    .cw-lastsync { font-size: 0.74rem; color: #94a3b8; }
+
+    .cw-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+                gap: 10px; margin-bottom: 18px; }
+    .cw-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+               padding: 13px 16px; }
+    .cw-card .n { font-size: 1.45rem; font-weight: 800; color: #1e293b;
+                  font-variant-numeric: tabular-nums; }
+    .cw-card .l { font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+                  letter-spacing: 0.05em; color: #94a3b8; margin-top: 2px; }
+
+    table.cw-tbl { width: 100%; border-collapse: collapse; background: #fff;
+                   border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+    .cw-tbl th { text-align: left; font-size: 0.7rem; text-transform: uppercase;
+                 letter-spacing: 0.05em; color: #94a3b8; padding: 9px 10px;
+                 border-bottom: 1.5px solid #e2e8f0; background: #f8fafc; }
+    .cw-tbl th.num, .cw-tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .cw-tbl td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; font-size: 0.84rem;
+                 color: #1e293b; vertical-align: middle; }
+    .cw-tbl tr.cw-row { cursor: pointer; }
+    .cw-tbl tr.cw-row:hover { background: #f8fafc; }
+    .cw-rank { color: #94a3b8; font-weight: 700; width: 30px; }
+    .cw-thumb { width: 38px; height: 48px; object-fit: cover; border-radius: 6px;
+                background: #f1f5f9; display: block; }
+    .cw-title { font-weight: 700; }
+    .cw-badge { display: inline-block; font-size: 0.66rem; font-weight: 800; border-radius: 999px;
+                padding: 1px 7px; margin-left: 6px; vertical-align: middle; }
+    .cw-badge.low  { background: #fef3c7; color: #92400e; }
+    .cw-badge.out  { background: #fee2e2; color: #b91c1c; }
+    .cw-badge.na   { background: #f1f5f9; color: #64748b; }
+    .cw-carts-n { font-weight: 800; color: #4338ca; }
+
+    .cw-detail td { background: #f8fafc; padding: 10px 14px; }
+    .cw-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+    .cw-chip { background: #eef2ff; color: #4338ca; border-radius: 999px; font-size: 0.74rem;
+               font-weight: 700; padding: 2px 9px; }
+    .cw-chip span { color: #818cf8; font-weight: 600; }
+    .cw-minicart { font-size: 0.78rem; color: #334155; padding: 5px 0;
+                   border-top: 1px solid #e2e8f0; }
+    .cw-minicart:first-of-type { border-top: none; }
+    .cw-minicart .who { font-weight: 700; }
+    .cw-minicart .when { color: #94a3b8; }
+    .cw-more { font-size: 0.76rem; color: #6366f1; font-weight: 700; margin-top: 6px; }
+
+    .cw-section-h { font-size: 0.95rem; font-weight: 800; color: #334155; margin: 26px 0 10px; }
+    .cw-empty { color: #94a3b8; text-align: center; padding: 36px 0; }
+    @media (max-width: 680px) {
+      .cw-tbl .hide-m { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header></header>
+  <div class="cw-wrap">
+    <div class="cw-head">
+      <h1>🛒 Cart Watch</h1>
+      <div class="cw-controls">
+        <select id="cw-days" onchange="load()">
+          <option value="2">Last 2 days</option>
+          <option value="7" selected>Last 7 days</option>
+          <option value="14">Last 14 days</option>
+          <option value="30">Last 30 days</option>
+        </select>
+        <button id="cw-sync" onclick="syncNow(this)" title="Pull the latest carts from Shopify now">⟳ Sync now</button>
+        <span class="cw-lastsync" id="cw-lastsync"></span>
+      </div>
+    </div>
+    <p class="cw-sub">
+      What customers currently have sitting in their carts, ranked by popularity.
+      Counts carts that reached the Shopify checkout page at least once and haven't ordered yet —
+      the record keeps updating as they edit their cart. Auto-refreshes from Shopify every 30 minutes.
+      Free gifts ($0 lines), gift cards and measuring tapes are excluded.
+    </p>
+
+    <div class="cw-cards" id="cw-cards"></div>
+
+    <table class="cw-tbl" id="cw-tbl" style="display:none">
+      <thead>
+        <tr>
+          <th></th><th></th><th>Style</th>
+          <th class="num" title="How many different carts this style is in">Carts</th>
+          <th class="num">Units</th>
+          <th class="num hide-m">Value</th>
+          <th class="num hide-m" title="Current stock on hand">Stock</th>
+        </tr>
+      </thead>
+      <tbody id="cw-body"></tbody>
+    </table>
+    <div class="cw-empty" id="cw-empty" style="display:none"></div>
+
+    <div class="cw-section-h" id="cw-carts-h" style="display:none">🧾 Individual carts
+      <button class="cw-more" style="border:none;background:none;cursor:pointer"
+        onclick="toggleCarts()" id="cw-carts-toggle">show</button></div>
+    <div id="cw-carts"></div>
+  </div>
+  <script src="cart-watch.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>
