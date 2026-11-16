@@ -1470,6 +1470,23 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_cartcl_checkout ON cart_checkout_lines(checkout_id);
     CREATE INDEX IF NOT EXISTS idx_cartcl_product  ON cart_checkout_lines(product_id);
+
+    -- BF Discount Planner: uploaded Google Analytics demand data + manual tier overrides
+    CREATE TABLE IF NOT EXISTS bf_ga_items (
+      item_name   TEXT PRIMARY KEY,
+      rank        INT,
+      views       INT NOT NULL DEFAULT 0,
+      atc         INT NOT NULL DEFAULT 0,
+      purchased   INT NOT NULL DEFAULT 0,
+      revenue     NUMERIC(12,2) NOT NULL DEFAULT 0,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS bf_discount_overrides (
+      product_id  BIGINT PRIMARY KEY,
+      tier        INT,
+      updated_by  TEXT,
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 }
 

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BF Discount Planner — The Self Styler WMS</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .bf-wrap { max-width: 1200px; margin: 0 auto; padding: 20px 16px 60px; }
+    .bf-head { display: flex; align-items: flex-start; justify-content: space-between;
+               gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+    .bf-head h1 { margin: 0; font-size: 1.35rem; }
+    .bf-sub { color: #64748b; font-size: 0.85rem; margin: 4px 0 14px; max-width: 820px; }
+
+    .bf-upload { background: #fff; border: 1.5px dashed #c7d2fe; border-radius: 12px;
+                 padding: 14px 16px; margin-bottom: 16px; display: flex; align-items: center;
+                 gap: 14px; flex-wrap: wrap; }
+    .bf-upload input[type=file] { font-size: 0.82rem; }
+    .bf-upload .meta { font-size: 0.78rem; color: #64748b; }
+    .bf-upload .meta b { color: #334155; }
+    .bf-btn { padding: 7px 14px; border: 1.5px solid #e2e8f0; background: #fff; border-radius: 8px;
+              font-weight: 700; cursor: pointer; color: #475569; font-size: 0.82rem; }
+    .bf-btn:hover { border-color: #6366f1; color: #6366f1; }
+    .bf-btn.primary { background: #4f46e5; border-color: #4f46e5; color: #fff; }
+    .bf-btn.primary:hover { background: #4338ca; color: #fff; }
+
+    .bf-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+                gap: 10px; margin-bottom: 16px; }
+    .bf-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; }
+    .bf-card .n { font-size: 1.3rem; font-weight: 800; color: #1e293b; font-variant-numeric: tabular-nums; }
+    .bf-card .l { font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+                  letter-spacing: 0.05em; color: #94a3b8; margin-top: 2px; }
+    .bf-card.t20 .n { color: #15803d; } .bf-card.t30 .n { color: #2563eb; }
+    .bf-card.t40 .n { color: #d97706; } .bf-card.t50 .n { color: #dc2626; }
+
+    .bf-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+    .bf-controls input[type=search] { padding: 7px 10px; border: 1.5px solid #e2e8f0;
+      border-radius: 8px; font-size: 0.84rem; min-width: 210px; }
+    .bf-controls select { padding: 7px 10px; border: 1.5px solid #e2e8f0; border-radius: 8px;
+      font-weight: 700; color: #334155; background: #fff; font-size: 0.82rem; }
+
+    table.bf-tbl { width: 100%; border-collapse: collapse; background: #fff;
+                   border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+    .bf-tbl th { text-align: left; font-size: 0.68rem; text-transform: uppercase;
+                 letter-spacing: 0.05em; color: #94a3b8; padding: 8px 9px;
+                 border-bottom: 1.5px solid #e2e8f0; background: #f8fafc; white-space: nowrap; }
+    .bf-tbl th.num, .bf-tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .bf-tbl td { padding: 7px 9px; border-bottom: 1px solid #f1f5f9; font-size: 0.83rem;
+                 color: #1e293b; vertical-align: middle; }
+    .bf-thumb { width: 34px; height: 44px; object-fit: cover; border-radius: 5px; background: #f1f5f9; display: block; }
+    .bf-title { font-weight: 700; }
+    .bf-flag { display: inline-block; font-size: 0.64rem; font-weight: 800; border-radius: 999px;
+               padding: 1px 7px; margin-left: 5px; vertical-align: middle; white-space: nowrap; }
+    .bf-flag.sellout { background: #fef3c7; color: #92400e; }
+    .bf-flag.dead { background: #e0e7ff; color: #4338ca; }
+    .bf-flag.noga { background: #f1f5f9; color: #64748b; }
+    .bf-tier { font-weight: 800; border-radius: 8px; border: 1.5px solid transparent;
+               padding: 4px 6px; cursor: pointer; }
+    .bf-tier.t20 { background: #dcfce7; color: #15803d; }
+    .bf-tier.t30 { background: #dbeafe; color: #1d4ed8; }
+    .bf-tier.t40 { background: #fef3c7; color: #b45309; }
+    .bf-tier.t50 { background: #fee2e2; color: #b91c1c; }
+    .bf-tier.overridden { border-color: #6366f1; }
+    .bf-sugg { font-size: 0.66rem; color: #94a3b8; display: block; margin-top: 1px; }
+    .bf-sale { color: #b91c1c; font-weight: 700; }
+    .bf-old { color: #94a3b8; text-decoration: line-through; font-size: 0.74rem; }
+    .bf-empty { color: #94a3b8; text-align: center; padding: 36px 0; }
+    .bf-unmatched { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+                    padding: 12px 16px; margin-top: 18px; font-size: 0.8rem; color: #334155; }
+    .bf-unmatched h3 { margin: 0 0 6px; font-size: 0.85rem; color: #92400e; }
+    @media (max-width: 760px) { .hide-m { display: none; } }
+  </style>
+</head>
+<body>
+  <header></header>
+  <div class="bf-wrap">
+    <div class="bf-head">
+      <h1>🏷️ BF Discount Planner</h1>
+      <div style="display:flex;gap:8px">
+        <button class="bf-btn" onclick="window.location='/api/bf/export'">⬇ Export CSV</button>
+      </div>
+    </div>
+    <p class="bf-sub">
+      Suggests a 20 / 30 / 40 / 50% Black Friday discount for every active style with stock,
+      by weighing demand (add-to-carts from your uploaded Google Analytics report) against
+      current stock on hand. Low stock + high demand → shallow discount; high stock + low
+      demand → deep discount. Every suggestion can be overridden — overrides are saved for everyone.
+    </p>
+
+    <div class="bf-upload">
+      <input type="file" id="bf-file" accept=".csv,.pdf" />
+      <button class="bf-btn primary" onclick="upload()" id="bf-upload-btn">⬆ Upload GA report</button>
+      <span class="meta" id="bf-upload-meta">Loading…</span>
+    </div>
+
+    <div class="bf-cards" id="bf-cards"></div>
+
+    <div class="bf-controls" id="bf-controls" style="display:none">
+      <input type="search" id="bf-q" placeholder="Search styles…" oninput="render()" />
+      <select id="bf-tier-filter" onchange="render()">
+        <option value="">All tiers</option>
+        <option value="20">20% only</option>
+        <option value="30">30% only</option>
+        <option value="40">40% only</option>
+        <option value="50">50% only</option>
+      </select>
+      <select id="bf-sort" onchange="render()">
+        <option value="atc">Sort: Add-to-carts</option>
+        <option value="stock">Sort: Stock on hand</option>
+        <option value="spa">Sort: Units per cart-add</option>
+        <option value="tier">Sort: Discount %</option>
+        <option value="title">Sort: Style A–Z</option>
+      </select>
+      <label style="font-size:0.78rem;color:#475569;font-weight:600">
+        <input type="checkbox" id="bf-only-flagged" onchange="render()" /> flagged only</label>
+    </div>
+
+    <table class="bf-tbl" id="bf-tbl" style="display:none">
+      <thead>
+        <tr>
+          <th></th><th>Style</th>
+          <th class="num" title="Add-to-carts in the GA window">ATC</th>
+          <th class="num hide-m">Views</th>
+          <th class="num">Stock</th>
+          <th class="num hide-m" title="Stock on hand per add-to-cart — the clearance pressure number">U/ATC</th>
+          <th class="num hide-m" title="Units sold in the last 30 days">30d sold</th>
+          <th>Discount</th>
+          <th class="num">Sale price</th>
+        </tr>
+      </thead>
+      <tbody id="bf-body"></tbody>
+    </table>
+    <div class="bf-empty" id="bf-empty" style="display:none"></div>
+
+    <div class="bf-unmatched" id="bf-unmatched" style="display:none"></div>
+  </div>
+  <script src="bf-discounts.js"></script>
+  <script src="nav.js"></script>
+</body>
+</html>

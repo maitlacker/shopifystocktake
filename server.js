@@ -12021,6 +12021,325 @@ app.get('/api/cart-watch/carts', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── BF Discount Planner — demand (GA add-to-carts) vs stock on hand ─
+const pdfParse = require('pdf-parse');
+
+// Normalise a product/item name for GA ↔ Shopify matching
+function bfNorm(s) {
+  return String(s || '')
+    .toUpperCase()
+    .replace(/[–—−]/g, '-')          // en/em dashes → hyphen
+    .replace(/\s*-?\s*THE SELF STYLER\s*$/, '')     // some titles carry a brand suffix
+    .replace(/[^A-Z0-9]+/g, ' ')                     // punctuation-insensitive
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function bfNum(s) {
+  return parseFloat(String(s ?? '0').replace(/[$,%\s,]/g, '')) || 0;
+}
+
+// Split one CSV line respecting double quotes
+function bfCsvSplit(line) {
+  const out = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+      else inQ = !inQ;
+    } else if (ch === ',' && !inQ) { out.push(cur); cur = ''; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+// GA4 "Ecommerce purchases: Item name" CSV export → rows
+function bfParseCsv(text) {
+  const lines = String(text).replace(/^﻿/, '').split(/\r?\n/);
+  let cols = null, idx = {};
+  const rows = [];
+  for (const line of lines) {
+    if (!line.trim() || line.startsWith('#')) continue;
+    const cells = bfCsvSplit(line).map(c => c.trim());
+    if (!cols) {
+      const lower = cells.map(c => c.toLowerCase());
+      const nameI = lower.findIndex(c => c === 'item name');
+      if (nameI === -1) continue; // metadata line before the header
+      cols = cells;
+      idx = {
+        name: nameI,
+        views: lower.findIndex(c => /items? viewed/.test(c)),
+        atc: lower.findIndex(c => /added to cart/.test(c)),
+        purchased: lower.findIndex(c => /items? purchased/.test(c)),
+        revenue: lower.findIndex(c => /item revenue/.test(c)),
+      };
+      if (idx.atc === -1) throw new Error('CSV found an "Item name" header but no "Items added to cart" column');
+      continue;
+    }
+    const name = cells[idx.name];
+    if (!name || /^(total|grand total)$/i.test(name)) continue;
+    rows.push({
+      name,
+      views: Math.round(bfNum(cells[idx.views])),
+      atc: Math.round(bfNum(cells[idx.atc])),
+      purchased: Math.round(bfNum(cells[idx.purchased])),
+      revenue: bfNum(cells[idx.revenue]),
+    });
+  }
+  if (!cols) throw new Error('Could not find the "Item name" header row — is this the GA4 Ecommerce purchases CSV export?');
+  return rows;
+}
+
+// GA4 PDF print of the same report → rows. The coordinate-based renderer
+// below reassembles each table row onto one line ("12 Saski Maxi Skirt …
+// 812 (1.08%) 239 (1.57%) 4 (0.59%) $359.80 (0.91%)"), so a single regex
+// captures rank, name and all four metrics with no cross-row pairing risk.
+const BF_PDF_ROW_RE = /^(\d{1,4}) (.+?) ([\d,]+) \(([<\d.]+)%\) ([\d,]+) \(([<\d.]+)%\) ([\d,]+) \(([<\d.]+)%\) \$([\d,.]+) \(([<\d.]+)%\)$/;
+
+function bfParsePdfPages(pageTexts) {
+  const rows = [];
+  for (const pg of pageTexts) {
+    for (const raw of pg.split('\n')) {
+      const m = raw.trim().match(BF_PDF_ROW_RE);
+      if (!m) continue;
+      rows.push({
+        name: m[2].trim(),
+        rank: parseInt(m[1], 10),
+        views: Math.round(bfNum(m[3])),
+        atc: Math.round(bfNum(m[5])),
+        purchased: Math.round(bfNum(m[7])),
+        revenue: bfNum(m[9]),
+      });
+    }
+  }
+  return rows;
+}
+
+// pdf.js text items carry x/y coordinates; group by y (a visual line) and
+// join left-to-right with spaces so table rows come out as single lines.
+function bfPdfPageRenderer(collector) {
+  return function (pageData) {
+    return pageData.getTextContent().then((tc) => {
+      const byY = new Map();
+      for (const item of tc.items) {
+        if (!item.str || !item.str.trim()) continue;
+        const y = Math.round(item.transform[5]);
+        if (!byY.has(y)) byY.set(y, []);
+        byY.get(y).push({ x: item.transform[4], s: item.str });
+      }
+      const text = [...byY.entries()]
+        .sort((a, b) => b[0] - a[0]) // pdf y-axis points up → top lines first
+        .map(([, items]) => items.sort((a, b) => a.x - b.x)
+          .map(i => i.s).join(' ').replace(/\s+/g, ' ').trim())
+        .join('\n');
+      collector.push(text);
+      return text;
+    });
+  };
+}
+
+// POST /api/bf/upload — body { filename, kind: 'csv'|'pdf', content }
+// content is raw text for csv, base64 for pdf
+app.post('/api/bf/upload', requireAuth, async (req, res) => {
+  try {
+    const { filename, kind, content } = req.body || {};
+    if (!content) return res.status(400).json({ error: 'No file content received' });
+    let rows;
+    if (kind === 'pdf') {
+      const pages = [];
+      await pdfParse(Buffer.from(content, 'base64'), { pagerender: bfPdfPageRenderer(pages) });
+      rows = bfParsePdfPages(pages);
+    } else {
+      rows = bfParseCsv(content);
+    }
+    // de-dupe by name (keep the higher ATC row if GA ever repeats a name)
+    const byName = new Map();
+    for (const r of rows) {
+      const k = bfNorm(r.name);
+      if (!k) continue;
+      if (!byName.has(k) || byName.get(k).atc < r.atc) byName.set(k, r);
+    }
+    if (byName.size < 10) {
+      return res.status(400).json({ error: `Only ${byName.size} styles parsed — that doesn't look like the GA Ecommerce purchases report.` });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM bf_ga_items');
+      for (const r of byName.values()) {
+        await client.query(
+          `INSERT INTO bf_ga_items (item_name, rank, views, atc, purchased, revenue)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (item_name) DO UPDATE SET rank=$2, views=$3, atc=$4, purchased=$5, revenue=$6, uploaded_at=NOW()`,
+          [r.name, r.rank || null, r.views, r.atc, r.purchased, r.revenue]);
+      }
+      const meta = {
+        at: new Date().toISOString(),
+        filename: String(filename || '').slice(0, 120),
+        kind, rows: byName.size,
+        by: req.user?.email || null,
+      };
+      await client.query(
+        `INSERT INTO app_settings (key, value, updated_at) VALUES ('bf_ga_upload', $1, NOW())
+         ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW()`,
+        [JSON.stringify(meta)]);
+      await client.query('COMMIT');
+      res.json({ ok: true, rows: byName.size });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally { client.release(); }
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+const BF_TIERS = [20, 30, 40, 50];
+
+function bfSuggest(atc, stock, hiAtcCut) {
+  if (!atc) {
+    if (stock >= 30) return { tier: 50, reason: `No add-to-carts in the GA window and ${stock} units on hand — clearance` };
+    if (stock >= 10) return { tier: 40, reason: `No add-to-carts in the GA window, moderate stock (${stock} units)` };
+    return { tier: 30, reason: `No add-to-carts in the GA window but only ${stock} units to move` };
+  }
+  const spa = stock / atc;
+  const spaTxt = `${stock} units ÷ ${atc} add-to-carts = ${spa.toFixed(1)} units per cart-add`;
+  if (spa < 1) return { tier: 20, reason: `${spaTxt} — will sell out, protect margin` };
+  if (spa < 2.5) return atc >= hiAtcCut
+    ? { tier: 20, reason: `${spaTxt} with top-tier demand — sells through at 20%` }
+    : { tier: 30, reason: `${spaTxt} — modest discount clears it` };
+  if (spa < 6) return { tier: 30, reason: `${spaTxt} — needs a mid discount to clear` };
+  if (spa < 12) return { tier: 40, reason: `${spaTxt} — heavy stock vs demand` };
+  return { tier: 50, reason: `${spaTxt} — demand nowhere near the stock holding` };
+}
+
+async function bfBuildReport() {
+  if (!productsCache.length) {
+    productsCache = await fetchAllProducts();
+    lastFetched = new Date();
+  }
+  const [gaRes, ovRes, velRes, metaRes] = await Promise.all([
+    pool.query('SELECT * FROM bf_ga_items'),
+    pool.query('SELECT product_id, tier FROM bf_discount_overrides'),
+    pool.query(`
+      SELECT product_id, SUM(quantity)::int AS units
+      FROM shopify_order_lines
+      WHERE created_at >= NOW() - INTERVAL '30 days'
+        AND NOT cancelled AND COALESCE(price, 0) > 0
+      GROUP BY product_id`),
+    pool.query(`SELECT value FROM app_settings WHERE key = 'bf_ga_upload'`),
+  ]);
+
+  const gaByNorm = new Map(gaRes.rows.map(r => [bfNorm(r.item_name), r]));
+  const overrides = new Map(ovRes.rows.map(r => [String(r.product_id), r.tier]));
+  const velByProduct = new Map(velRes.rows.map(r => [String(r.product_id), r.units]));
+
+  // demand cut: top third of styles that have any ATCs
+  const atcVals = gaRes.rows.map(r => r.atc).filter(a => a > 0).sort((a, b) => a - b);
+  const hiAtcCut = atcVals.length ? atcVals[Math.floor(atcVals.length * 2 / 3)] : Infinity;
+
+  const products = [];
+  const matchedGa = new Set();
+  let noStock = 0;
+  for (const p of productsCache) {
+    if (/gift card|x-redo|measuring tape/i.test(p.title)) continue;
+    let stock = 0, price = 0;
+    for (const v of (p.variants || [])) {
+      if (v.inventory_management === 'shopify') stock += Math.max(v.inventory_quantity || 0, 0);
+      price = Math.max(price, parseFloat(v.price) || 0);
+    }
+    if (stock <= 0) { noStock++; continue; }
+
+    const ga = gaByNorm.get(bfNorm(p.title));
+    if (ga) matchedGa.add(bfNorm(ga.item_name));
+    const atc = ga ? ga.atc : 0;
+    const { tier: suggested, reason } = bfSuggest(atc, stock, hiAtcCut);
+    const override = overrides.has(String(p.id)) ? overrides.get(String(p.id)) : null;
+
+    products.push({
+      productId: String(p.id),
+      title: p.title,
+      image: p.images?.[0]?.src || null,
+      price,
+      stock,
+      atc,
+      views: ga ? ga.views : 0,
+      purchased: ga ? ga.purchased : 0,
+      vel30: velByProduct.get(String(p.id)) || 0,
+      inGa: Boolean(ga),
+      unitsPerAtc: atc > 0 ? +(stock / atc).toFixed(1) : null,
+      suggested,
+      reason,
+      override,
+      tier: override ?? suggested,
+      sellOut: atc > 0 && stock < atc * 0.25,
+      dead: stock >= 30 && atc <= 5,
+    });
+  }
+  products.sort((a, b) => b.atc - a.atc || b.stock - a.stock);
+
+  const unmatchedGa = gaRes.rows
+    .filter(r => !matchedGa.has(bfNorm(r.item_name)))
+    .sort((a, b) => b.atc - a.atc)
+    .map(r => ({ name: r.item_name, atc: r.atc }));
+
+  return {
+    upload: metaRes.rows[0] ? JSON.parse(metaRes.rows[0].value) : null,
+    products,
+    unmatchedGa,
+    excluded: { noStock },
+    tierMix: BF_TIERS.map(t => ({ tier: t, count: products.filter(p => p.tier === t).length })),
+  };
+}
+
+// GET /api/bf/report
+app.get('/api/bf/report', requireAuth, async (req, res) => {
+  try { res.json(await bfBuildReport()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/bf/override — { productId, tier } (tier null = back to suggested)
+app.post('/api/bf/override', requireAuth, async (req, res) => {
+  try {
+    const { productId, tier } = req.body || {};
+    const pid = String(productId || '').replace(/\D/g, '');
+    if (!pid) return res.status(400).json({ error: 'productId required' });
+    if (tier == null) {
+      await pool.query('DELETE FROM bf_discount_overrides WHERE product_id = $1::bigint', [pid]);
+    } else {
+      if (!BF_TIERS.includes(Number(tier))) return res.status(400).json({ error: 'tier must be 20, 30, 40 or 50' });
+      await pool.query(`
+        INSERT INTO bf_discount_overrides (product_id, tier, updated_by, updated_at)
+        VALUES ($1::bigint, $2, $3, NOW())
+        ON CONFLICT (product_id) DO UPDATE SET tier=$2, updated_by=$3, updated_at=NOW()`,
+        [pid, Number(tier), req.user?.email || null]);
+    }
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/bf/export — final plan as CSV
+app.get('/api/bf/export', requireAuth, async (req, res) => {
+  try {
+    const { products } = await bfBuildReport();
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const lines = ['Product ID,Style,Current price,Discount %,Sale price,Suggested %,Overridden,Stock on hand,Add-to-carts,Views,Units sold 30d,Flags'];
+    for (const p of products) {
+      const flags = [p.sellOut ? 'sell-out risk' : '', p.dead ? 'dead stock' : '', p.inGa ? '' : 'not in GA report']
+        .filter(Boolean).join('; ');
+      lines.push([
+        p.productId, esc(p.title), p.price.toFixed(2), p.tier,
+        (p.price * (1 - p.tier / 100)).toFixed(2), p.suggested,
+        p.override != null ? 'yes' : '', p.stock, p.atc, p.views, p.vel30, esc(flags),
+      ].join(','));
+    }
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="bf-discount-plan.csv"');
+    res.send(lines.join('\n'));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
