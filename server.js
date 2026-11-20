@@ -10966,7 +10966,7 @@ app.patch('/api/leave/employees/:id/warehouse', requireAuth, requireLeaveAdmin, 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// GET /api/roster/me — my roster profile + availability for the next 5 weeks
+// GET /api/roster/me — my roster profile + availability for the next 10 weeks
 app.get('/api/roster/me', requireAuth, async (req, res) => {
   try {
     const email = req.user.email;
@@ -10975,7 +10975,7 @@ app.get('/api/roster/me', requireAuth, async (req, res) => {
        FROM leave_employees WHERE LOWER(wms_email)=LOWER($1) LIMIT 1`, [email]);
     const emp = emps[0] || null;
     const today = brisbaneToday();
-    const until = addDays(today, 35);
+    const until = addDays(today, 70);
     const { rows: avail } = await pool.query(
       `SELECT date, available, note, status, start_time, end_time FROM warehouse_availability
        WHERE LOWER(wms_email)=LOWER($1) AND date >= $2 AND date <= $3 ORDER BY date`,

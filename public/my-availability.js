@@ -52,13 +52,13 @@ async function init() {
                       start: a.start || '09:00', end: a.end || '17:00' };
   }
 
-  // 4 weeks starting from the Monday of the current week (Brisbane)
+  // Current week + 8 weeks ahead, starting from this week's Monday (Brisbane)
   const today = me.today;
   const dow = (new Date(today + 'T00:00:00Z').getUTCDay() + 6) % 7; // 0 = Mon
   const thisMonday = addDaysIso(today, -dow);
 
   let html = '';
-  for (let w = 0; w < 4; w++) {
+  for (let w = 0; w < 9; w++) {
     const weekStart = addDaysIso(thisMonday, w * 7);
     const label = w === 0 ? 'This week' : w === 1 ? 'Next week' :
       `Week of ${new Date(weekStart + 'T00:00:00Z').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' })}`;
