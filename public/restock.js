@@ -5,6 +5,7 @@ let filteredProducts = [];
 let activeFilter = 'all';
 let activeSortField = 'default';
 let expandedRows = new Set();
+let incomingColsOpen = new Set(); // product ids showing per-PO size columns
 let globalSettings = {};
 let productConfigs = {};  // productId → config row
 let refreshPoller  = null;
@@ -354,6 +355,56 @@ function productRow(p, expanded) {
 function expandRow(p, expanded) {
   const cfg = productConfigs[String(p.productId)] || {};
 
+  // Incoming deliveries, earliest first (shared by the summary lines and
+  // the optional per-PO size columns)
+  const sortedIncoming = [...p.incomingOrders].sort((a, b) =>
+    String(a.expectedDelivery).localeCompare(String(b.expectedDelivery)));
+  const showPoCols = incomingColsOpen.has(p.productId) && sortedIncoming.length > 0;
+
+  // Resolve one PO's quantity for one size (same key fallbacks as the server:
+  // size label → variant id → case-insensitive label)
+  const poQtyFor = (o, v) => {
+    const byV = o.qtyByVariant || {};
+    const t = v.title === 'Default' ? '' : (v.title || '');
+    const q = byV[t]
+      ?? byV[String(v.id)]
+      ?? Object.entries(byV).find(([k]) => k.toLowerCase() === t.toLowerCase())?.[1]
+      ?? 0;
+    return Number(q) || 0;
+  };
+  const fmtDue = (o) => {
+    const d = new Date(String(o.expectedDelivery).slice(0, 10) + 'T00:00:00Z');
+    return (isNaN(d) ? '?' : d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' }))
+      + (o.estimatedDelivery ? '*' : '');
+  };
+
+  // Per-PO column headers (shown when the Incoming column is expanded)
+  const poColHead = showPoCols ? sortedIncoming.map((o, idx) => {
+    const styleTotal = p.variants.reduce((s, v) => s + poQtyFor(o, v), 0);
+    const label = o.source === 'production_order' && o.poNumber
+      ? `<a href="/production-order.html?id=${o.poId}" onclick="event.stopPropagation()"
+           style="color:#15803d;text-decoration:none">PO ${escHtml(String(o.poNumber))}</a>`
+      : `Order #${idx + 1}`;
+    return `<th style="background:#eef2ff;color:#4338ca;white-space:nowrap">
+      ${label}<br />
+      <span style="font-weight:600;color:#6366f1">${o.freightMode === 'air' ? '✈️' : '🚢'} ${fmtDue(o)}</span><br />
+      <span style="font-weight:600;color:#94a3b8">${styleTotal} units</span>
+    </th>`;
+  }).join('') : '';
+
+  const poColCells = (v) => showPoCols ? sortedIncoming.map(o => {
+    const q = poQtyFor(o, v);
+    return `<td style="background:#eef2ff;font-variant-numeric:tabular-nums">${q > 0 ? '+' + q : '<span style="color:#c7d2fe">—</span>'}</td>`;
+  }).join('') : '';
+
+  const incomingToggle = sortedIncoming.length
+    ? ` <button onclick="toggleIncomingCols(${p.productId});event.stopPropagation()"
+          title="Show what each PO delivers per size"
+          style="border:1px solid #c7d2fe;background:${showPoCols ? '#4f46e5' : '#eef2ff'};color:${showPoCols ? '#fff' : '#4338ca'};
+                 border-radius:6px;font-size:0.66rem;font-weight:800;cursor:pointer;padding:1px 6px;vertical-align:middle">
+          ${showPoCols ? '◂ hide POs' : `▸ by PO (${sortedIncoming.length})`}</button>`
+    : '';
+
   // Size breakdown table
   const varRows = p.variants.map(v => {
     const seaStr = v.suggestedSeaQty > 0
@@ -393,6 +444,7 @@ function expandRow(p, expanded) {
       <td style="font-variant-numeric:tabular-nums">${soldQty > 0 ? soldQty : '—'}</td>
       <td>${stStr}</td>
       <td>${v.incomingQty > 0 ? '+' + v.incomingQty : '—'}</td>
+      ${poColCells(v)}
       <td>${velDisplay}</td>
       <td>${retStr}</td>
       <td>${dStr}</td>
@@ -412,19 +464,22 @@ function expandRow(p, expanded) {
 
   const sizeTable = `
     ${oosNote}
+    <div style="overflow-x:auto">
     <table class="rs-size-table">
       <thead><tr>
-        <th>Size</th><th>Stock</th><th>Sold (42d)</th><th>ST%</th><th>Incoming</th>
+        <th>Size</th><th>Stock</th><th>Sold (42d)</th><th>ST%</th>
+        <th style="white-space:nowrap">Incoming${incomingToggle}</th>
+        ${poColHead}
         <th>Vel/day</th><th>Returns</th><th>Runway</th>
         <th>🚢 Suggest</th><th>✈️ Suggest</th>
       </tr></thead>
       <tbody>${varRows}</tbody>
-    </table>`;
+    </table>
+    </div>
+    ${showPoCols && sortedIncoming.some(o => o.estimatedDelivery)
+      ? '<div style="font-size:0.7rem;color:#94a3b8;margin:-8px 0 10px">* delivery date estimated from lead time</div>' : ''}`;
 
-  // Incoming PO summary
-  // Incoming deliveries — one line each, earliest first
-  const sortedIncoming = [...p.incomingOrders].sort((a, b) =>
-    String(a.expectedDelivery).localeCompare(String(b.expectedDelivery)));
+  // Incoming PO summary — one line each, earliest first
   const incomingLines = sortedIncoming.map((o, idx) => {
     const due = String(o.expectedDelivery).slice(0,10) + (o.estimatedDelivery ? ' (est.)' : '');
     const nth = sortedIncoming.length > 1
@@ -514,6 +569,12 @@ function toggleExpand(productId) {
   } else {
     expandedRows.add(productId);
   }
+  applyFilterAndRender();
+}
+
+function toggleIncomingCols(productId) {
+  if (incomingColsOpen.has(productId)) incomingColsOpen.delete(productId);
+  else incomingColsOpen.add(productId);
   applyFilterAndRender();
 }
 
