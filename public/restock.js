@@ -575,7 +575,13 @@ function toggleExpand(productId) {
 function toggleIncomingCols(productId) {
   if (incomingColsOpen.has(productId)) incomingColsOpen.delete(productId);
   else incomingColsOpen.add(productId);
-  applyFilterAndRender();
+  // Swap only this product's expanded row in place — a full table re-render
+  // replaces the whole tbody, which loses the scroll anchor and makes the
+  // page jump.
+  const row = document.getElementById(`expand-${productId}`);
+  const p = allProducts.find(x => x.productId === productId);
+  if (row && p) row.outerHTML = expandRow(p, expandedRows.has(productId));
+  else applyFilterAndRender();
 }
 
 // ── Per-product config save ────────────────────────────────────────
